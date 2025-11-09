@@ -1,0 +1,14 @@
+services:
+
+  webatm:
+    image: webatm:latest  # Updated to use your webatm image
+    container_name: webatm-local
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=production
+      - HEARTBEAT_INTERVAL=30        # Heartbeat every 30 seconds
+      - BLUESKY_SERVER_HOST=host.docker.internal
+      - WEB_HOST=0.0.0.0
+    ports:
+      - 8082:8082
+      

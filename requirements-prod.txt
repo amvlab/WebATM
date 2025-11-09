@@ -1,0 +1,11 @@
+# Production deployment dependencies
+# Use this for Docker containers and production deployments with gunicorn
+
+# Include base dependencies
+-r requirements.txt
+
+# Production WSGI server
+gunicorn>=20.0.0
+
+# Async Socket.IO support with gunicorn
+eventlet>=0.33.0
