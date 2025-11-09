@@ -3,6 +3,7 @@ import { DataProcessor } from '../../../data/DataProcessor';
 import { AircraftData, DisplayOptions } from '../../../data/types';
 import { StateManager } from '../../../core/StateManager';
 import { EntityRenderer, EntityShapeDrawer, EntityRenderConfig } from '../EntityRenderer';
+import { logger } from '../../../utils/Logger';
 
 /**
  * Aircraft shape drawing function type (for backward compatibility)
@@ -182,9 +183,19 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         // This handles the race condition where aircraft data arrives before map finishes loading
         const source = this.map.getSource('aircraft-points') as GeoJSONSource;
         if (!source) {
-            // Sources not ready yet, skip update
-            // The display will be updated once the map finishes loading and initializing
-            return;
+            // Sources not ready yet, which can happen:
+            // 1. During initial map load 
+            // 2. After map style change (sources are removed)
+            // In both cases, we need to initialize the renderer
+            logger.debug('AircraftRenderer', 'Points source not found, initializing renderer...');
+            this.initialize(true);
+            
+            // After initialization, try updating again
+            const sourceAfterInit = this.map.getSource('aircraft-points') as GeoJSONSource;
+            if (!sourceAfterInit) {
+                logger.warn('AircraftRenderer', 'Failed to initialize aircraft sources');
+                return;
+            }
         }
 
         this.updateEntityDisplay(aircraftData);
