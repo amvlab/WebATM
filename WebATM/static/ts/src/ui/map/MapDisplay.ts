@@ -258,14 +258,25 @@ export class MapDisplay {
             // Save the style to storage for persistence
             storage.set(this.STORAGE_KEY_STYLE, styleUrl);
 
+            // Use 'idle' event instead of 'style.load' - it's more reliable after setStyle()
+            this.map.once('idle', () => {
+                // Set projection when map is idle after style change
+                this.map?.setProjection({
+                    type: this.currentProjection
+                });
+
+                // Notify listeners that style has changed
+                if (this.styleChangeCallback) {
+                    this.styleChangeCallback();
+                }
+            });
+
             // Change the map style
             this.map.setStyle(styleUrl);
 
             // Hide the map style message now that a style has been selected
             this.hideMapStyleMessage();
 
-            // Note: 'style.load' event will fire after style is loaded,
-            // where we'll reset projection and reload layers
         } catch (error) {
             logger.error('MapDisplay', 'Error changing map style:', error);
             alert(`Error changing map style: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -281,21 +292,25 @@ export class MapDisplay {
         const customStyleControl = document.getElementById('custom-style-control-modal');
         const customStyleInput = document.getElementById('custom-style-url-modal') as HTMLInputElement;
         const applyCustomStyleBtn = document.getElementById('apply-custom-style-modal');
+        const applyMapStyleBtn = document.getElementById('apply-map-style-btn') as HTMLButtonElement;
 
         if (!styleSelect) {
             logger.warn('MapDisplay', 'Map style select element not found');
             return;
         }
 
-        // Handle style select change
+        // Handle style select change - only toggle custom input visibility
         styleSelect.addEventListener('change', (e) => {
             const target = e.target as HTMLSelectElement;
-            const selectedOption = target.selectedOptions[0];
 
             if (target.value === 'custom') {
                 // Show custom style input
                 if (customStyleControl) {
                     customStyleControl.style.display = 'block';
+                }
+                // Hide apply button for predefined styles
+                if (applyMapStyleBtn) {
+                    applyMapStyleBtn.style.display = 'none';
                 }
             } else if (target.value === '') {
                 // User selected "Select a map style..." placeholder
@@ -303,23 +318,39 @@ export class MapDisplay {
                     customStyleControl.style.display = 'none';
                 }
             } else {
-                // User selected a predefined style
+                // User selected a predefined style - just hide custom input
                 if (customStyleControl) {
                     customStyleControl.style.display = 'none';
                 }
+                // Show apply button for predefined styles
+                if (applyMapStyleBtn) {
+                    applyMapStyleBtn.style.display = 'block';
+                }
+            }
+        });
 
-                const styleUrl = target.value;
+        // Handle apply map style button - applies the selected style from dropdown
+        if (applyMapStyleBtn) {
+            applyMapStyleBtn.addEventListener('click', () => {
+                const selectedValue = styleSelect.value;
+
+                if (selectedValue === '' || selectedValue === 'custom') {
+                    // Don't apply if placeholder or custom is selected
+                    return;
+                }
+
+                const styleUrl = selectedValue;
 
                 // Handle MapTiler URLs that need API key
                 if (styleUrl.includes('api.maptiler.com') && styleUrl.endsWith('?key=')) {
                     const apiKeyInput = document.getElementById('maptiler-api-key-input') as HTMLInputElement;
                     const apiKey = apiKeyInput?.value.trim();
-                    
+
                     if (!apiKey) {
                         alert('MapTiler API key is required. Please enter your API key in the field above.');
                         return;
                     }
-                    
+
                     // Append the API key to the URL
                     const urlWithKey = styleUrl + apiKey;
                     this.changeMapStyle(urlWithKey);
@@ -327,8 +358,8 @@ export class MapDisplay {
                     // Change the map style without API key
                     this.changeMapStyle(styleUrl);
                 }
-            }
-        });
+            });
+        }
 
         // Handle custom style apply button
         if (applyCustomStyleBtn) {
@@ -359,7 +390,10 @@ export class MapDisplay {
                     // Try to apply the currently selected MapTiler style if one is selected
                     const currentStyle = styleSelect.value;
                     if (currentStyle.includes('api.maptiler.com')) {
-                        styleSelect.dispatchEvent(new Event('change'));
+                        // Trigger the apply button click instead of change event
+                        if (applyMapStyleBtn) {
+                            applyMapStyleBtn.click();
+                        }
                     }
                 }
             });
