@@ -8,14 +8,18 @@ A modern web client for the [BlueSky Air Traffic Management (ATM) simulator](htt
 
 ## Features
 
-- **Interactive Map Visualisation**: Standard Web Mercator and globe view with aircraft tracking using MapLibre GL
-- **Customizable Map Sources**: Support for custom tile sources to customize the base map layer
+- **Intuitive Aircraft Interaction**: Single-click to fly to any aircraft, double-click to activate follow mode
+- **Customizable Aircraft Display**: Toggle visibility of labels, icons, trails, routes, and shapes
+- **Flexible Aircraft Styling**: Choose from chevron, drone, triangle, or aircraft icon styles and customise colors
+- **Smart Command Input**: Tab completion for BlueSky commands with autosuggestion
+- **Flexible Map Projection**: Switch between Web Mercator and 3D globe view powered by [MapLibre GL](https://maplibre.org/maplibre-gl-js/docs/)
+- **Custom Map Sources**: Configure custom tile sources to personalize your base map layer
 - **BlueSky Integration**: Seamless connection to BlueSky ATM simulator servers
-- **TypeScript Architecture**: Modern, type-safe client-side application
+- **Modern TypeScript Architecture**: Fully type-safe, maintainable client-side codebase
 
 ## 🚀 WebATM Pro Version Available
 
-**Looking for advanced features?** WebATM Pro includes additional capabilities not available in this open source version:
+**Looking for more advanced features?** WebATM Pro includes additional capabilities not available in this open source version:
 
 - **Server Development Environment**: Modify and develop BlueSky server code directly from the web interface
 - **3D Visualisation**: Advanced 3D aircraft and terrain visualization
