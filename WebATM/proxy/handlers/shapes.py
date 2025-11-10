@@ -101,30 +101,6 @@ def on_poly_received(data, *args, **kwargs):
                         separated_data["polylines"]["polys"]
                     )
 
-            # Apply 5-shape limit for polygons
-            if len(proxy.poly_data_by_node[sender_id]["polys"]) > 5:
-                # Get shape names sorted by creation order (keep most recent 5)
-                poly_names = list(proxy.poly_data_by_node[sender_id]["polys"].keys())
-                shapes_to_remove = poly_names[:-5]  # Remove all but last 5
-                for shape_name in shapes_to_remove:
-                    del proxy.poly_data_by_node[sender_id]["polys"][shape_name]
-                logger.debug(
-                    f"Demo limit: Removed {len(shapes_to_remove)} polygons, keeping 5 most recent"
-                )
-
-            # Apply 5-shape limit for polylines
-            if len(proxy.polyline_data_by_node[sender_id]["polys"]) > 5:
-                # Get shape names sorted by creation order (keep most recent 5)
-                polyline_names = list(
-                    proxy.polyline_data_by_node[sender_id]["polys"].keys()
-                )
-                shapes_to_remove = polyline_names[:-5]  # Remove all but last 5
-                for shape_name in shapes_to_remove:
-                    del proxy.polyline_data_by_node[sender_id]["polys"][shape_name]
-                logger.debug(
-                    f"Demo limit: Removed {len(shapes_to_remove)} polylines, keeping 5 most recent"
-                )
-
         # Only emit data if it's from the currently active node
         active_node_id = proxy._get_safe_active_node()
         if sender_id and active_node_id and sender_id == active_node_id:
