@@ -259,7 +259,24 @@ export class ShapeRenderer {
                 features
             });
         } else {
-            logger.warn('ShapeRenderer', `Polygon source '${this.POLYGON_SOURCE_ID}' not found - cannot render ${polygons.length} polygons`);
+            // Source not ready yet, which can happen:
+            // 1. During initial map load
+            // 2. After map style change (sources are removed)
+            // In both cases, we need to initialize the renderer
+            logger.debug('ShapeRenderer', 'Polygon source not found, initializing renderer...');
+            this.initialized = false;
+            this.initialize();
+
+            // After initialization, try updating again
+            const sourceAfterInit = map.getSource(this.POLYGON_SOURCE_ID) as GeoJSONSource;
+            if (sourceAfterInit) {
+                sourceAfterInit.setData({
+                    type: 'FeatureCollection',
+                    features
+                });
+            } else {
+                logger.warn('ShapeRenderer', `Failed to initialize polygon source - cannot render ${polygons.length} polygons`);
+            }
         }
     }
 
@@ -298,7 +315,24 @@ export class ShapeRenderer {
                 features
             });
         } else {
-            logger.warn('ShapeRenderer', `Polyline source '${this.POLYLINE_SOURCE_ID}' not found - cannot render ${polylines.length} polylines`);
+            // Source not ready yet, which can happen:
+            // 1. During initial map load
+            // 2. After map style change (sources are removed)
+            // In both cases, we need to initialize the renderer
+            logger.debug('ShapeRenderer', 'Polyline source not found, initializing renderer...');
+            this.initialized = false;
+            this.initialize();
+
+            // After initialization, try updating again
+            const sourceAfterInit = map.getSource(this.POLYLINE_SOURCE_ID) as GeoJSONSource;
+            if (sourceAfterInit) {
+                sourceAfterInit.setData({
+                    type: 'FeatureCollection',
+                    features
+                });
+            } else {
+                logger.warn('ShapeRenderer', `Failed to initialize polyline source - cannot render ${polylines.length} polylines`);
+            }
         }
     }
 
@@ -346,7 +380,24 @@ export class ShapeRenderer {
                 features
             });
         } else {
-            logger.warn('ShapeRenderer', `Labels source '${this.LABELS_SOURCE_ID}' not found - cannot render labels`);
+            // Source not ready yet, which can happen:
+            // 1. During initial map load
+            // 2. After map style change (sources are removed)
+            // In both cases, we need to initialize the renderer
+            logger.debug('ShapeRenderer', 'Labels source not found, initializing renderer...');
+            this.initialized = false;
+            this.initialize();
+
+            // After initialization, try updating again
+            const sourceAfterInit = map.getSource(this.LABELS_SOURCE_ID) as GeoJSONSource;
+            if (sourceAfterInit) {
+                sourceAfterInit.setData({
+                    type: 'FeatureCollection',
+                    features
+                });
+            } else {
+                logger.warn('ShapeRenderer', `Failed to initialize labels source - cannot render labels`);
+            }
         }
     }
 

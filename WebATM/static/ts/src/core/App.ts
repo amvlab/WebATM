@@ -458,6 +458,14 @@ export class App {
             if (this.shapeRenderer) {
                 this.shapeRenderer.onStyleChange();
             }
+
+            // Trigger a display options update to force all renderers to re-render
+            // This ensures shapes, aircraft, and routes all appear after style change
+            // We use requestAnimationFrame to ensure layers are fully set up first
+            requestAnimationFrame(() => {
+                const currentOptions = this.stateManager.getDisplayOptions();
+                this.stateManager.updateDisplayOptions({...currentOptions});
+            });
         });
 
         // Initialize map interaction managers
