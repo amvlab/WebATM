@@ -34,8 +34,11 @@ A modern web client for the [BlueSky Air Traffic Management (ATM) simulator](htt
 ### For Local Development
 - Python 3.13 or higher
 - Node.js 22+ and npm (for TypeScript development)
-- [BlueSky ATM simulator](https://github.com/TUDelft-CNS-ATM/bluesky) version 1.1.0
+- [BlueSky ATM simulator](https://github.com/amvlab/bluesky) (amvlab fork recommended) or [TUDelft-CNS-ATM/bluesky](https://github.com/TUDelft-CNS-ATM/bluesky) version 1.1.0
 
+## Compatibility
+
+WebATM works best with the [amvlab fork of BlueSky](https://github.com/amvlab/bluesky), but is also compatible with the latest [BlueSky from TU Delft](https://github.com/TUDelft-CNS-ATM/bluesky).
 
 ## Quick Start
 
