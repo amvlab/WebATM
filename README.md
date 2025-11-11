@@ -39,7 +39,7 @@ A modern web client for the [BlueSky Air Traffic Management (ATM) simulator](htt
 
 ## Quick Start
 
-### Option 1: Local Development
+### Option 1: Local Deployment
 
 1. **Clone the repository**
    ```bash
