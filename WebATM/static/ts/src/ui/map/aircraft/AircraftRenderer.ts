@@ -59,6 +59,7 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
      */
     protected buildEntityLabel(aircraftData: AircraftData, index: number): string {
         const id = aircraftData.id[index];
+        const actype = aircraftData.actype && aircraftData.actype[index] ? aircraftData.actype[index] : '';
         const altitude = aircraftData.alt ? aircraftData.alt[index] : 0;
         const verticalSpeed = aircraftData.vs ? aircraftData.vs[index] : 0;
 
@@ -84,6 +85,10 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
 
         if (this.displayOptions.showAircraftId) {
             labelParts.push(id);
+        }
+
+        if (this.displayOptions.showAircraftType && actype) {
+            labelParts.push(actype);
         }
 
         if (this.displayOptions.showAircraftSpeed && speed > 0) {

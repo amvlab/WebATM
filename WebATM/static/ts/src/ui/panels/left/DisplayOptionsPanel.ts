@@ -102,6 +102,7 @@ export class DisplayOptionsPanel extends BasePanel {
         const showAircraftId = storage.get<boolean>('show-aircraft-id') ?? displayOptions.showAircraftId;
         const showAircraftSpeed = storage.get<boolean>('show-aircraft-speed') ?? displayOptions.showAircraftSpeed;
         const showAircraftAltitude = storage.get<boolean>('show-aircraft-altitude') ?? displayOptions.showAircraftAltitude;
+        const showAircraftType = storage.get<boolean>('show-aircraft-type') ?? displayOptions.showAircraftType;
         const showAircraftTrails = storage.get<boolean>('show-aircraft-trails') ?? displayOptions.showAircraftTrails;
         const showProtectedZones = storage.get<boolean>('show-protected-zones') ?? displayOptions.showProtectedZones;
 
@@ -150,6 +151,7 @@ export class DisplayOptionsPanel extends BasePanel {
             showAircraftId,
             showAircraftSpeed,
             showAircraftAltitude,
+            showAircraftType,
             showAircraftTrails,
             showProtectedZones,
             showShapes,
@@ -216,6 +218,9 @@ export class DisplayOptionsPanel extends BasePanel {
 
         const showAircraftAltitudeCheckbox = document.getElementById('show-aircraft-altitude') as HTMLInputElement;
         if (showAircraftAltitudeCheckbox) showAircraftAltitudeCheckbox.checked = showAircraftAltitude;
+
+        const showAircraftTypeCheckbox = document.getElementById('show-aircraft-type') as HTMLInputElement;
+        if (showAircraftTypeCheckbox) showAircraftTypeCheckbox.checked = showAircraftType;
 
         const showAircraftTrailsCheckbox = document.getElementById('show-aircraft-trails') as HTMLInputElement;
         if (showAircraftTrailsCheckbox) showAircraftTrailsCheckbox.checked = showAircraftTrails;
@@ -685,12 +690,13 @@ export class DisplayOptionsPanel extends BasePanel {
                 // Save the main labels toggle state
                 storage.set('show-aircraft-labels', checked);
 
-                // Update all three label sub-options to match
+                // Update all four label sub-options to match
                 storage.set('show-aircraft-id', checked);
                 storage.set('show-aircraft-speed', checked);
                 storage.set('show-aircraft-altitude', checked);
+                storage.set('show-aircraft-type', checked);
 
-                // Update the UI checkboxes for ID, Speed, and Altitude
+                // Update the UI checkboxes for ID, Speed, Altitude, and Type
                 const showAircraftIdCheckbox = document.getElementById('show-aircraft-id') as HTMLInputElement;
                 if (showAircraftIdCheckbox) showAircraftIdCheckbox.checked = checked;
 
@@ -700,20 +706,25 @@ export class DisplayOptionsPanel extends BasePanel {
                 const showAircraftAltitudeCheckbox = document.getElementById('show-aircraft-altitude') as HTMLInputElement;
                 if (showAircraftAltitudeCheckbox) showAircraftAltitudeCheckbox.checked = checked;
 
+                const showAircraftTypeCheckbox = document.getElementById('show-aircraft-type') as HTMLInputElement;
+                if (showAircraftTypeCheckbox) showAircraftTypeCheckbox.checked = checked;
+
                 // Toggle visibility of sub-option containers
                 this.toggleSubOptionContainers([
                     'show-aircraft-id-container',
                     'show-aircraft-speed-container',
-                    'show-aircraft-altitude-container'
+                    'show-aircraft-altitude-container',
+                    'show-aircraft-type-container'
                 ], checked);
 
-                // Update state manager with all four values
+                // Update state manager with all five values
                 if (this.stateManager) {
                     this.stateManager.updateDisplayOptions({
                         showAircraftLabels: checked,
                         showAircraftId: checked,
                         showAircraftSpeed: checked,
-                        showAircraftAltitude: checked
+                        showAircraftAltitude: checked,
+                        showAircraftType: checked
                     });
                 }
             });
@@ -751,6 +762,18 @@ export class DisplayOptionsPanel extends BasePanel {
                 storage.set('show-aircraft-altitude', checked);
                 if (this.stateManager) {
                     this.stateManager.updateDisplayOptions({ showAircraftAltitude: checked });
+                }
+            });
+        }
+
+        // Aircraft type visibility
+        const showAircraftTypeCheckbox = document.getElementById('show-aircraft-type') as HTMLInputElement;
+        if (showAircraftTypeCheckbox) {
+            showAircraftTypeCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                storage.set('show-aircraft-type', checked);
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({ showAircraftType: checked });
                 }
             });
         }

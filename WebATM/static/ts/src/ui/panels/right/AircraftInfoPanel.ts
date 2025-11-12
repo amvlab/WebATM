@@ -112,6 +112,7 @@ export class AircraftInfoPanel extends BasePanel {
 
         // Get aircraft data (in BlueSky units: alt in ft, speeds in kt, vs in ft/s)
         const aircraftId = data.id[index];
+        const aircraftType = data.actype && data.actype[index] ? data.actype[index] : 'N/A';
         const lat = data.lat[index];
         const lon = data.lon[index];
         const altFeet = data.alt[index];
@@ -125,7 +126,7 @@ export class AircraftInfoPanel extends BasePanel {
 
         // Create info object for comparison
         const currentInfo = {
-            aircraftId, lat, lon, altFeet, casKnots, tasKnots, gsKnots, trk, vsFtPerSec, inconf, tcpamax,
+            aircraftId, aircraftType, lat, lon, altFeet, casKnots, tasKnots, gsKnots, trk, vsFtPerSec, inconf, tcpamax,
             // Include display options in comparison to trigger update on unit changes
             speedUnit: this.displayOptions.speedUnit,
             altUnit: this.displayOptions.altitudeUnit,
@@ -166,6 +167,10 @@ export class AircraftInfoPanel extends BasePanel {
                 <div class="info-row">
                     <span class="info-label">Aircraft ID:</span>
                     <span class="info-value copyable-value" data-field="id">${aircraftId}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Aircraft Type:</span>
+                    <span class="info-value copyable-value" data-field="actype">${aircraftType}</span>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Latitude:</span>

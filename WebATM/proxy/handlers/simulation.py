@@ -116,6 +116,7 @@ def on_acdata_received(data):
                 empty_traffic_data = {
                     "id": [],
                     "lat": [],
+                    "actype": [], # this is only sent by bluesky/amvlab
                     "lon": [],
                     "alt": [],
                     "tas": [],
