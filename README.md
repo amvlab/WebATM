@@ -78,7 +78,7 @@ WebATM works best with the [amvlab fork of BlueSky](https://github.com/amvlab/bl
 
 2. **Start with Docker Compose**
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 3. **Access the web interface**
@@ -87,7 +87,7 @@ WebATM works best with the [amvlab fork of BlueSky](https://github.com/amvlab/bl
 
 4. **View logs**
    ```bash
-   docker-compose logs -f webatm
+   docker compose logs -f webatm
    ```
 
 ## Configuration
