@@ -748,6 +748,7 @@ export class App {
                 trk: [],
                 vs: [],
                 tas: [],
+                actype: [],
                 inconf: [],
                 tcpamax: [],
                 nconf_cur: 0,

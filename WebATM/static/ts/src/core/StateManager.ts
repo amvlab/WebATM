@@ -66,6 +66,7 @@ export class StateManager {
                 showAircraftId: true,
                 showAircraftSpeed: true,
                 showAircraftAltitude: true,
+                showAircraftType: true,
                 showAircraftTrails: false,
                 showProtectedZones: false,
                 showRoutes: true,
@@ -266,6 +267,7 @@ export class StateManager {
         lon: number;
         alt: number;
         tas: number;
+        actype: string;
         trk: number;
         vs: number;
         inconf: boolean;
@@ -283,6 +285,7 @@ export class StateManager {
             lon: aircraftData.lon[index],
             alt: aircraftData.alt[index],
             tas: aircraftData.tas[index],
+            actype: aircraftData.actype && aircraftData.actype[index] ? aircraftData.actype[index] : '',
             trk: aircraftData.trk[index],
             vs: aircraftData.vs[index],
             inconf: aircraftData.inconf[index],
@@ -296,6 +299,7 @@ export class StateManager {
         lon: number;
         alt: number;
         tas: number;
+        actype: string;
         trk: number;
         vs: number;
         inconf: boolean;
@@ -313,6 +317,7 @@ export class StateManager {
             lon: aircraftData.lon[index],
             alt: aircraftData.alt[index],
             tas: aircraftData.tas[index],
+            actype: aircraftData.actype && aircraftData.actype[index] ? aircraftData.actype[index] : '',
             trk: aircraftData.trk[index],
             vs: aircraftData.vs[index],
             inconf: aircraftData.inconf[index],

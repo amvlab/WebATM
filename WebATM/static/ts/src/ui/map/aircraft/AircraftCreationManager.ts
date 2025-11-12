@@ -17,7 +17,7 @@ import { logger } from '../../../utils/Logger';
  */
 interface AircraftData {
     id: string;
-    type: string;
+    actype: string; // Aircraft type
     altDisplay: number;
     altUnit: AltitudeUnit;
     spdDisplay: number;
@@ -362,7 +362,7 @@ export class AircraftCreationManager {
 
         this.currentAircraftData = {
             id: id,
-            type: type,
+            actype: type,
             altDisplay: parseFloat(alt),
             altUnit: currentAltUnit,
             spdDisplay: parseFloat(spd),
@@ -848,7 +848,7 @@ export class AircraftCreationManager {
         logger.debug('AircraftCreationManager', `Unit conversion: ${this.currentAircraftData.altDisplay}${this.currentAircraftData.altUnit} → ${altFeet}ft, ${this.currentAircraftData.spdDisplay}${this.currentAircraftData.spdUnit} → ${speedKnots}kts`);
 
         // Build and send CRE command
-        const command = `CRE ${this.currentAircraftData.id},${this.currentAircraftData.type},${position[1]},${position[0]},${heading},${altFeet},${speedKnots}`;
+        const command = `CRE ${this.currentAircraftData.id},${this.currentAircraftData.actype},${position[1]},${position[0]},${heading},${altFeet},${speedKnots}`;
 
         logger.info('AircraftCreationManager', `Creating aircraft with command: ${command}`);
         logger.debug('AircraftCreationManager', `Position: [${position[1]}, ${position[0]}], Heading: ${heading}°`);

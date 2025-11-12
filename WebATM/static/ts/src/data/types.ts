@@ -32,6 +32,7 @@ export interface AircraftData extends EntityData {
     tas: number[];          // True Airspeed
     cas?: number[];         // Calibrated Airspeed (optional - may not be sent by backend yet)
     gs?: number[];          // Ground Speed (optional - may not be sent by backend yet)
+    actype?: string[];
     inconf: boolean[];      // In conflict status
     tcpamax: number[];      // Time to closest point of approach
     nconf_cur: number;      // Current number of conflicts
@@ -426,6 +427,7 @@ export interface DisplayOptions {
   showAircraftId: boolean;
   showAircraftSpeed: boolean;
   showAircraftAltitude: boolean;
+  showAircraftType: boolean;
   showAircraftTrails: boolean;
   showProtectedZones: boolean;
   showRoutes: boolean;
