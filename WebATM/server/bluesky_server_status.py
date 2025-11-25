@@ -91,6 +91,7 @@ def register_server_status_routes(app):
             # If no hostname specified, use current server IP from proxy
             if not hostname:
                 from flask import current_app
+
                 hostname = getattr(current_app.bluesky_proxy, "server_ip", None)
 
             # If still no hostname, default to localhost
