@@ -761,25 +761,129 @@
     <div id="upload-scenario-modal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Upload Scenario</h3>
+                <h3>Upload Scenario Files</h3>
                 <button class="modal-close" id="upload-scenario-close">&times;</button>
             </div>
             <div class="modal-body">
+                <!-- BlueSky Base Path Configuration -->
                 <div class="setting-group">
-                    <div class="demo-message">
-                        <span class="demo-badge">UNDER DEVELOPMENT</span>
-                        <p><strong>Uploading scenarios is currently under development.</strong></p>
-                        <p>You can run scenarios in the console using the IC command:</p>
-                        <div class="demo-commands">
-                            <code>IC scenario_name</code>
+                    <div class="section-header">
+                        <h4>🗂️ BlueSky Base Directory</h4>
+                        <div class="section-description">Configure the path where BlueSky can access uploaded files</div>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label for="bluesky-base-path-input">BlueSky Base Path:</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="bluesky-base-path-input" placeholder="e.g., /path/to/bluesky or C:\bluesky" style="flex: 1;">
+                            <button id="configure-base-path-btn" class="btn-secondary">Configure</button>
                         </div>
-                        <p><strong>Note:</strong> Scenarios must be reachable by the BlueSky server.</p>
-                        <p>In the full version, you will be able to upload and edit custom scenario files.</p>
+                        <small class="setting-help">
+                            Enter the base directory path where BlueSky is installed. Files will be uploaded to subdirectories (scenario/, plugins/, settings.cfg).
+                        </small>
+                    </div>
+
+                    <div id="base-path-status" style="margin-top: 8px; display: none;">
+                        <div style="padding: 8px; border-radius: 4px; background-color: #333;">
+                            <strong>Configured paths:</strong>
+                            <div style="margin-top: 4px; font-family: monospace; font-size: 11px;">
+                                <div>📁 Scenarios: <span id="scenario-path-display">-</span></div>
+                                <div>🧩 Plugins: <span id="plugins-path-display">-</span></div>
+                                <div>⚙️ Settings: <span id="settings-path-display">-</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- File Upload Section -->
+                <div class="setting-group" id="file-upload-section" style="display: none;">
+                    <div class="section-header">
+                        <h4>📤 Upload Files</h4>
+                        <div class="section-description">Upload scenario (.scn), plugin (.py), or settings (.cfg) files</div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="file-type-select">File Type:</label>
+                        <select id="file-type-select">
+                            <option value="scenario">Scenario Files (.scn)</option>
+                            <option value="plugins">Plugin Files (.py)</option>
+                            <option value="settings">Settings File (.cfg)</option>
+                        </select>
+                        <small class="setting-help">Select the type of file you want to upload</small>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="file-input">Select File:</label>
+                        <input type="file" id="file-input" accept=".scn" style="width: 100%; margin-bottom: 5px;">
+                        <div id="file-drop-zone" style="
+                            border: 2px dashed #555;
+                            border-radius: 4px;
+                            padding: 20px;
+                            text-align: center;
+                            color: #888;
+                            margin-top: 8px;
+                            background-color: #222;
+                            transition: all 0.2s;
+                            cursor: pointer;
+                        ">
+                            📁 Click here or drag and drop files
+                        </div>
+                        <small class="setting-help">Choose a file to upload to the selected directory</small>
+                    </div>
+
+                    <div class="setting-group">
+                        <button id="upload-file-btn" class="btn-primary" style="width: 100%;" disabled>Upload File</button>
+                        <div id="upload-progress" style="display: none; margin-top: 8px;">
+                            <div style="background-color: #333; border-radius: 4px; padding: 4px;">
+                                <div id="upload-progress-bar" style="
+                                    background-color: #4CAF50;
+                                    height: 20px;
+                                    border-radius: 2px;
+                                    width: 0%;
+                                    transition: width 0.3s;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    color: white;
+                                    font-size: 12px;
+                                ">0%</div>
+                            </div>
+                        </div>
+                        <div id="upload-status" style="margin-top: 8px;"></div>
+                    </div>
+                </div>
+
+                <!-- File Management Section -->
+                <div class="setting-group" id="file-management-section" style="display: none;">
+                    <div class="section-header">
+                        <h4>📋 Uploaded Files</h4>
+                        <div class="section-description">Manage files that have been uploaded</div>
+                    </div>
+
+                    <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                        <button id="refresh-files-btn" class="btn-secondary">🔄 Refresh</button>
+                        <select id="view-file-type-select" style="flex: 1;">
+                            <option value="scenario">Scenario Files</option>
+                            <option value="plugins">Plugin Files</option>
+                            <option value="settings">Settings File</option>
+                        </select>
+                    </div>
+
+                    <div id="file-list" style="
+                        max-height: 200px;
+                        overflow-y: auto;
+                        border: 1px solid #444;
+                        border-radius: 4px;
+                        background-color: #1a1a1a;
+                    ">
+                        <div style="padding: 16px; text-align: center; color: #666;">
+                            Configure base path first
+                        </div>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button id="upload-scenario-ok" class="btn-primary">OK</button>
+                <button id="upload-scenario-close-footer" class="btn-secondary">Close</button>
             </div>
         </div>
     </div>

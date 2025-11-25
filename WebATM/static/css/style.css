@@ -1485,6 +1485,30 @@ body {
     flex-direction: column;
 }
 
+/* Special styling for upload scenario modal with more content */
+#upload-scenario-modal {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 1000 !important;
+}
+
+#upload-scenario-modal .modal-content {
+    max-width: 600px;
+    width: 90%;
+    max-height: 90vh;
+    margin: auto;
+    transform: none !important;
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+}
+
 .modal-header {
     display: flex;
     justify-content: space-between;

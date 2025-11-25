@@ -1,6 +1,7 @@
 import { modalManager } from './ModalManager';
 import { settingsModal } from './SettingsModal';
 import { serverManager } from './ServerManager';
+import { blueSkyFileManager } from './BlueSkyFileManager';
 import { logger } from '../utils/Logger';
 
 /**
@@ -64,7 +65,13 @@ export class Modals {
                 button.addEventListener('click', (e) => {
                     e.preventDefault();
                     logger.debug('Modals', `Opening modal: ${modalId}`);
-                    this.openModal(modalId);
+                    
+                    // Special handling for upload scenario modal
+                    if (modalId === 'upload-scenario-modal') {
+                        blueSkyFileManager.openModal();
+                    } else {
+                        this.openModal(modalId);
+                    }
                     this.closeMenuDropdown();
                 });
             } else {
@@ -91,7 +98,6 @@ export class Modals {
 
         // OK button handlers (typically just close the modal)
         const okButtons = [
-            { buttonId: 'upload-scenario-ok', modalId: 'upload-scenario-modal' },
             { buttonId: 'modify-settings-ok', modalId: 'modify-settings-modal' },
             { buttonId: 'download-logs-ok', modalId: 'download-logs-modal' },
             { buttonId: 'upload-plugin-ok', modalId: 'upload-plugin-modal' }
@@ -228,4 +234,4 @@ export class Modals {
 export const modals = new Modals();
 
 // Also export individual components for direct access
-export { modalManager, settingsModal, serverManager };
+export { modalManager, settingsModal, serverManager, blueSkyFileManager };

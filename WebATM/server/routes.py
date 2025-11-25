@@ -2,13 +2,15 @@
 Basic Flask routes for WebATM.
 
 This module contains routes for the main page, simulation commands,
-server configuration, and health/status endpoints.
+server configuration, health/status endpoints, and BlueSky file uploads.
 """
 
 import json
+import os
 import socket
 import time
 from pathlib import Path
+from werkzeug.utils import secure_filename
 
 from flask import current_app, jsonify, render_template, request
 
@@ -329,3 +331,287 @@ def register_basic_routes(app, session_manager):
 
         except Exception as e:
             return jsonify({"status": "unhealthy", "error": str(e)}), 503
+
+    # BlueSky File Upload System Routes
+    
+    @app.route("/api/bluesky/configure-base-path", methods=["POST"])
+    def configure_bluesky_base_path():
+        """Configure BlueSky base directory path."""
+        try:
+            data = request.json if request.json else {}
+            base_path = data.get("base_path", "").strip()
+            
+            if not base_path:
+                return jsonify({"success": False, "error": "Base path is required"}), 400
+            
+            # Normalize path for cross-platform compatibility
+            path_obj = Path(base_path).expanduser().resolve()
+            
+            if not path_obj.exists():
+                return jsonify({"success": False, "error": f"Path does not exist: {path_obj}"}), 400
+            
+            if not path_obj.is_dir():
+                return jsonify({"success": False, "error": f"Path is not a directory: {path_obj}"}), 400
+            
+            # Check if writable (cross-platform)
+            if not os.access(str(path_obj), os.W_OK):
+                return jsonify({"success": False, "error": f"Path is not writable: {path_obj}"}), 400
+            
+            # Store in app config (in production, consider using a database or session)
+            current_app.bluesky_base_path = str(path_obj)
+            
+            # Create subdirectories if they don't exist
+            scenario_dir = path_obj / "scenario"
+            plugins_dir = path_obj / "plugins"
+            
+            try:
+                scenario_dir.mkdir(exist_ok=True)
+                plugins_dir.mkdir(exist_ok=True)
+                logger.info(f"BlueSky base path configured: {current_app.bluesky_base_path}")
+                
+                return jsonify({
+                    "success": True,
+                    "base_path": current_app.bluesky_base_path,
+                    "derived_paths": {
+                        "scenario": str(scenario_dir),
+                        "plugins": str(plugins_dir),
+                        "settings": str(path_obj / "settings.cfg")
+                    }
+                })
+                
+            except Exception as e:
+                return jsonify({"success": False, "error": f"Could not create subdirectories: {str(e)}"}), 500
+            
+        except Exception as e:
+            logger.error(f"Error configuring BlueSky base path: {e}")
+            return jsonify({"success": False, "error": f"Failed to configure path: {str(e)}"}), 500
+
+    @app.route("/api/bluesky/upload/<file_type>", methods=["POST"])
+    def upload_bluesky_file(file_type):
+        """Upload files to BlueSky directories."""
+        try:
+            # Check if base path is configured
+            if not hasattr(current_app, 'bluesky_base_path'):
+                return jsonify({"success": False, "error": "BlueSky base path not configured"}), 400
+            
+            base_path = Path(current_app.bluesky_base_path)
+            
+            # Validate file type
+            file_type_config = {
+                "scenario": {"extension": ".scn", "directory": "scenario", "allow_multiple": True},
+                "plugins": {"extension": ".py", "directory": "plugins", "allow_multiple": True},
+                "settings": {"extension": ".cfg", "filepath": "settings.cfg", "allow_multiple": False}
+            }
+            
+            if file_type not in file_type_config:
+                return jsonify({"success": False, "error": f"Invalid file type: {file_type}"}), 400
+            
+            # Check if file is present
+            if 'file' not in request.files:
+                return jsonify({"success": False, "error": "No file provided"}), 400
+            
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({"success": False, "error": "No file selected"}), 400
+            
+            config = file_type_config[file_type]
+            
+            # Validate file extension
+            if not file.filename.lower().endswith(config["extension"]):
+                return jsonify({"success": False, "error": f"Invalid file extension. Expected {config['extension']}"}), 400
+            
+            # File size validation (max 50MB for scenario files, 10MB for others)
+            max_size = 50 * 1024 * 1024 if file_type == "scenario" else 10 * 1024 * 1024  # 50MB or 10MB
+            file.seek(0, 2)  # Seek to end of file
+            file_size = file.tell()
+            file.seek(0)  # Reset file pointer
+            
+            if file_size > max_size:
+                max_size_mb = max_size // (1024 * 1024)
+                return jsonify({"success": False, "error": f"File too large. Maximum size: {max_size_mb}MB"}), 400
+            
+            # Secure filename (cross-platform)
+            filename = secure_filename(file.filename)
+            if not filename:
+                return jsonify({"success": False, "error": "Invalid filename"}), 400
+            
+            # Determine target path
+            if file_type == "settings":
+                target_path = base_path / config["filepath"]
+            else:
+                target_dir = base_path / config["directory"]
+                target_dir.mkdir(exist_ok=True)
+                
+                # Handle filename conflicts for multiple files
+                if config["allow_multiple"]:
+                    counter = 1
+                    original_path = target_dir / filename
+                    target_path = original_path
+                    
+                    while target_path.exists():
+                        name_part = Path(filename).stem
+                        ext_part = Path(filename).suffix
+                        new_filename = f"{name_part}_{counter}{ext_part}"
+                        target_path = target_dir / new_filename
+                        counter += 1
+                        
+                    if target_path != original_path:
+                        filename = target_path.name
+                else:
+                    target_path = target_dir / filename
+            
+            # Save file (cross-platform compatible)
+            file.save(str(target_path))
+            
+            logger.info(f"File uploaded successfully: {target_path}")
+            
+            return jsonify({
+                "success": True,
+                "filename": filename,
+                "file_type": file_type,
+                "target_path": str(target_path),
+                "message": f"{file_type.title()} file uploaded successfully"
+            })
+            
+        except Exception as e:
+            logger.error(f"Error uploading {file_type} file: {e}")
+            return jsonify({"success": False, "error": f"Failed to upload file: {str(e)}"}), 500
+
+    @app.route("/api/bluesky/list/<file_type>", methods=["GET"])
+    def list_bluesky_files(file_type):
+        """List files in BlueSky directories."""
+        try:
+            # Check if base path is configured
+            if not hasattr(current_app, 'bluesky_base_path'):
+                return jsonify({"success": False, "error": "BlueSky base path not configured"}), 400
+            
+            base_path = Path(current_app.bluesky_base_path)
+            
+            # Validate file type
+            file_type_config = {
+                "scenario": {"extension": ".scn", "directory": "scenario"},
+                "plugins": {"extension": ".py", "directory": "plugins"},
+                "settings": {"extension": ".cfg", "filepath": "settings.cfg"}
+            }
+            
+            if file_type not in file_type_config:
+                return jsonify({"success": False, "error": f"Invalid file type: {file_type}"}), 400
+            
+            config = file_type_config[file_type]
+            files = []
+            
+            if file_type == "settings":
+                settings_path = base_path / config["filepath"]
+                if settings_path.exists():
+                    stat_info = settings_path.stat()
+                    files.append({
+                        "filename": "settings.cfg",
+                        "size": stat_info.st_size,
+                        "modified": stat_info.st_mtime
+                    })
+            else:
+                target_dir = base_path / config["directory"]
+                if target_dir.exists():
+                    for file_path in target_dir.glob(f"*{config['extension']}"):
+                        stat_info = file_path.stat()
+                        files.append({
+                            "filename": file_path.name,
+                            "size": stat_info.st_size,
+                            "modified": stat_info.st_mtime
+                        })
+            
+            return jsonify({
+                "success": True,
+                "file_type": file_type,
+                "files": files,
+                "base_path": str(base_path)
+            })
+            
+        except Exception as e:
+            logger.error(f"Error listing {file_type} files: {e}")
+            return jsonify({"success": False, "error": f"Failed to list files: {str(e)}"}), 500
+
+    @app.route("/api/bluesky/<file_type>/<filename>", methods=["DELETE"])
+    def delete_bluesky_file(file_type, filename):
+        """Delete files from BlueSky directories."""
+        try:
+            # Check if base path is configured
+            if not hasattr(current_app, 'bluesky_base_path'):
+                return jsonify({"success": False, "error": "BlueSky base path not configured"}), 400
+            
+            base_path = Path(current_app.bluesky_base_path)
+            
+            # Validate file type
+            file_type_config = {
+                "scenario": {"directory": "scenario"},
+                "plugins": {"directory": "plugins"},
+                "settings": {"filepath": "settings.cfg"}
+            }
+            
+            if file_type not in file_type_config:
+                return jsonify({"success": False, "error": f"Invalid file type: {file_type}"}), 400
+            
+            # Secure filename
+            secure_name = secure_filename(filename)
+            if not secure_name:
+                return jsonify({"success": False, "error": "Invalid filename"}), 400
+            
+            config = file_type_config[file_type]
+            
+            # Determine target path
+            if file_type == "settings":
+                if filename != "settings.cfg":
+                    return jsonify({"success": False, "error": "Can only delete settings.cfg"}), 400
+                target_path = base_path / config["filepath"]
+            else:
+                target_dir = base_path / config["directory"]
+                target_path = target_dir / secure_name
+            
+            # Check if file exists
+            if not target_path.exists():
+                return jsonify({"success": False, "error": f"File not found: {filename}"}), 404
+            
+            # Delete file
+            target_path.unlink()
+            
+            logger.info(f"File deleted successfully: {target_path}")
+            
+            return jsonify({
+                "success": True,
+                "filename": filename,
+                "file_type": file_type,
+                "message": f"{file_type.title()} file deleted successfully"
+            })
+            
+        except Exception as e:
+            logger.error(f"Error deleting {file_type} file: {e}")
+            return jsonify({"success": False, "error": f"Failed to delete file: {str(e)}"}), 500
+
+    @app.route("/api/bluesky/filestatus", methods=["GET"])
+    def get_bluesky_file_status():
+        """Get BlueSky file system configuration status."""
+        try:
+            if not hasattr(current_app, 'bluesky_base_path'):
+                return jsonify({
+                    "configured": False,
+                    "base_path": None,
+                    "derived_paths": {}
+                })
+            
+            base_path = Path(current_app.bluesky_base_path)
+            
+            return jsonify({
+                "configured": True,
+                "base_path": str(base_path),
+                "derived_paths": {
+                    "scenario": str(base_path / "scenario"),
+                    "plugins": str(base_path / "plugins"),
+                    "settings": str(base_path / "settings.cfg")
+                },
+                "path_exists": base_path.exists(),
+                "path_writable": os.access(str(base_path), os.W_OK) if base_path.exists() else False
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting BlueSky file status: {e}")
+            return jsonify({"success": False, "error": f"Failed to get status: {str(e)}"}), 500
