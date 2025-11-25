@@ -33,6 +33,20 @@ interface ListFilesResponse {
     base_path: string;
 }
 
+interface BrowseDirectoryResponse {
+    success: boolean;
+    file_type: string;
+    files: UploadedFile[];
+    current_path: string;
+    breadcrumbs: Breadcrumb[];
+    base_path: string;
+}
+
+interface Breadcrumb {
+    name: string;
+    path: string;
+}
+
 /**
  * BlueSky File Manager
  * Handles file uploads for scenarios, plugins, and settings files
@@ -45,6 +59,11 @@ export class BlueSkyFileManager {
     };
 
     private isConfigured: boolean = false;
+    private currentPaths: Record<string, string> = {
+        scenario: '',
+        plugins: '',
+        settings: ''
+    };
 
     constructor() {
         this.init();
@@ -93,10 +112,15 @@ export class BlueSkyFileManager {
         const viewFileTypeSelect = document.getElementById('view-file-type-select') as HTMLSelectElement;
         
         refreshBtn?.addEventListener('click', () => this.refreshFileList());
-        viewFileTypeSelect?.addEventListener('change', () => this.refreshFileList());
+        viewFileTypeSelect?.addEventListener('change', () => {
+            // Reset current path when changing file types
+            const fileType = viewFileTypeSelect.value;
+            this.currentPaths[fileType] = '';
+            this.refreshFileList();
+        });
 
         // Close button handlers
-        const closeFooterBtn = document.getElementById('upload-scenario-close-footer');
+        const closeFooterBtn = document.getElementById('upload-files-close-footer');
         closeFooterBtn?.addEventListener('click', () => this.closeModal());
 
         logger.debug('BlueSkyFileManager', 'Event handlers initialized');
@@ -375,11 +399,17 @@ export class BlueSkyFileManager {
         if (!fileListDiv) return;
 
         try {
-            const response = await fetch(`/api/bluesky/list/${fileType}`);
-            const result: ListFilesResponse = await response.json();
+            // Use the new browse API with current path
+            const currentPath = this.currentPaths[fileType] || '';
+            const url = currentPath ? 
+                `/api/bluesky/browse/${fileType}/${encodeURIComponent(currentPath)}` : 
+                `/api/bluesky/browse/${fileType}`;
+            
+            const response = await fetch(url);
+            const result: BrowseDirectoryResponse = await response.json();
 
             if (result.success) {
-                this.renderFileList(result.files, fileType);
+                this.renderFileList(result.files, fileType, result.breadcrumbs);
             } else {
                 fileListDiv.innerHTML = `<div style="padding: 16px; text-align: center; color: #f44336;">Error loading files</div>`;
             }
@@ -389,12 +419,32 @@ export class BlueSkyFileManager {
         }
     }
 
-    private renderFileList(files: UploadedFile[], fileType: string): void {
+    private renderFileList(files: UploadedFile[], fileType: string, breadcrumbs?: Breadcrumb[]): void {
         const fileListDiv = document.getElementById('file-list');
         if (!fileListDiv) return;
 
+        let content = '';
+
+        // Add breadcrumb navigation if we have breadcrumbs
+        if (breadcrumbs && breadcrumbs.length > 1) {
+            const breadcrumbItems = breadcrumbs.map((crumb, index) => {
+                const isLast = index === breadcrumbs.length - 1;
+                const clickHandler = isLast ? '' : `onclick="blueSkyFileManager.navigateToPath('${fileType}', '${crumb.path}')"`;
+                const style = isLast ? 'color: #fff; font-weight: bold;' : 'color: #4CAF50; cursor: pointer;';
+                
+                return `<span style="${style}" ${clickHandler}>${crumb.name}</span>`;
+            }).join(' <span style="color: #666;">/</span> ');
+
+            content += `
+                <div style="padding: 8px; background-color: #2a2a2a; border-bottom: 1px solid #444; font-size: 12px;">
+                    <i class="fa fa-home" style="margin-right: 5px;"></i>${breadcrumbItems}
+                </div>
+            `;
+        }
+
         if (files.length === 0) {
-            fileListDiv.innerHTML = `<div style="padding: 16px; text-align: center; color: #666;">No ${fileType} files uploaded</div>`;
+            content += `<div style="padding: 16px; text-align: center; color: #666;">No ${fileType} files uploaded</div>`;
+            fileListDiv.innerHTML = content;
             return;
         }
 
@@ -403,10 +453,12 @@ export class BlueSkyFileManager {
             const isFolder = file.type === 'folder';
             const icon = isFolder ? '📁' : '';
             const sizeText = isFolder ? 'Folder' : `${Math.round(file.size / 1024)} KB`;
+            const clickHandler = isFolder ? `onclick="blueSkyFileManager.navigateToFolder('${fileType}', '${file.filename}')"` : '';
+            const cursorStyle = isFolder ? 'cursor: pointer;' : '';
             
             return `
                 <div style="padding: 8px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center;">
-                    <div>
+                    <div style="${cursorStyle}" ${clickHandler}>
                         <div style="font-weight: bold; ${isFolder ? 'color: #4CAF50;' : ''}">${icon} ${file.filename}</div>
                         <div style="font-size: 11px; color: #888;">${sizeText} • ${modifiedDate}</div>
                     </div>
@@ -419,7 +471,21 @@ export class BlueSkyFileManager {
             `;
         }).join('');
 
-        fileListDiv.innerHTML = fileItems;
+        content += fileItems;
+        fileListDiv.innerHTML = content;
+    }
+
+    public async navigateToFolder(fileType: string, folderName: string): Promise<void> {
+        const currentPath = this.currentPaths[fileType] || '';
+        const newPath = currentPath ? `${currentPath}/${folderName}` : folderName;
+        
+        this.currentPaths[fileType] = newPath;
+        await this.refreshFileList();
+    }
+
+    public async navigateToPath(fileType: string, path: string): Promise<void> {
+        this.currentPaths[fileType] = path;
+        await this.refreshFileList();
     }
 
     public async deleteFile(fileType: string, filename: string): Promise<void> {
@@ -471,16 +537,22 @@ export class BlueSkyFileManager {
     }
 
     public closeModal(): void {
-        const modal = document.getElementById('upload-scenario-modal');
+        const modal = document.getElementById('upload-files-modal');
         if (modal) {
             modal.style.display = 'none';
         }
     }
 
     public openModal(): void {
-        const modal = document.getElementById('upload-scenario-modal');
+        const modal = document.getElementById('upload-files-modal');
         if (modal) {
             modal.style.display = 'block';
+            // Reset all current paths when opening the modal
+            this.currentPaths = {
+                scenario: '',
+                plugins: '',
+                settings: ''
+            };
             this.checkCurrentStatus(); // Refresh status when opening
         }
     }

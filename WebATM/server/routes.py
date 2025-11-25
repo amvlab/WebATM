@@ -545,6 +545,164 @@ def register_basic_routes(app, session_manager):
             logger.error(f"Error listing {file_type} files: {e}")
             return jsonify({"success": False, "error": f"Failed to list files: {str(e)}"}), 500
 
+    @app.route("/api/bluesky/browse/<file_type>", methods=["GET"])
+    @app.route("/api/bluesky/browse/<file_type>/<path:subpath>", methods=["GET"])
+    def browse_bluesky_directory(file_type, subpath=""):
+        """Browse files and folders in BlueSky directories with subdirectory navigation."""
+        try:
+            # Check if base path is configured
+            if not hasattr(current_app, 'bluesky_base_path'):
+                return jsonify({"success": False, "error": "BlueSky base path not configured"}), 400
+            
+            base_path = Path(current_app.bluesky_base_path)
+            
+            # Validate file type
+            file_type_config = {
+                "scenario": {"extension": ".scn", "directory": "scenario"},
+                "plugins": {"extension": ".py", "directory": "plugins"},
+                "settings": {"extension": ".cfg", "filepath": "settings.cfg"}
+            }
+            
+            if file_type not in file_type_config:
+                return jsonify({"success": False, "error": f"Invalid file type: {file_type}"}), 400
+            
+            config = file_type_config[file_type]
+            
+            # For settings, just return the single file (no directory browsing)
+            if file_type == "settings":
+                files = []
+                settings_path = base_path / config["filepath"]
+                if settings_path.exists():
+                    stat_info = settings_path.stat()
+                    files.append({
+                        "filename": "settings.cfg",
+                        "size": stat_info.st_size,
+                        "modified": stat_info.st_mtime,
+                        "type": "file"
+                    })
+                
+                return jsonify({
+                    "success": True,
+                    "file_type": file_type,
+                    "files": files,
+                    "current_path": "",
+                    "breadcrumbs": [],
+                    "base_path": str(base_path)
+                })
+            
+            # Build the target directory path
+            target_base = base_path / config["directory"]
+            
+            # Clean and validate the subpath to prevent directory traversal attacks
+            if subpath:
+                # Normalize the path and remove any .. components
+                normalized_subpath = Path(subpath).as_posix()
+                # Split into parts and filter out dangerous components
+                path_parts = [part for part in normalized_subpath.split('/') if part and part != '.' and part != '..']
+                
+                if path_parts:
+                    target_dir = target_base
+                    for part in path_parts:
+                        target_dir = target_dir / part
+                else:
+                    target_dir = target_base
+            else:
+                target_dir = target_base
+            
+            # Security check: ensure the target directory is within the allowed base
+            try:
+                # Resolve to absolute paths and check containment
+                resolved_target = target_dir.resolve()
+                resolved_base = target_base.resolve()
+                
+                # Check if target is within the allowed directory
+                if not str(resolved_target).startswith(str(resolved_base)):
+                    return jsonify({
+                        "success": False, 
+                        "error": "Access denied: Path outside allowed directory"
+                    }), 403
+                    
+            except (OSError, ValueError):
+                return jsonify({
+                    "success": False, 
+                    "error": "Invalid path"
+                }), 400
+            
+            files = []
+            current_path_parts = []
+            
+            if target_dir.exists() and target_dir.is_dir():
+                # Calculate the current path relative to the base directory
+                try:
+                    relative_path = target_dir.relative_to(target_base)
+                    if relative_path != Path('.'):
+                        current_path_parts = list(relative_path.parts)
+                except ValueError:
+                    # If we can't calculate relative path, something is wrong
+                    return jsonify({
+                        "success": False, 
+                        "error": "Invalid path structure"
+                    }), 400
+                
+                # Add folders first
+                for folder_path in target_dir.iterdir():
+                    if folder_path.is_dir():
+                        stat_info = folder_path.stat()
+                        files.append({
+                            "filename": folder_path.name,
+                            "size": 0,  # Folders don't have a meaningful size
+                            "modified": stat_info.st_mtime,
+                            "type": "folder"
+                        })
+                
+                # Add files with the specified extension
+                for file_path in target_dir.glob(f"*{config['extension']}"):
+                    if file_path.is_file():
+                        stat_info = file_path.stat()
+                        files.append({
+                            "filename": file_path.name,
+                            "size": stat_info.st_size,
+                            "modified": stat_info.st_mtime,
+                            "type": "file"
+                        })
+            
+            # Build breadcrumbs for navigation
+            breadcrumbs = []
+            breadcrumb_path = ""
+            
+            # Add root breadcrumb
+            breadcrumbs.append({
+                "name": config["directory"],
+                "path": ""
+            })
+            
+            # Add intermediate breadcrumbs
+            for i, part in enumerate(current_path_parts):
+                if i == 0:
+                    breadcrumb_path = part
+                else:
+                    breadcrumb_path = f"{breadcrumb_path}/{part}"
+                
+                breadcrumbs.append({
+                    "name": part,
+                    "path": breadcrumb_path
+                })
+            
+            current_path = "/".join(current_path_parts) if current_path_parts else ""
+            
+            return jsonify({
+                "success": True,
+                "file_type": file_type,
+                "files": files,
+                "current_path": current_path,
+                "breadcrumbs": breadcrumbs,
+                "base_path": str(base_path)
+            })
+            
+        except Exception as e:
+            logger.error(f"Error browsing {file_type} directory: {e}")
+            return jsonify({"success": False, "error": f"Failed to browse directory: {str(e)}"}), 500
+
     @app.route("/api/bluesky/<file_type>/<filename>", methods=["DELETE"])
     def delete_bluesky_file(file_type, filename):
         """Delete files from BlueSky directories."""

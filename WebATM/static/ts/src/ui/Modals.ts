@@ -29,10 +29,9 @@ export class Modals {
     private initializeModals(): void {
         // Register all standard modals with the modal manager
         const standardModals = [
-            'upload-scenario-modal',
+            'upload-files-modal',
             'modify-settings-modal',
             'download-logs-modal',
-            'upload-plugin-modal',
             'create-aircraft-modal',
             'polygon-name-modal'
         ];
@@ -52,10 +51,9 @@ export class Modals {
 
         // Button handlers to open modals
         const modalButtons = [
-            { buttonId: 'upload-scenario-btn', modalId: 'upload-scenario-modal' },
+            { buttonId: 'upload-files-btn', modalId: 'upload-files-modal' },
             { buttonId: 'modify-settings-btn', modalId: 'modify-settings-modal' },
-            { buttonId: 'download-logs-btn', modalId: 'download-logs-modal' },
-            { buttonId: 'upload-plugin-btn', modalId: 'upload-plugin-modal' }
+            { buttonId: 'download-logs-btn', modalId: 'download-logs-modal' }
         ];
 
         modalButtons.forEach(({ buttonId, modalId }) => {
@@ -66,8 +64,8 @@ export class Modals {
                     e.preventDefault();
                     logger.debug('Modals', `Opening modal: ${modalId}`);
                     
-                    // Special handling for upload scenario modal
-                    if (modalId === 'upload-scenario-modal') {
+                    // Special handling for upload files modal
+                    if (modalId === 'upload-files-modal') {
                         blueSkyFileManager.openModal();
                     } else {
                         this.openModal(modalId);
@@ -81,10 +79,9 @@ export class Modals {
 
         // Close button handlers
         const closeButtons = [
-            { buttonId: 'upload-scenario-close', modalId: 'upload-scenario-modal' },
+            { buttonId: 'upload-files-close', modalId: 'upload-files-modal' },
             { buttonId: 'modify-settings-close', modalId: 'modify-settings-modal' },
             { buttonId: 'download-logs-close', modalId: 'download-logs-modal' },
-            { buttonId: 'upload-plugin-close', modalId: 'upload-plugin-modal' },
             { buttonId: 'create-aircraft-modal-close', modalId: 'create-aircraft-modal' },
             { buttonId: 'polygon-name-modal-close', modalId: 'polygon-name-modal' }
         ];
@@ -93,8 +90,8 @@ export class Modals {
             const button = document.getElementById(buttonId);
             if (button) {
                 button.addEventListener('click', () => {
-                    // Special handling for upload scenario modal
-                    if (modalId === 'upload-scenario-modal') {
+                    // Special handling for upload files modal
+                    if (modalId === 'upload-files-modal') {
                         blueSkyFileManager.closeModal();
                     } else {
                         this.closeModal(modalId);
@@ -106,8 +103,7 @@ export class Modals {
         // OK button handlers (typically just close the modal)
         const okButtons = [
             { buttonId: 'modify-settings-ok', modalId: 'modify-settings-modal' },
-            { buttonId: 'download-logs-ok', modalId: 'download-logs-modal' },
-            { buttonId: 'upload-plugin-ok', modalId: 'upload-plugin-modal' }
+            { buttonId: 'download-logs-ok', modalId: 'download-logs-modal' }
         ];
 
         okButtons.forEach(({ buttonId, modalId }) => {
