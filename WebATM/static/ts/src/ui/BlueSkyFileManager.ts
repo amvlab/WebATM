@@ -1,5 +1,12 @@
 import { logger } from '../utils/Logger';
 
+interface AppWindow extends Window {
+    app?: {
+        sendCommand: (command: string) => void;
+    };
+}
+declare const window: AppWindow;
+
 interface FileTypeConfig {
     extension: string;
     directory?: string;
@@ -81,6 +88,8 @@ export class BlueSkyFileManager {
         this.setupEventHandlers();
         this.loadSavedBasePath();
         this.checkCurrentStatus();
+        // Initialize button visibility based on default file type
+        this.updateFileInputAccept();
     }
 
     private setupEventHandlers(): void {
@@ -106,6 +115,10 @@ export class BlueSkyFileManager {
         // Upload button
         const uploadBtn = document.getElementById('upload-file-btn');
         uploadBtn?.addEventListener('click', () => this.uploadFile());
+
+        // Upload and run scenario button
+        const uploadAndRunBtn = document.getElementById('upload-and-run-scenario-btn');
+        uploadAndRunBtn?.addEventListener('click', () => this.uploadAndRunScenario());
 
         // File management
         const refreshBtn = document.getElementById('refresh-files-btn');
@@ -258,6 +271,7 @@ export class BlueSkyFileManager {
     private updateFileInputAccept(): void {
         const fileTypeSelect = document.getElementById('file-type-select') as HTMLSelectElement;
         const fileInput = document.getElementById('file-input') as HTMLInputElement;
+        const uploadAndRunBtn = document.getElementById('upload-and-run-scenario-btn') as HTMLButtonElement;
         
         const selectedType = fileTypeSelect.value;
         const config = this.fileTypeConfigs[selectedType];
@@ -265,17 +279,33 @@ export class BlueSkyFileManager {
         if (config && fileInput) {
             fileInput.accept = config.extension;
         }
+
+        // Show/hide upload and run scenario button based on file type
+        if (uploadAndRunBtn) {
+            if (selectedType === 'scenario') {
+                uploadAndRunBtn.style.display = 'block';
+            } else {
+                uploadAndRunBtn.style.display = 'none';
+            }
+        }
     }
 
     private handleFileSelection(): void {
         const fileInput = document.getElementById('file-input') as HTMLInputElement;
         const uploadBtn = document.getElementById('upload-file-btn') as HTMLButtonElement;
+        const uploadAndRunBtn = document.getElementById('upload-and-run-scenario-btn') as HTMLButtonElement;
         
         if (fileInput.files && fileInput.files.length > 0) {
             uploadBtn.disabled = false;
+            if (uploadAndRunBtn) {
+                uploadAndRunBtn.disabled = false;
+            }
             this.showStatus(`Selected: ${fileInput.files[0].name}`, 'info');
         } else {
             uploadBtn.disabled = true;
+            if (uploadAndRunBtn) {
+                uploadAndRunBtn.disabled = true;
+            }
         }
     }
 
@@ -300,18 +330,24 @@ export class BlueSkyFileManager {
         }
     }
 
-    private async uploadFile(): Promise<void> {
+    private async uploadAndRunScenario(): Promise<void> {
         const fileInput = document.getElementById('file-input') as HTMLInputElement;
         const fileTypeSelect = document.getElementById('file-type-select') as HTMLSelectElement;
         
         if (!fileInput.files || fileInput.files.length === 0) {
-            this.showStatus('Please select a file first', 'error');
+            this.showStatus('Please select a scenario file first', 'error');
             return;
         }
 
         const file = fileInput.files[0];
         const fileType = fileTypeSelect.value;
         
+        // Ensure we're dealing with a scenario file
+        if (fileType !== 'scenario') {
+            this.showStatus('This function is only available for scenario files', 'error');
+            return;
+        }
+
         // Validate file extension
         const config = this.fileTypeConfigs[fileType];
         if (!file.name.toLowerCase().endsWith(config.extension)) {
@@ -319,17 +355,55 @@ export class BlueSkyFileManager {
             return;
         }
 
+        // Extract scenario name (remove .scn extension)
+        const scenarioName = file.name.replace(/\.scn$/i, '');
+
+        const uploadAndRunBtn = document.getElementById('upload-and-run-scenario-btn') as HTMLButtonElement;
+        uploadAndRunBtn.disabled = true;
+        uploadAndRunBtn.textContent = 'Uploading...';
+
+        try {
+            // Upload the file first
+            const uploadSuccess = await this.performFileUpload(file, fileType);
+            
+            if (uploadSuccess) {
+                this.showStatus('File uploaded successfully! Running scenario...', 'success');
+                
+                // Close the modal
+                this.closeModal();
+                
+                // Send IC command to run the scenario
+                if (window.app) {
+                    const command = `IC ${scenarioName}`;
+                    window.app.sendCommand(command);
+                } else {
+                    this.showStatus('Could not run scenario: Application not available', 'error');
+                }
+            }
+        } catch (error) {
+            logger.error('BlueSkyFileManager', 'Upload and run error:', error);
+            this.showStatus('Upload and run failed. Please try again.', 'error');
+        } finally {
+            uploadAndRunBtn.disabled = false;
+            uploadAndRunBtn.textContent = 'Upload File and run scenario';
+        }
+    }
+
+    private async performFileUpload(file: File, fileType: string): Promise<boolean> {
+        // Validate file extension
+        const config = this.fileTypeConfigs[fileType];
+        if (!file.name.toLowerCase().endsWith(config.extension)) {
+            this.showStatus(`Invalid file type. Expected ${config.extension} file.`, 'error');
+            return false;
+        }
+
         // Validate file size (max 50MB for scenario files, 10MB for others)
         const maxSize = fileType === 'scenario' ? 50 * 1024 * 1024 : 10 * 1024 * 1024; // 50MB or 10MB
         if (file.size > maxSize) {
             const maxSizeMB = Math.floor(maxSize / (1024 * 1024));
             this.showStatus(`File too large. Maximum size: ${maxSizeMB}MB`, 'error');
-            return;
+            return false;
         }
-
-        const uploadBtn = document.getElementById('upload-file-btn') as HTMLButtonElement;
-        uploadBtn.disabled = true;
-        uploadBtn.textContent = 'Uploading...';
 
         // Show progress bar
         const progressDiv = document.getElementById('upload-progress');
@@ -362,7 +436,53 @@ export class BlueSkyFileManager {
             const result = await response.json();
 
             if (result.success) {
-                this.showStatus(`File uploaded successfully: ${result.filename}`, 'success');
+                // Hide progress bar after a delay
+                setTimeout(() => {
+                    progressDiv!.style.display = 'none';
+                    progressBar!.style.width = '0%';
+                    progressBar!.textContent = '0%';
+                }, 2000);
+                
+                return true;
+            } else {
+                this.showStatus(`Upload failed: ${result.error}`, 'error');
+                return false;
+            }
+        } catch (error) {
+            logger.error('BlueSkyFileManager', 'Upload error:', error);
+            this.showStatus('Upload failed. Please try again.', 'error');
+            return false;
+        } finally {
+            // Hide progress bar after a delay if not already hidden
+            setTimeout(() => {
+                progressDiv!.style.display = 'none';
+                progressBar!.style.width = '0%';
+                progressBar!.textContent = '0%';
+            }, 2000);
+        }
+    }
+
+    private async uploadFile(): Promise<void> {
+        const fileInput = document.getElementById('file-input') as HTMLInputElement;
+        const fileTypeSelect = document.getElementById('file-type-select') as HTMLSelectElement;
+        
+        if (!fileInput.files || fileInput.files.length === 0) {
+            this.showStatus('Please select a file first', 'error');
+            return;
+        }
+
+        const file = fileInput.files[0];
+        const fileType = fileTypeSelect.value;
+
+        const uploadBtn = document.getElementById('upload-file-btn') as HTMLButtonElement;
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = 'Uploading...';
+
+        try {
+            const uploadSuccess = await this.performFileUpload(file, fileType);
+            
+            if (uploadSuccess) {
+                this.showStatus(`File uploaded successfully: ${file.name}`, 'success');
                 
                 // Clear file input
                 fileInput.value = '';
@@ -370,8 +490,6 @@ export class BlueSkyFileManager {
                 
                 // Refresh file list
                 this.refreshFileList();
-            } else {
-                this.showStatus(`Upload failed: ${result.error}`, 'error');
             }
         } catch (error) {
             logger.error('BlueSkyFileManager', 'Upload error:', error);
@@ -379,13 +497,6 @@ export class BlueSkyFileManager {
         } finally {
             uploadBtn.disabled = false;
             uploadBtn.textContent = 'Upload File';
-            
-            // Hide progress bar after a delay
-            setTimeout(() => {
-                progressDiv!.style.display = 'none';
-                progressBar!.style.width = '0%';
-                progressBar!.textContent = '0%';
-            }, 2000);
         }
     }
 
@@ -463,9 +574,16 @@ export class BlueSkyFileManager {
                         <div style="font-size: 11px; color: #888;">${sizeText} • ${modifiedDate}</div>
                     </div>
                     ${isFolder ? '' : `
-                    <button class="btn-secondary" onclick="blueSkyFileManager.deleteFile('${fileType}', '${file.filename}')" style="padding: 4px 8px; font-size: 11px;">
-                        🗑️ Delete
-                    </button>
+                    <div style="display: flex; gap: 4px;">
+                        ${fileType === 'scenario' ? `
+                        <button class="btn-primary" onclick="blueSkyFileManager.runScenario('${file.filename}')" style="padding: 4px 8px; font-size: 11px;">
+                            ▶️ Run
+                        </button>
+                        ` : ''}
+                        <button class="btn-secondary" onclick="blueSkyFileManager.deleteFile('${fileType}', '${file.filename}')" style="padding: 4px 8px; font-size: 11px;">
+                            🗑️ Delete
+                        </button>
+                    </div>
                     `}
                 </div>
             `;
@@ -486,6 +604,31 @@ export class BlueSkyFileManager {
     public async navigateToPath(fileType: string, path: string): Promise<void> {
         this.currentPaths[fileType] = path;
         await this.refreshFileList();
+    }
+
+    public runScenario(filename: string): void {
+        // Build the relative path from the scenario directory
+        const currentPath = this.currentPaths['scenario'] || '';
+        let scenarioPath = filename;
+        
+        if (currentPath) {
+            scenarioPath = `${currentPath}/${filename}`;
+        }
+        
+        // Remove .scn extension for the IC command
+        const scenarioName = scenarioPath.replace(/\.scn$/i, '');
+        
+        // Close the modal
+        this.closeModal();
+        
+        // Send IC command to run the scenario
+        if (window.app) {
+            const command = `IC ${scenarioName}`;
+            window.app.sendCommand(command);
+            logger.debug('BlueSkyFileManager', `Running scenario: ${command}`);
+        } else {
+            this.showStatus('Could not run scenario: Application not available', 'error');
+        }
     }
 
     public async deleteFile(fileType: string, filename: string): Promise<void> {
