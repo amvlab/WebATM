@@ -23,6 +23,7 @@ interface UploadedFile {
     filename: string;
     size: number;
     modified: number;
+    type: 'file' | 'folder';
 }
 
 interface ListFilesResponse {
@@ -59,12 +60,13 @@ export class BlueSkyFileManager {
 
     private initializeFileManager(): void {
         this.setupEventHandlers();
+        this.loadSavedBasePath();
         this.checkCurrentStatus();
     }
 
     private setupEventHandlers(): void {
-        // Configure base path button
-        const configureBtn = document.getElementById('configure-base-path-btn');
+        // Configure base path button (now in settings modal)
+        const configureBtn = document.getElementById('configure-base-path-btn-settings');
         configureBtn?.addEventListener('click', () => this.configureBasePath());
 
         // File type selector
@@ -118,36 +120,72 @@ export class BlueSkyFileManager {
     }
 
     private updateUIForConfiguredState(status: BlueSkyFileStatus): void {
-        // Update base path input
-        const basePathInput = document.getElementById('bluesky-base-path-input') as HTMLInputElement;
+        // Update base path input in settings modal
+        const basePathInput = document.getElementById('bluesky-base-path-input-settings') as HTMLInputElement;
         if (basePathInput && status.base_path) {
             basePathInput.value = status.base_path;
+            // Save the path to localStorage if it's different from what's saved
+            const savedPath = localStorage.getItem('bluesky-base-path');
+            if (savedPath !== status.base_path) {
+                this.saveBasePath(status.base_path);
+            }
         }
 
-        // Show status
-        const statusDiv = document.getElementById('base-path-status');
+        // Show status in settings modal
+        const statusDiv = document.getElementById('base-path-status-settings');
         if (statusDiv && status.derived_paths) {
-            document.getElementById('scenario-path-display')!.textContent = status.derived_paths.scenario;
-            document.getElementById('plugins-path-display')!.textContent = status.derived_paths.plugins;
-            document.getElementById('settings-path-display')!.textContent = status.derived_paths.settings;
+            document.getElementById('scenario-path-display-settings')!.textContent = status.derived_paths.scenario;
+            document.getElementById('plugins-path-display-settings')!.textContent = status.derived_paths.plugins;
+            document.getElementById('settings-path-display-settings')!.textContent = status.derived_paths.settings;
             statusDiv.style.display = 'block';
         }
 
-        // Show upload and management sections
-        document.getElementById('file-upload-section')!.style.display = 'block';
-        document.getElementById('file-management-section')!.style.display = 'block';
+        // Show upload and management sections in upload modal
+        const uploadSection = document.getElementById('file-upload-section');
+        const managementSection = document.getElementById('file-management-section');
+        if (uploadSection) uploadSection.style.display = 'block';
+        if (managementSection) managementSection.style.display = 'block';
+        
+        // Hide "not configured" notice and show configured status in upload modal
+        const notConfiguredDiv = document.getElementById('base-path-not-configured');
+        const configuredStatusDiv = document.getElementById('base-path-status');
+        if (notConfiguredDiv) notConfiguredDiv.style.display = 'none';
+        if (configuredStatusDiv && status.derived_paths) {
+            const scenarioDisplay = document.getElementById('scenario-path-display');
+            const pluginsDisplay = document.getElementById('plugins-path-display');
+            const settingsDisplay = document.getElementById('settings-path-display');
+            
+            if (scenarioDisplay) scenarioDisplay.textContent = status.derived_paths.scenario;
+            if (pluginsDisplay) pluginsDisplay.textContent = status.derived_paths.plugins;
+            if (settingsDisplay) settingsDisplay.textContent = status.derived_paths.settings;
+            configuredStatusDiv.style.display = 'block';
+        }
 
         this.refreshFileList();
     }
 
     private updateUIForUnconfiguredState(): void {
-        document.getElementById('base-path-status')!.style.display = 'none';
-        document.getElementById('file-upload-section')!.style.display = 'none';
-        document.getElementById('file-management-section')!.style.display = 'none';
+        // Hide status in settings modal
+        const statusDiv = document.getElementById('base-path-status-settings');
+        if (statusDiv) {
+            statusDiv.style.display = 'none';
+        }
+        
+        // Hide upload and management sections in upload modal
+        const uploadSection = document.getElementById('file-upload-section');
+        const managementSection = document.getElementById('file-management-section');
+        if (uploadSection) uploadSection.style.display = 'none';
+        if (managementSection) managementSection.style.display = 'none';
+        
+        // Show "not configured" notice and hide configured status in upload modal
+        const notConfiguredDiv = document.getElementById('base-path-not-configured');
+        const configuredStatusDiv = document.getElementById('base-path-status');
+        if (notConfiguredDiv) notConfiguredDiv.style.display = 'block';
+        if (configuredStatusDiv) configuredStatusDiv.style.display = 'none';
     }
 
     private async configureBasePath(): Promise<void> {
-        const basePathInput = document.getElementById('bluesky-base-path-input') as HTMLInputElement;
+        const basePathInput = document.getElementById('bluesky-base-path-input-settings') as HTMLInputElement;
         const basePath = basePathInput.value.trim();
 
         if (!basePath) {
@@ -155,7 +193,7 @@ export class BlueSkyFileManager {
             return;
         }
 
-        const configureBtn = document.getElementById('configure-base-path-btn') as HTMLButtonElement;
+        const configureBtn = document.getElementById('configure-base-path-btn-settings') as HTMLButtonElement;
         configureBtn.disabled = true;
         configureBtn.textContent = 'Configuring...';
 
@@ -172,7 +210,10 @@ export class BlueSkyFileManager {
                 this.isConfigured = true;
                 this.showStatus('Base path configured successfully!', 'success');
                 
-                // Update UI
+                // Save the successful path to localStorage
+                this.saveBasePath(result.base_path);
+                
+                // Update UI in both settings modal and upload modal
                 this.updateUIForConfiguredState({
                     configured: true,
                     base_path: result.base_path,
@@ -359,17 +400,21 @@ export class BlueSkyFileManager {
 
         const fileItems = files.map(file => {
             const modifiedDate = new Date(file.modified * 1000).toLocaleDateString();
-            const fileSizeKB = Math.round(file.size / 1024);
+            const isFolder = file.type === 'folder';
+            const icon = isFolder ? '📁' : '';
+            const sizeText = isFolder ? 'Folder' : `${Math.round(file.size / 1024)} KB`;
             
             return `
                 <div style="padding: 8px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <div style="font-weight: bold;">${file.filename}</div>
-                        <div style="font-size: 11px; color: #888;">${fileSizeKB} KB • ${modifiedDate}</div>
+                        <div style="font-weight: bold; ${isFolder ? 'color: #4CAF50;' : ''}">${icon} ${file.filename}</div>
+                        <div style="font-size: 11px; color: #888;">${sizeText} • ${modifiedDate}</div>
                     </div>
+                    ${isFolder ? '' : `
                     <button class="btn-secondary" onclick="blueSkyFileManager.deleteFile('${fileType}', '${file.filename}')" style="padding: 4px 8px; font-size: 11px;">
                         🗑️ Delete
                     </button>
+                    `}
                 </div>
             `;
         }).join('');
@@ -425,7 +470,7 @@ export class BlueSkyFileManager {
         }
     }
 
-    private closeModal(): void {
+    public closeModal(): void {
         const modal = document.getElementById('upload-scenario-modal');
         if (modal) {
             modal.style.display = 'none';
@@ -437,6 +482,48 @@ export class BlueSkyFileManager {
         if (modal) {
             modal.style.display = 'block';
             this.checkCurrentStatus(); // Refresh status when opening
+        }
+    }
+
+    /**
+     * Save the BlueSky base path to localStorage
+     */
+    private saveBasePath(basePath: string): void {
+        try {
+            localStorage.setItem('bluesky-base-path', basePath);
+            logger.debug('BlueSkyFileManager', `Saved base path to localStorage: ${basePath}`);
+        } catch (error) {
+            logger.warn('BlueSkyFileManager', 'Failed to save base path to localStorage:', error);
+        }
+    }
+
+    /**
+     * Load the BlueSky base path from localStorage
+     */
+    private loadSavedBasePath(): void {
+        try {
+            const savedPath = localStorage.getItem('bluesky-base-path');
+            if (savedPath) {
+                const basePathInput = document.getElementById('bluesky-base-path-input-settings') as HTMLInputElement;
+                if (basePathInput) {
+                    basePathInput.value = savedPath;
+                    logger.debug('BlueSkyFileManager', `Loaded saved base path: ${savedPath}`);
+                }
+            }
+        } catch (error) {
+            logger.warn('BlueSkyFileManager', 'Failed to load base path from localStorage:', error);
+        }
+    }
+
+    /**
+     * Clear the saved BlueSky base path from localStorage
+     */
+    private clearSavedBasePath(): void {
+        try {
+            localStorage.removeItem('bluesky-base-path');
+            logger.debug('BlueSkyFileManager', 'Cleared saved base path from localStorage');
+        } catch (error) {
+            logger.warn('BlueSkyFileManager', 'Failed to clear base path from localStorage:', error);
         }
     }
 }

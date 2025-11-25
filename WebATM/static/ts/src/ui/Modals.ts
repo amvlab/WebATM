@@ -92,7 +92,14 @@ export class Modals {
         closeButtons.forEach(({ buttonId, modalId }) => {
             const button = document.getElementById(buttonId);
             if (button) {
-                button.addEventListener('click', () => this.closeModal(modalId));
+                button.addEventListener('click', () => {
+                    // Special handling for upload scenario modal
+                    if (modalId === 'upload-scenario-modal') {
+                        blueSkyFileManager.closeModal();
+                    } else {
+                        this.closeModal(modalId);
+                    }
+                });
             }
         });
 

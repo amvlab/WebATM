@@ -507,17 +507,31 @@ def register_basic_routes(app, session_manager):
                     files.append({
                         "filename": "settings.cfg",
                         "size": stat_info.st_size,
-                        "modified": stat_info.st_mtime
+                        "modified": stat_info.st_mtime,
+                        "type": "file"
                     })
             else:
                 target_dir = base_path / config["directory"]
                 if target_dir.exists():
+                    # Add folders first
+                    for folder_path in target_dir.iterdir():
+                        if folder_path.is_dir():
+                            stat_info = folder_path.stat()
+                            files.append({
+                                "filename": folder_path.name,
+                                "size": 0,  # Folders don't have a meaningful size
+                                "modified": stat_info.st_mtime,
+                                "type": "folder"
+                            })
+                    
+                    # Add files with the specified extension
                     for file_path in target_dir.glob(f"*{config['extension']}"):
                         stat_info = file_path.stat()
                         files.append({
                             "filename": file_path.name,
                             "size": stat_info.st_size,
-                            "modified": stat_info.st_mtime
+                            "modified": stat_info.st_mtime,
+                            "type": "file"
                         })
             
             return jsonify({

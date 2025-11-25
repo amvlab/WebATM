@@ -541,6 +541,45 @@
 
                 </div>
 
+                <!-- BlueSky File Management Section -->
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h4>🗂️ BlueSky File Management</h4>
+                        <div class="section-description">Configure BlueSky base directory for file uploads and management</div>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label for="bluesky-base-path-input-settings">BlueSky Base Directory:</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="bluesky-base-path-input-settings" placeholder="e.g., /path/to/bluesky or C:\bluesky" style="flex: 1;">
+                            <button id="configure-base-path-btn-settings" class="btn-secondary">Configure</button>
+                        </div>
+                        <small class="setting-help">
+                            Enter the base directory where BlueSky is installed. Files will be uploaded to subdirectories (scenario/, plugins/, settings.cfg).
+                        </small>
+                        
+                        <div style="margin-top: 8px; padding: 8px; border-radius: 4px; background-color: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3);">
+                            <div style="color: #ffc107; font-size: 11px; font-weight: bold;">⚠️ File Upload Requirements:</div>
+                            <ul style="margin: 4px 0 0 16px; padding: 0; font-size: 11px; color: #cccccc;">
+                                <li>WebATM backend must have file system access to this BlueSky directory</li>
+                                <li>If WebATM and BlueSky run on different machines/containers, file uploads won't work</li>
+                                <li>BlueSky simulation works normally without file upload capability</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div id="base-path-status-settings" style="margin-top: 8px; display: none;">
+                        <div style="padding: 8px; border-radius: 4px; background-color: #333;">
+                            <strong>Configured paths:</strong>
+                            <div style="margin-top: 4px; font-family: monospace; font-size: 11px;">
+                                <div>📁 Scenarios: <span id="scenario-path-display-settings">-</span></div>
+                                <div>🧩 Plugins: <span id="plugins-path-display-settings">-</span></div>
+                                <div>⚙️ Settings: <span id="settings-path-display-settings">-</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Map Display Section -->
                 <div class="settings-section">
                     <div class="section-header">
@@ -765,22 +804,20 @@
                 <button class="modal-close" id="upload-scenario-close">&times;</button>
             </div>
             <div class="modal-body">
-                <!-- BlueSky Base Path Configuration -->
+                <!-- Configuration Notice -->
                 <div class="setting-group">
                     <div class="section-header">
-                        <h4>🗂️ BlueSky Base Directory</h4>
-                        <div class="section-description">Configure the path where BlueSky can access uploaded files</div>
+                        <h4>📤 File Upload and Management</h4>
+                        <div class="section-description">Upload and manage scenario files, plugins, and settings</div>
                     </div>
                     
-                    <div class="setting-group">
-                        <label for="bluesky-base-path-input">BlueSky Base Path:</label>
-                        <div style="display: flex; gap: 8px;">
-                            <input type="text" id="bluesky-base-path-input" placeholder="e.g., /path/to/bluesky or C:\bluesky" style="flex: 1;">
-                            <button id="configure-base-path-btn" class="btn-secondary">Configure</button>
+                    <div id="base-path-not-configured" class="setting-group">
+                        <div style="padding: 8px; border-radius: 4px; background-color: #333; border: 1px solid #666;">
+                            <p style="margin: 0; color: #ffa500;">
+                                ⚠️ <strong>BlueSky base directory not configured</strong><br>
+                                Please configure the BlueSky base directory in <strong>Settings</strong> before uploading files.
+                            </p>
                         </div>
-                        <small class="setting-help">
-                            Enter the base directory path where BlueSky is installed. Files will be uploaded to subdirectories (scenario/, plugins/, settings.cfg).
-                        </small>
                     </div>
 
                     <div id="base-path-status" style="margin-top: 8px; display: none;">

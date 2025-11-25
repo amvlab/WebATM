@@ -1487,7 +1487,6 @@ body {
 
 /* Special styling for upload scenario modal with more content */
 #upload-scenario-modal {
-    display: flex !important;
     justify-content: center !important;
     align-items: center !important;
     position: fixed !important;
@@ -1496,6 +1495,10 @@ body {
     width: 100vw !important;
     height: 100vh !important;
     z-index: 1000 !important;
+}
+
+#upload-scenario-modal[style*="display: block"] {
+    display: flex !important;
 }
 
 #upload-scenario-modal .modal-content {
