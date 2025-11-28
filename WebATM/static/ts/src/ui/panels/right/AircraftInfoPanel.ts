@@ -110,12 +110,12 @@ export class AircraftInfoPanel extends BasePanel {
 
         const data = this.currentAircraftData;
 
-        // Get aircraft data (in BlueSky units: alt in ft, speeds in kt, vs in ft/s)
+        // Get aircraft data (in BlueSky units: alt in m, speeds in kt, vs in ft/s)
         const aircraftId = data.id[index];
         const aircraftType = data.actype && data.actype[index] ? data.actype[index] : 'N/A';
         const lat = data.lat[index];
         const lon = data.lon[index];
-        const altFeet = data.alt[index];
+        const altMeters = data.alt[index];
         const casKnots = (data.cas && data.cas[index]) || null;  // May not be available from backend yet
         const tasKnots = data.tas[index];
         const gsKnots = (data.gs && data.gs[index]) || null;  // May not be available from backend yet
@@ -126,7 +126,7 @@ export class AircraftInfoPanel extends BasePanel {
 
         // Create info object for comparison
         const currentInfo = {
-            aircraftId, aircraftType, lat, lon, altFeet, casKnots, tasKnots, gsKnots, trk, vsFtPerSec, inconf, tcpamax,
+            aircraftId, aircraftType, lat, lon, altMeters, casKnots, tasKnots, gsKnots, trk, vsFtPerSec, inconf, tcpamax,
             // Include display options in comparison to trigger update on unit changes
             speedUnit: this.displayOptions.speedUnit,
             altUnit: this.displayOptions.altitudeUnit,
@@ -144,7 +144,7 @@ export class AircraftInfoPanel extends BasePanel {
         // Format values using DataProcessor with current units
         const latStr = lat.toFixed(6);
         const lonStr = lon.toFixed(6);
-        const altStr = DataProcessor.formatAltitude(altFeet, this.displayOptions.altitudeUnit);
+        const altStr = DataProcessor.formatAltitude(altMeters, this.displayOptions.altitudeUnit);
 
         // Handle potentially missing speed data from backend
         const casStr = casKnots !== null
