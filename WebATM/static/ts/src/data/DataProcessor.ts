@@ -4,7 +4,7 @@
  * Provides centralized unit conversion for display across the application.
  * BlueSky server sends data in specific units:
  * - Speed: knots (kt)
- * - Altitude: feet (ft)
+ * - Altitude: meters (m)
  * - Vertical Speed: feet per second (ft/s)
  */
 
@@ -49,28 +49,28 @@ export class DataProcessor {
     }
 
     /**
-     * Convert altitude from feet to target unit
+     * Convert altitude from meters (BlueSky server unit) to target unit
      */
-    static convertAltitude(altFeet: number, targetUnit: AltitudeUnit): number {
+    static convertAltitude(altMeters: number, targetUnit: AltitudeUnit): number {
         switch (targetUnit) {
             case 'm':
-                return altFeet * 0.3048;
+                return altMeters;
             case 'km':
-                return altFeet * 0.0003048;
+                return altMeters / 1000;
             case 'ft':
-                return altFeet;
+                return altMeters / 0.3048;
             case 'fl':
-                return altFeet / 100; // Flight Level
+                return (altMeters / 0.3048) / 100; // Convert to feet, then to Flight Level
             default:
-                return altFeet;
+                return altMeters;
         }
     }
 
     /**
      * Format altitude value with unit label
      */
-    static formatAltitude(altFeet: number, unit: AltitudeUnit): string {
-        const converted = this.convertAltitude(altFeet, unit);
+    static formatAltitude(altMeters: number, unit: AltitudeUnit): string {
+        const converted = this.convertAltitude(altMeters, unit);
 
         switch (unit) {
             case 'm':

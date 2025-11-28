@@ -636,11 +636,8 @@ export class AircraftRouteRenderer {
      * Server sends altitude in METERS
      */
     private formatAltitudeValue(altMeters: number): string {
-        // Convert meters to feet (DataProcessor expects feet)
-        const altFeet = altMeters / 0.3048;
-
-        // Use DataProcessor for consistent formatting
-        return DataProcessor.formatAltitude(altFeet, this.displayOptions.altitudeUnit);
+        // Use DataProcessor for consistent formatting (now expects meters)
+        return DataProcessor.formatAltitude(altMeters, this.displayOptions.altitudeUnit);
     }
 
     /**

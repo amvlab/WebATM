@@ -99,7 +99,7 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         }
 
         if (this.displayOptions.showAircraftAltitude && altitude > 0) {
-            // Altitude values from BlueSky are in feet, format using DataProcessor
+            // Altitude values from BlueSky are in meters, format using DataProcessor
             const converted = DataProcessor.convertAltitude(altitude, this.displayOptions.altitudeUnit);
             let altitudeLabel: string;
 
