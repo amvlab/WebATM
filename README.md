@@ -41,7 +41,7 @@ A modern web client for the [BlueSky Air Traffic Management (ATM) simulator](htt
 ### For Local Development
 - Python 3.13 or higher
 - Node.js 22+ and npm (for TypeScript development)
-- [BlueSky ATM simulator](https://github.com/amvlab/bluesky) (amvlab fork recommended) or [TUDelft-CNS-ATM/bluesky](https://github.com/TUDelft-CNS-ATM/bluesky) version 1.1.0
+- [BlueSky ATM simulator](https://github.com/amvlab/bluesky) (amvlab fork recommended) or [TUDelft-CNS-ATM/bluesky](https://github.com/TUDelft-CNS-ATM/bluesky) version 1.1.1
 
 ## Compatibility
 
@@ -49,7 +49,46 @@ WebATM works best with the [amvlab fork of BlueSky](https://github.com/amvlab/bl
 
 ## Quick Start
 
-### Option 1: Local Deployment
+### Option 1: Prebuilt Release (no Node.js required)
+
+Use this if you just want to run WebATM without installing Node.js or building the frontend yourself. You still clone the repo for the Python source, then drop in a single tarball that contains all the runtime assets that aren't checked into git.
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/amvlab/WebATM
+   cd WebATM
+   ```
+
+2. **Download and extract the prebuilt assets**
+
+   Grab the latest `webatm-prebuilt-<version>.tar.gz` from the [Releases page](https://github.com/amvlab/WebATM/releases) and extract it from the repo root:
+   ```bash
+   tar -xzf ~/Downloads/webatm-prebuilt-<version>.tar.gz
+   ```
+   The tarball uses repo-relative paths, so extracting from the WebATM root lands the files in the right places:
+   - `WebATM/static/dist/` — prebuilt webpack bundles
+   - `WebATM/static/vendor/` — third-party CSS/fonts (FontAwesome, MapLibre)
+   - `WebATM/static/tiles/world.pmtiles` — offline basemap (optional but bundled)
+
+3. **Install Python dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Start the application**
+   ```bash
+   script/run_webatm.sh
+   ```
+
+5. **Access the web interface**
+
+   Open your browser to: http://localhost:8082
+
+6. **(Optional) Enable the offline basemap**
+
+   The tarball already includes `WebATM/static/tiles/world.pmtiles`. To use it, open **Settings → Map Display Configuration → Offline (Local PMTiles)** in the web UI.
+
+### Option 2: Local Deployment (build from source)
 
 1. **Clone the repository**
    ```bash
@@ -76,7 +115,7 @@ WebATM works best with the [amvlab fork of BlueSky](https://github.com/amvlab/bl
 
    Open your browser to: http://localhost:8082
 
-### Option 2: Docker Deployment
+### Option 3: Docker Deployment
 
 1. **Build the Docker image**
    ```bash
@@ -112,6 +151,12 @@ WebATM works best with the [amvlab fork of BlueSky](https://github.com/amvlab/bl
 WebATM connects to BlueSky servers using the standard BlueSky network ports (11000 and 11001).
 
 **Important**: These ports are currently not configurable. Ensure your BlueSky server runs with default port configuration.
+
+### Offline Basemap
+
+WebATM can render the map from a local PMTiles archive instead of an online tile provider — useful for air-gapped deployments or unreliable networks. The prebuilt release tarball (Option 1) already includes `world.pmtiles`; if you built from source, advanced users can generate their own archive with the `pmtiles` CLI — see the instructions in [.gitignore](.gitignore).
+
+Once `WebATM/static/tiles/world.pmtiles` exists, enable it via **Settings → Map Display Configuration → Offline (Local PMTiles)**.
 
 
 ### Code Quality
