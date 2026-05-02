@@ -12,7 +12,7 @@ A modern web client for the [BlueSky Air Traffic Management (ATM) simulator](htt
 - **Customizable Aircraft Display**: Toggle visibility of labels, icons, trails, routes, and shapes
 - **Aircraft Type in Labels & Info Panel**: View aircraft type directly on map labels and in the aircraft information panel
 - **Flexible Aircraft Styling**: Choose from chevron, drone, triangle, or aircraft icon styles and customise colors
-- **3D Aircraft Visualization**: Render aircraft as 3D models (A320, A350, A380, drones, and more) on the globe view
+- **3D Aircraft Visualization**: Render aircraft as 3D models (A320, A350, A380, drones, and more).
 - **Smart Command Input**: Tab completion for BlueSky commands with autosuggestion
 - **Command Palette**: Quickly browse and search available BlueSky stack commands from the console
 - **Console Map Picker**: Select coordinates directly from the map when entering commands
