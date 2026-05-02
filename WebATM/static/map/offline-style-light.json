@@ -1,0 +1,111 @@
+{
+    "version": 8,
+    "name": "WebATM Offline Light",
+    "metadata": {
+        "description": "Minimal Protomaps-schema light basemap for WebATM offline mode. Rendered directly from a local .pmtiles archive served by Flask; no glyphs or sprites so the style is fully self-contained."
+    },
+    "sources": {
+        "protomaps": {
+            "type": "vector",
+            "url": "pmtiles:///static/tiles/world.pmtiles",
+            "attribution": "<a href=\"https://protomaps.com\">Protomaps</a> © <a href=\"https://openstreetmap.org\">OpenStreetMap</a>"
+        }
+    },
+    "layers": [
+        {
+            "id": "background",
+            "type": "background",
+            "paint": { "background-color": "#f5f2ea" }
+        },
+        {
+            "id": "earth",
+            "type": "fill",
+            "source": "protomaps",
+            "source-layer": "earth",
+            "paint": { "fill-color": "#ece7dc" }
+        },
+        {
+            "id": "landuse",
+            "type": "fill",
+            "source": "protomaps",
+            "source-layer": "landuse",
+            "filter": ["in", ["get", "kind"], ["literal", ["urban_area", "residential", "industrial"]]],
+            "paint": { "fill-color": "#e4ddd0", "fill-opacity": 0.8 }
+        },
+        {
+            "id": "natural",
+            "type": "fill",
+            "source": "protomaps",
+            "source-layer": "natural",
+            "filter": ["in", ["get", "kind"], ["literal", ["forest", "wood", "park", "grass", "nature_reserve"]]],
+            "paint": { "fill-color": "#d8e4c8" }
+        },
+        {
+            "id": "water",
+            "type": "fill",
+            "source": "protomaps",
+            "source-layer": "water",
+            "paint": { "fill-color": "#b8d4e6" }
+        },
+        {
+            "id": "physical_line-river",
+            "type": "line",
+            "source": "protomaps",
+            "source-layer": "physical_line",
+            "filter": ["==", ["get", "kind"], "river"],
+            "paint": { "line-color": "#b8d4e6", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.3, 14, 2] }
+        },
+        {
+            "id": "roads-minor",
+            "type": "line",
+            "source": "protomaps",
+            "source-layer": "roads",
+            "minzoom": 10,
+            "filter": ["in", ["get", "kind"], ["literal", ["minor_road", "other"]]],
+            "paint": { "line-color": "#ffffff", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.3, 16, 1.5] }
+        },
+        {
+            "id": "roads-major",
+            "type": "line",
+            "source": "protomaps",
+            "source-layer": "roads",
+            "minzoom": 10,
+            "filter": ["in", ["get", "kind"], ["literal", ["medium_road", "major_road"]]],
+            "paint": { "line-color": "#ffffff", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.6, 16, 2.5] }
+        },
+        {
+            "id": "roads-highway",
+            "type": "line",
+            "source": "protomaps",
+            "source-layer": "roads",
+            "minzoom": 10,
+            "filter": ["==", ["get", "kind"], "highway"],
+            "paint": { "line-color": "#f5c87a", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.8, 16, 3.5] }
+        },
+        {
+            "id": "boundaries-country",
+            "type": "line",
+            "source": "protomaps",
+            "source-layer": "boundaries",
+            "filter": ["<=", ["get", "kind_detail"], 2],
+            "paint": {
+                "line-color": "#7a8290",
+                "line-width": ["interpolate", ["linear"], ["zoom"], 0, 0.3, 6, 1],
+                "line-dasharray": [3, 2]
+            }
+        },
+        {
+            "id": "boundaries-region",
+            "type": "line",
+            "source": "protomaps",
+            "source-layer": "boundaries",
+            "minzoom": 4,
+            "filter": ["==", ["get", "kind_detail"], 4],
+            "paint": {
+                "line-color": "#a8b0bc",
+                "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.2, 10, 0.7],
+                "line-dasharray": [2, 2]
+            }
+        }
+    ]
+}

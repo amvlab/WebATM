@@ -1,7 +1,7 @@
 """BlueSky proxy gateway for web interface communication."""
 
 import time
-from typing import Any, Dict
+from typing import Any
 
 from ..bluesky_client import safe_decode
 from ..logger import get_logger
@@ -77,10 +77,13 @@ class BlueSkyProxy:
         # Store server IP address (default to localhost, will be set by main.py if configured)
         self.server_ip = "localhost"
 
-        # Stack command processing (BlueSky client pattern)
+        # Stack command processing (BlueSky client pattern). Values use the
+        # comma-separated arg-signature format that BlueSky's STACKCMDS
+        # broadcast ships (e.g. "acid,type,lat,lon,hdg,alt,spd"); these
+        # seeds get overwritten the moment STACKCMDS arrives.
         self.cmddict = {
-            "HELP": "HELP [command]: Display help information",
-            "?": "?: Display help information (alias for HELP)",
+            "HELP": "[command]",
+            "?": "[command]",
         }  # Local command dictionary (like Command.cmddict)
         self.echo_signal = None  # Signal for echo responses
 
@@ -244,6 +247,6 @@ class BlueSkyProxy:
         """Clear all client state data."""
         return self.data_mgr._clear_state(context)
 
-    def get_current_data(self) -> Dict[str, Any]:
+    def get_current_data(self) -> dict[str, Any]:
         """Get current simulation data for initial page load."""
         return self.data_mgr.get_current_data()

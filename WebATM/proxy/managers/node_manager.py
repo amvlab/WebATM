@@ -160,10 +160,6 @@ class NodeManager:
                     conn_mgr._emit_connection_status(True)
 
                 # The standalone proxy auto-selects the first node, so we don't need to do it manually here
-                # Just ensure the active node info is properly updated
-                if self.proxy.bluesky_client.act_id:
-                    current_active = safe_decode(self.proxy.bluesky_client.act_id)
-
                 # Emit updated node list to connected clients
                 if self.proxy.running:
                     self._emit_node_info()

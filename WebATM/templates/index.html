@@ -10,11 +10,11 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
     <link rel="shortcut icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
 
-    <!-- Font awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" />
+    <!-- Font awesome (vendored for offline support) -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
 
-    <!-- MapLibre GL CSS -->
-    <link href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet" />
+    <!-- MapLibre GL CSS (vendored for offline support) -->
+    <link href="{{ url_for('static', filename='vendor/maplibre-gl/maplibre-gl.css') }}" rel="stylesheet" />
 
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -106,6 +106,10 @@
                         <div class="drawing-controls">
                             <button id="create-aircraft-btn" class="nav-btn">Create Aircraft</button>
                             <button id="draw-shape-btn" class="nav-btn">Draw Shape</button>
+                            <span class="draw-route-btn-wrapper">
+                                <button id="draw-route-btn" class="nav-btn disabled" disabled>Draw Route</button>
+                                <span class="draw-route-disabled-tooltip" role="tooltip">Please select an aircraft before adding a route</span>
+                            </span>
                         </div>
                         <div class="nav-controls" style="margin-top: 20px;">
                             <button class="nav-btn" onclick="zoomIn()">Zoom In</button>
@@ -209,6 +213,8 @@
                                 <input type="checkbox" id="show-shape-labels" checked>
                                 Shape Labels
                             </label>
+
+                            <!-- Aircraft Display Options -->
                             <div class="aircraft-appearance-controls">
                                 <div class="unit-controls" style="margin-bottom: 8px;">
                                     <label for="aircraft-shape-select">Aircraft Shape:</label>
@@ -239,6 +245,35 @@
                                     <label for="map-labels-text-size">Map Labels Size:</label>
                                     <input type="range" id="map-labels-text-size" min="8" max="20" value="12" step="1">
                                     <span id="labels-size-value">12</span>px
+                                </div>
+                            </div>
+                            <!-- 3D Display Options Section (Pro Only) -->
+                            <div class="threeD-toggle-control">
+                                <button id="threeD-toggle" class="nav-btn">3D ▼</button>
+                            </div>
+                            <div class="threeD-controls" id="threeD-controls" style="display: none;">
+                                <div class="threeD-display-controls">
+                                    <div id="show-3d-overlay-container" class="checkbox-control" style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                                        <input type="checkbox" id="show-3d-overlay">
+                                        <label for="show-3d-overlay">Show 3D aircraft</label>
+                                    </div>
+                                    <div id="aircraft-3d-scale-container" class="color-controls" style="display: none;">
+                                        <label for="aircraft-3d-scale">3D Aircraft Scale:</label>
+                                        <div>
+                                            <input type="text" id="aircraft-3d-scale" value="2.0" style="width: 60px;" 
+                                                   placeholder="2.0" pattern="[0-9]*\.?[0-9]*" title="Enter positive number (e.g., 2.0)">
+                                            <span>x</span>
+                                        </div>
+                                    </div>
+                                    <div id="altitude-exaggeration-container" class="font-size-controls" style="display: none;">
+                                        <label for="altitude-exaggeration">Altitude Exaggeration:</label>
+                                        <input type="range" id="altitude-exaggeration" min="1" max="5" step="0.1" value="2.0">
+                                        <span id="altitude-exaggeration-value">2.0</span>x
+                                    </div>
+                                    <div id="aircraft-model-container" class="unit-controls" style="display: none;">
+                                        <label for="aircraft-model-select">Aircraft Model:</label>
+                                        <select id="aircraft-model-select"></select>
+                                    </div>
                                 </div>
                             </div>
                             <div class="sizes-toggle-control">
@@ -386,6 +421,7 @@
                         </div>
                     </div>
                 </div>
+
             </div>
 
             <!-- Horizontal resize handle between left panel and map -->
@@ -477,13 +513,14 @@
             <div class="console-section">
                 <div class="console-header">
                     <h3>Command Console</h3>
+                    <button id="open-command-palette" class="console-btn" title="Browse commands (Ctrl+K)">Commands</button>
                     <button id="clear-console" class="console-btn">Clear</button>
                 </div>
                 <div class="console-output" id="console-output">
                 </div>
                 <div class="console-input-container">
                     <span class="console-prompt">BS></span>
-                    <input type="text" id="console-input" placeholder="Enter command..." autocomplete="off">
+                    <input type="text" id="console-input" placeholder="Enter command… (Ctrl+K to browse)" autocomplete="off">
                     <button id="send-command" class="console-btn">Send</button>
                 </div>
             </div>
@@ -498,6 +535,19 @@
                 </div>
                 <div class="echo-output" id="echo-output">
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Command Palette Modal (Ctrl+K / Ctrl+Shift+P) -->
+    <div id="command-palette-modal" class="modal" style="display: none;">
+        <div class="modal-content command-palette-content">
+            <div class="modal-header">
+                <h3>Command Palette</h3>
+                <button class="modal-close" id="command-palette-modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="command-palette-list-container"></div>
             </div>
         </div>
     </div>
@@ -599,6 +649,8 @@
                             <option value="">Select a map style...</option>
                             <option value="https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json"
                                 selected>Dark Matter (No Labels)</option>
+                            <option value="/static/map/offline-style.json">Offline Dark (Local PMTiles)</option>
+                            <option value="/static/map/offline-style-light.json">Offline Light (Local PMTiles)</option>
                             <option value="https://demotiles.maplibre.org/style.json">MapLibre Demo</option>
                             <option value="https://api.maptiler.com/maps/streets/style.json?key=">MapTiler Streets</option>
                             <option value="https://api.maptiler.com/maps/satellite/style.json?key=">MapTiler Satellite</option>
@@ -707,7 +759,11 @@
                 </div>
                 <div class="setting-group">
                     <label for="aircraft-type-input">Aircraft Type:</label>
-                    <input type="text" id="aircraft-type-input" placeholder="e.g. A320" maxlength="10" required>
+                    <div class="actype-input-wrapper">
+                        <input type="text" id="aircraft-type-input" placeholder="e.g. A320" maxlength="10" autocomplete="off" required>
+                        <div id="aircraft-type-dropdown" class="modal-actype-dropdown" style="display: none;"></div>
+                    </div>
+                    <small id="aircraft-type-warning" class="modal-actype-warning" style="display: none;">openap library does not include this type</small>
                     <small class="setting-help">Aircraft type (e.g. A320, B737, etc.)</small>
                 </div>
                 <div id="manual-position-fields">
@@ -766,7 +822,64 @@
         </div>
     </div>
 
-
+    <!-- Route Constraints Modal (opened after drawing waypoints on the map) -->
+    <div id="route-constraints-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 720px;">
+            <div class="modal-header">
+                <h3>Route Constraints (optional)</h3>
+                <button class="modal-close" id="route-constraints-modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <div class="setting-help">
+                        Route for aircraft <strong id="route-constraints-target"></strong>.
+                        Leave altitude and speed blank for unconstrained waypoints. Values are in
+                        your current display units and will be converted to feet/knots before
+                        being sent to BlueSky.
+                    </div>
+                </div>
+                <div class="setting-group" id="route-constraints-bulk-section">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="route-constraints-bulk-toggle" checked>
+                        Set the same altitude &amp; speed for all waypoints
+                    </label>
+                    <div id="route-constraints-bulk-inputs" style="overflow-x: auto; margin-top: 8px;">
+                        <table class="route-constraints-bulk-table" style="border-collapse: collapse;">
+                            <thead>
+                                <tr>
+                                    <th style="text-align: left; padding: 4px 6px;" id="route-constraints-bulk-alt-label">Altitude (ft)</th>
+                                    <th style="text-align: left; padding: 4px 6px;" id="route-constraints-bulk-spd-label">Speed (kt)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td style="padding: 4px 6px;"><input type="number" id="route-constraints-bulk-alt" placeholder="optional" style="width: 160px;"></td>
+                                    <td style="padding: 4px 6px;"><input type="number" id="route-constraints-bulk-spd" placeholder="optional" style="width: 160px;"></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="setting-group" style="overflow-x: auto;">
+                    <table id="route-constraints-table" style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr>
+                                <th style="text-align: left; padding: 4px 6px;">WP</th>
+                                <th style="text-align: left; padding: 4px 6px;">Position (lat, lon)</th>
+                                <th style="text-align: left; padding: 4px 6px;" id="route-constraints-alt-header">Altitude (ft)</th>
+                                <th style="text-align: left; padding: 4px 6px;" id="route-constraints-spd-header">Speed (kt)</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="submit-route-constraints-btn" class="btn-primary">Submit Route</button>
+                <button id="cancel-route-constraints-btn" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Demo Version Dialog -->
     <div id="demo-version-modal" class="modal" style="display: none;">
@@ -1148,9 +1261,9 @@ stack_background_color = 102, 102, 102</pre>
     </div>
 
     <!-- Scripts -->
-    <script src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    
+    <!-- maplibre-gl and socket.io-client are bundled by webpack via npm imports;
+         no CDN script tags needed (keeps the app functional without internet). -->
+
     <!-- Webpack Bundles (dynamically injected with content hashes) -->
     {% for script_tag in webpack_scripts %}
         {{ script_tag|safe }}

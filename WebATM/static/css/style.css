@@ -389,6 +389,20 @@ body {
     background-color: #505050;
 }
 
+.nav-btn:disabled,
+.nav-btn.disabled {
+    background-color: #2a2a2a;
+    color: #777777;
+    border-color: #404040;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.nav-btn:disabled:hover,
+.nav-btn.disabled:hover {
+    background-color: #2a2a2a;
+}
+
 /* Drawing Controls */
 .drawing-controls {
     margin-top: 8px;
@@ -571,6 +585,15 @@ body {
     max-height: 300px;
     overflow-y: auto;
 }
+.threeD-controls {
+    margin-top: 4px;
+    padding: 8px;
+    background-color: #404040;
+    border-radius: 4px;
+    border: 1px solid #606060;
+    max-height: 300px;
+    overflow-y: auto;
+}
 
 .font-size-controls {
     margin-bottom: 12px;
@@ -652,6 +675,17 @@ body {
 .units-toggle-control {
     margin-top: 8px;
     padding: 4px 0;
+}
+/* 3D toggle control matching other toggle controls */
+.threeD-toggle-control {
+    margin-top: 8px;
+    padding: 4px 0;
+}
+.threeD-toggle-control button {
+    width: 100%;
+    text-align: left;
+    padding: 6px 8px;
+    font-size: var(--panel-font-size);
 }
 
 .units-toggle-control button {
@@ -787,6 +821,20 @@ body {
     font-size: var(--panel-font-size);
     cursor: pointer;
     min-width: 80px;
+}
+
+/* Aircraft model dropdown - ensure proper right alignment */
+#aircraft-model-container {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+}
+
+/* Aircraft 3D scale input - ensure proper right alignment */
+#aircraft-3d-scale-container {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
 }
 
 /* Aircraft appearance controls group */
@@ -969,6 +1017,27 @@ body {
     padding: 1px 3px;
     border-radius: 2px;
     transition: background-color 0.2s ease;
+}
+
+/* Per-aircraft 3D model / scale override controls — kept at a
+   shared width and matching box styling so both rows line up and
+   render identically. */
+.aircraft-model-override,
+.aircraft-scale-override {
+    width: 160px;
+    height: 22px;
+    box-sizing: border-box;
+    padding: 2px 4px;
+    font-size: var(--panel-font-size);
+    font-family: inherit;
+    color: #cccccc;
+    background-color: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 2px;
+}
+
+.aircraft-scale-override::placeholder {
+    color: #888;
 }
 
 .copyable-value:hover {
@@ -1264,6 +1333,155 @@ body {
     pointer-events: none;
     white-space: pre;
     z-index: 1;
+}
+
+/* ACID Autocomplete Dropdown */
+.acid-autocomplete-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 40px;
+    right: 60px;
+    max-height: 220px;
+    overflow-y: auto;
+    background-color: #1e1e1e;
+    border: 1px solid #4CAF50;
+    border-radius: 4px 4px 0 0;
+    z-index: 100;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+    scrollbar-width: thin;
+    scrollbar-color: #4CAF50 #1e1e1e;
+}
+
+.acid-dropdown-item {
+    padding: 4px 10px;
+    color: #00ff00;
+    font-family: 'Courier New', monospace;
+    font-size: var(--console-input-font-size);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.acid-dropdown-item:hover,
+.acid-dropdown-item.selected {
+    background-color: #2a5a2a;
+    color: #ffffff;
+}
+
+/* Aircraft Type Autocomplete Dropdown */
+.actype-autocomplete-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 40px;
+    right: 60px;
+    max-height: 220px;
+    overflow-y: auto;
+    background-color: #1e1e1e;
+    border: 1px solid #4CAF50;
+    border-radius: 4px 4px 0 0;
+    z-index: 100;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+    scrollbar-width: thin;
+    scrollbar-color: #4CAF50 #1e1e1e;
+}
+
+.actype-dropdown-item {
+    padding: 4px 10px;
+    color: #00ff00;
+    font-family: 'Courier New', monospace;
+    font-size: var(--console-input-font-size);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.actype-dropdown-item:hover,
+.actype-dropdown-item.selected {
+    background-color: #2a5a2a;
+    color: #ffffff;
+}
+
+/* Aircraft Type dropdown inside the Create Aircraft modal */
+.actype-input-wrapper {
+    position: relative;
+}
+
+.modal-actype-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 180px;
+    overflow-y: auto;
+    background-color: #2b2b2b;
+    border: 1px solid #4CAF50;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    z-index: 10000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    scrollbar-width: thin;
+    scrollbar-color: #4CAF50 #2b2b2b;
+}
+
+.modal-actype-dropdown-item {
+    padding: 6px 10px;
+    color: #ffffff;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.modal-actype-dropdown-item:hover,
+.modal-actype-dropdown-item.selected {
+    background-color: #2a5a2a;
+    color: #ffffff;
+}
+
+.modal-actype-warning,
+.modal-field-warning {
+    display: block;
+    color: #ffa726;
+    font-size: 0.85em;
+    margin-top: 4px;
+}
+
+/* Map-pick hint shown while the console input cursor is on a lat/lon/hdg arg */
+.console-map-pick-hint {
+    position: absolute;
+    bottom: 100%;
+    right: 60px;
+    background-color: #1e1e1e;
+    color: #4CAF50;
+    border: 1px solid #4CAF50;
+    border-radius: 4px 4px 0 0;
+    padding: 4px 10px;
+    font-family: 'Courier New', monospace;
+    font-size: var(--console-input-font-size);
+    z-index: 100;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+/* CRE duplicate aircraft warning / openap aircraft type warning */
+.acid-warning,
+.actype-warning {
+    position: absolute;
+    bottom: 100%;
+    left: 40px;
+    background-color: #5a3a00;
+    color: #ffa726;
+    border: 1px solid #ff9800;
+    border-radius: 4px 4px 0 0;
+    padding: 4px 10px;
+    font-family: 'Courier New', monospace;
+    font-size: var(--console-input-font-size);
+    z-index: 100;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
 }
 
 /* Scrollbars */
@@ -2324,6 +2542,74 @@ body {
     border-color: #444444 !important;
 }
 
+/* Draw Route button disabled-state tooltip
+ *
+ * The wrapper is display:block so the button sizes the same as its
+ * sibling .nav-btn buttons inside the flex-column .drawing-controls
+ * container. The tooltip uses position:fixed so it isn't clipped by
+ * panel overflow; RouteDrawingManager positions it at hover time. */
+.draw-route-btn-wrapper {
+    display: block;
+}
+
+.draw-route-btn-wrapper > #draw-route-btn {
+    width: 100%;
+}
+
+.draw-route-disabled-tooltip {
+    display: none;
+    position: fixed;
+    background-color: #1e1e1e;
+    color: #ffffff;
+    border: 1px solid #606060;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: var(--panel-font-size);
+    white-space: nowrap;
+    z-index: 10000;
+    pointer-events: none;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* Route Constraints modal - waypoint table */
+#route-constraints-modal .modal-body,
+#route-constraints-table,
+#route-constraints-table input,
+.route-constraints-bulk-table,
+.route-constraints-bulk-table input {
+    font-size: var(--panel-font-size);
+}
+
+#route-constraints-table thead th,
+.route-constraints-bulk-table thead th {
+    padding: 6px 8px;
+    font-size: var(--panel-font-size);
+}
+
+#route-constraints-table tbody td {
+    padding: 10px 8px;
+    vertical-align: middle;
+}
+
+#route-constraints-table tbody tr + tr td {
+    border-top: 1px solid #3a3a3a;
+}
+
+#route-constraints-table input[type="number"],
+.route-constraints-bulk-table input[type="number"] {
+    padding: 6px 8px;
+    background-color: #404040;
+    color: #ffffff;
+    border: 1px solid #606060;
+    border-radius: 4px;
+}
+
+#route-constraints-table input[type="number"]:focus,
+.route-constraints-bulk-table input[type="number"]:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
 /* Disabled state for server control buttons */
 .disabled,
 button.disabled {
@@ -2340,4 +2626,188 @@ button.disabled:hover {
     background-color: #2a2a2a !important;
     color: #666666 !important;
     border-color: #444444 !important;
+}
+
+/* Allow hover (and the native title tooltip) on disabled header controls;
+   the `disabled` attribute still blocks clicks on <button>/<select>. */
+.control-btn.disabled,
+.speed-control.disabled {
+    pointer-events: auto !important;
+}
+/* ── Inline argument-signature hint shown above the console input ── */
+.console-arg-hint {
+    display: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    background-color: #1e1e1e;
+    border-bottom: 1px solid #2a2a2a;
+    font-family: 'Courier New', monospace;
+    font-size: var(--console-input-font-size);
+    color: #909090;
+}
+
+.console-arg-hint .cmd-arg-cmd {
+    color: #4CAF50;
+    font-weight: 600;
+}
+
+.console-arg-hint .cmd-arg-chip {
+    color: #909090;
+    padding: 0 2px;
+}
+
+.console-arg-hint .cmd-arg-chip.optional {
+    color: #6f6f6f;
+    font-style: italic;
+}
+
+.console-arg-hint .cmd-arg-chip.current {
+    color: #66BB6A;
+    font-weight: 700;
+    text-decoration: underline;
+}
+
+.console-arg-hint .cmd-arg-empty {
+    color: #6f6f6f;
+    font-style: italic;
+}
+
+.console-arg-hint .cmd-arg-cmd.cmd-arg-unknown {
+    color: #ffa726;
+}
+
+.console-arg-hint .cmd-arg-kbd {
+    display: inline-block;
+    padding: 0 5px;
+    background: #2a2a2a;
+    border: 1px solid #4a4a4a;
+    border-radius: 3px;
+    color: #ddd;
+    font-family: 'Courier New', monospace;
+    font-size: calc(var(--console-input-font-size) - 1px);
+    font-style: normal;
+}
+
+/* ── Shared Command List View (panel + palette modal) ── */
+.command-list-view {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+}
+
+.command-list-view .cmd-search-row {
+    padding: 4px 8px;
+}
+
+.command-list-view .cmd-search-input {
+    width: 100%;
+    box-sizing: border-box;
+    background-color: #000000;
+    color: #00ff00;
+    border: 1px solid #404040;
+    padding: 6px 8px;
+    font-family: 'Courier New', monospace;
+    font-size: var(--panel-font-size);
+}
+
+.command-list-view .cmd-search-input:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+.command-list-view .cmd-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.command-list-view .cmd-section-header {
+    color: #4CAF50;
+    font-size: var(--panel-font-size);
+    font-weight: 700;
+    padding: 6px 12px 2px 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.command-list-view .cmd-row {
+    display: grid;
+    grid-template-columns: 22px max-content 1fr;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+}
+
+.command-list-view .cmd-row:hover {
+    background-color: #2a5a2a;
+    border-left-color: #4CAF50;
+}
+
+.command-list-view .cmd-fav {
+    background: none;
+    border: none;
+    color: #707070;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.command-list-view .cmd-fav.active {
+    color: #FFC107;
+}
+
+.command-list-view .cmd-fav:hover {
+    color: #FFC107;
+}
+
+.command-list-view .cmd-name {
+    color: #ffffff;
+    font-family: 'Courier New', monospace;
+    font-size: var(--panel-font-size);
+    font-weight: 700;
+}
+
+.command-list-view .cmd-sig {
+    color: #909090;
+    font-family: 'Courier New', monospace;
+    font-size: var(--panel-font-size);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.command-list-view .cmd-empty {
+    color: #707070;
+    font-style: italic;
+    padding: 8px 12px;
+    font-size: var(--panel-font-size);
+}
+
+/* Command palette modal: wider and taller than the standard form modals,
+   since it's a scrollable list. */
+#command-palette-modal .modal-content.command-palette-content {
+    max-width: 640px;
+    width: 90%;
+    max-height: 70vh;
+}
+
+#command-palette-modal .modal-body {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+#command-palette-modal #command-palette-list-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+    height: 60vh;
 }

@@ -6,7 +6,11 @@ from .events import on_request_received, on_reset_received
 from .navigation import on_defwpt_received
 from .routes import on_routedata_received
 from .shapes import on_poly_received
-from .simulation import on_acdata_received, on_siminfo_received
+from .simulation import (
+    on_acdata_received,
+    on_siminfo_received,
+    on_statechange_received,
+)
 from .visualization import (
     on_plot_received,
     on_showdialog_received,
@@ -17,6 +21,7 @@ from .visualization import (
 __all__ = [
     "on_siminfo_received",
     "on_acdata_received",
+    "on_statechange_received",
     "on_routedata_received",
     "echo",
     "on_poly_received",

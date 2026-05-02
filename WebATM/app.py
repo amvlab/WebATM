@@ -102,7 +102,7 @@ def create_app():
         """Handle uncaught exceptions."""
         try:
             return jsonify({"error": "Internal server error"}), 500
-        except:
+        except Exception:
             return "Internal server error", 500
 
     # === Register Routes and Handlers ===

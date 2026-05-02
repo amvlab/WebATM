@@ -34,7 +34,7 @@ def is_port_listening(port: int, timeout: float = 1.0, hostname: str = None) -> 
         result = sock.connect_ex((hostname, port))
         sock.close()
         return result == 0
-    except:
+    except Exception:
         return False
 
 

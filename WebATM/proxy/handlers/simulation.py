@@ -177,3 +177,39 @@ def on_acdata_received(data):
         import traceback
 
         traceback.print_exc()
+
+
+def on_statechange_received(data, sender_id=None):
+    """Handle simulation state transitions from BlueSky (STATECHANGE topic)."""
+    proxy = get_bluesky_proxy()
+    if not proxy or not proxy.allow_reconnection:
+        return
+
+    simstate = data.get("simstate") if isinstance(data, dict) else None
+    if simstate is None:
+        return
+
+    if isinstance(sender_id, bytes):
+        sender_id_str = sender_id.hex()
+    elif sender_id is not None:
+        sender_id_str = str(sender_id)
+    else:
+        sender_id_str = None
+
+    proxy.last_successful_update = time.time()
+
+    if isinstance(proxy.sim_data, dict):
+        proxy.sim_data["state"] = int(simstate)
+
+    payload = {
+        "simstate": int(simstate),
+        "sender_id": sender_id_str,
+    }
+
+    if proxy.socketio and proxy.connected_clients > 0:
+        try:
+            proxy.socketio.emit("statechange", payload)
+        except Exception as e:
+            logger.error(f"Proxy->Web: Error sending STATECHANGE: {e}")
+
+    logger.info(f"STATECHANGE from {sender_id_str}: simstate={simstate}")

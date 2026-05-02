@@ -17,7 +17,7 @@ Key adaptations from BlueSky's networking components:
 """
 
 from collections import defaultdict, deque
-from typing import Callable, Dict
+from collections.abc import Callable
 
 import msgpack
 import zmq
@@ -141,7 +141,7 @@ class BlueSkySubscriber:
     """Simple subscriber system - adapted from BlueSky's subscriber patterns."""
 
     def __init__(self):
-        self.subscribers: Dict[str, list] = defaultdict(list)
+        self.subscribers: dict[str, list] = defaultdict(list)
 
     def subscribe(self, topic: str, callback: Callable):
         """Subscribe to a topic."""
@@ -468,6 +468,16 @@ class BlueSkyClient:
                     else:
                         # Simple string or other data - add defaults and sender_id from header
                         self.subscriber.emit(topic, str(data), 0, sender_id)
+                elif topic == "STATECHANGE":
+                    # STATECHANGE follows BlueSky's shared-state format:
+                    # [action_type, {"simstate": <int>, ...}]
+                    if isinstance(data, (list, tuple)) and len(data) == 2:
+                        action_type, actual_data = data
+                        self.context.action = action_type
+                        self.context.sender_id = sender_id
+                        self.subscriber.emit(topic, actual_data, sender_id=sender_id)
+                    else:
+                        self.subscriber.emit(topic, data, sender_id=sender_id)
                 elif topic == "POLY":
                     # POLY expects BlueSky shared state format: [action_type, data_dict]
                     if isinstance(data, (list, tuple)) and len(data) == 2:

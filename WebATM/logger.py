@@ -10,7 +10,6 @@ Provides standardized logging similar to TypeScript logging with:
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 
 class FileNameFormatter(logging.Formatter):
@@ -41,7 +40,7 @@ _date_format = "%Y-%m-%d %H:%M:%S"
 
 def configure_logging(
     level: int = logging.INFO,
-    log_file: Optional[str] = None,
+    log_file: str | None = None,
     include_console: bool = True,
 ):
     """
@@ -82,7 +81,7 @@ def configure_logging(
         root_logger.addHandler(file_handler)
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
+def get_logger(name: str | None = None) -> logging.Logger:
     """
     Get or create a logger for a module.
 

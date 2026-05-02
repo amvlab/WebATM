@@ -7,7 +7,7 @@ and session cleanup.
 
 import os
 import time
-from typing import Any, Dict
+from typing import Any
 
 from ..logger import get_logger
 
@@ -24,7 +24,7 @@ class SessionManager:
         )  # 30 seconds default
 
         # Active sessions tracking: session_id -> {'start_time': time, 'last_heartbeat': time}
-        self.active_sessions: Dict[str, Dict[str, float]] = {}
+        self.active_sessions: dict[str, dict[str, float]] = {}
 
     def add_session(self, session_id: str) -> bool:
         """
@@ -85,7 +85,7 @@ class SessionManager:
         """
         return len(self.active_sessions)
 
-    def get_session_info(self) -> Dict[str, Any]:
+    def get_session_info(self) -> dict[str, Any]:
         """
         Get session information for status reporting.
 
@@ -98,7 +98,7 @@ class SessionManager:
             "active_sessions": current_sessions,
         }
 
-    def get_config_info(self) -> Dict[str, int]:
+    def get_config_info(self) -> dict[str, int]:
         """
         Get session manager configuration.
 

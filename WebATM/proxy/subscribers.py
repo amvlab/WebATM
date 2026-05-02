@@ -15,6 +15,7 @@ from .handlers import (
     on_simsettings_received,
     on_stack_received,
     on_stackcmds_received,
+    on_statechange_received,
     on_trails_received,
 )
 
@@ -48,6 +49,12 @@ def register_subscribers():
         proxy.bluesky_client.subscribe("SIMINFO", on_siminfo_received)
         logger.debug(
             f"SIMINFO subscribers: {len(proxy.bluesky_client.subscriber.subscribers['SIMINFO'])}"
+        )
+
+        logger.debug("Registering STATECHANGE subscriber...")
+        proxy.bluesky_client.subscribe("STATECHANGE", on_statechange_received)
+        logger.debug(
+            f"STATECHANGE subscribers: {len(proxy.bluesky_client.subscriber.subscribers['STATECHANGE'])}"
         )
 
         logger.debug("Registering ACDATA subscriber with actonly=True...")

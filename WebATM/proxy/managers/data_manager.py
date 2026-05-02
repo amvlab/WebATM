@@ -2,7 +2,7 @@
 
 import threading
 import time
-from typing import Any, Dict
+from typing import Any
 
 from ...logger import get_logger
 
@@ -174,7 +174,7 @@ class DataManager:
         else:
             logger.info(" Client stopped - Ready for new connection")
 
-    def get_current_data(self) -> Dict[str, Any]:
+    def get_current_data(self) -> dict[str, Any]:
         """Get current simulation data for initial page load."""
         # Import helper methods from node manager
         from .node_manager import NodeManager

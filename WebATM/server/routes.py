@@ -10,9 +10,9 @@ import os
 import socket
 import time
 from pathlib import Path
-from werkzeug.utils import secure_filename
 
 from flask import current_app, jsonify, render_template, request
+from werkzeug.utils import secure_filename
 
 from ..logger import get_logger
 
@@ -29,12 +29,12 @@ def get_webpack_assets():
     try:
         # Go up one level from server/ to WebATM/ to find static/
         manifest_path = (
-            Path(__file__).parent.parent / "static" / "ts" / "dist" / "manifest.json"
+            Path(__file__).parent.parent / "static" / "dist" / "manifest.json"
         )
 
         if not manifest_path.exists():
             # Fallback to single bundle.js if manifest doesn't exist
-            return ['<script src="/static/ts/dist/bundle.js"></script>']
+            return ['<script src="/static/dist/bundle.js"></script>']
 
         with open(manifest_path) as f:
             manifest = json.load(f)
@@ -48,7 +48,7 @@ def get_webpack_assets():
         ):
             # Development mode: single bundle
             bundle_file = manifest["main.js"]
-            script_tags.append(f'<script src="/static/ts/dist/{bundle_file}"></script>')
+            script_tags.append(f'<script src="/static/dist/{bundle_file}"></script>')
         else:
             # Production mode: split bundles - load in correct order
             chunk_order = ["runtime.js", "vendor.js", "app.js", "main.js"]
@@ -56,19 +56,19 @@ def get_webpack_assets():
             for chunk_name in chunk_order:
                 if chunk_name in manifest:
                     script_tags.append(
-                        f'<script src="/static/ts/dist/{manifest[chunk_name]}"></script>'
+                        f'<script src="/static/dist/{manifest[chunk_name]}"></script>'
                     )
 
         return (
             script_tags
             if script_tags
-            else ['<script src="/static/ts/dist/bundle.js"></script>']
+            else ['<script src="/static/dist/bundle.js"></script>']
         )
 
     except Exception as e:
         logger.info(f"Error reading webpack manifest: {e}")
         # Fallback to single bundle.js
-        return ['<script src="/static/ts/dist/bundle.js"></script>']
+        return ['<script src="/static/dist/bundle.js"></script>']
 
 
 def register_basic_routes(app, session_manager):
@@ -266,6 +266,77 @@ def register_basic_routes(app, session_manager):
                 500,
             )
 
+    @app.route("/api/aircraft/models", methods=["GET"])
+    def get_aircraft_models():
+        """Get available 3D aircraft models."""
+        try:
+            models_dir = Path(__file__).parent.parent / "static" / "models" / "aircraft"
+
+            if not models_dir.exists():
+                logger.warning("Aircraft models directory not found")
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": "3D aircraft models directory not found",
+                        "models": [],
+                    }
+                ), 404
+
+            # Scan for supported model files
+            supported_extensions = {".gltf", ".glb"}
+            models = []
+
+            for model_file in models_dir.iterdir():
+                if (
+                    model_file.is_file()
+                    and model_file.suffix.lower() in supported_extensions
+                ):
+                    # Create display name from filename
+                    display_name = model_file.stem
+
+                    # Map common aircraft model names to better display names
+                    display_name_map = {
+                        "737": "Boeing 737",
+                        "a320": "Airbus A320",
+                        "drone": "Generic Drone",
+                        "tie": "TIE Fighter",
+                    }
+
+                    if display_name.lower() in display_name_map:
+                        display_name = display_name_map[display_name.lower()]
+
+                    # Get file size
+                    file_size = model_file.stat().st_size
+
+                    models.append(
+                        {
+                            "filename": model_file.name,
+                            "displayName": display_name,
+                            "description": f"{display_name} 3D model",
+                            "fileSize": file_size,
+                            "isDefault": model_file.name == "737.gltf",
+                        }
+                    )
+
+            # Sort by display name, but put default model first
+            models.sort(key=lambda m: (not m["isDefault"], m["displayName"]))
+
+            logger.debug(
+                f"Found {len(models)} aircraft models: {[m['filename'] for m in models]}"
+            )
+
+            return jsonify({"success": True, "models": models, "count": len(models)})
+
+        except Exception as e:
+            logger.error(f"Error fetching aircraft models: {e}")
+            return jsonify(
+                {
+                    "success": False,
+                    "error": f"Failed to fetch aircraft models: {str(e)}",
+                    "models": [],
+                }
+            ), 500
+
     @app.route("/health")
     def health_check():
         """Health check endpoint for Traefik - always returns 200 if Flask is running."""
@@ -294,7 +365,7 @@ def register_basic_routes(app, session_manager):
                     result = sock.connect_ex((hostname, port))
                     sock.close()
                     return result == 0
-                except:
+                except Exception:
                     return False
 
             # Check if BlueSky ports are accessible (same logic as server_control.py)

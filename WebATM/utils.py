@@ -1,7 +1,4 @@
-"""
-OSS
-Utility functions for WebATM.
-"""
+"""Utility functions for WebATM."""
 
 from time import gmtime, strftime
 
