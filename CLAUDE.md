@@ -23,23 +23,32 @@ python WebATM.py
 
 The web interface will be available at http://localhost:8082
 
-### TypeScript Development
+### Frontend (TypeScript) Development
+The TypeScript source lives in the top-level `frontend/` directory. Build output is emitted to `WebATM/static/dist/` (consumed by the Flask templates) and vendored third-party assets (FontAwesome, MapLibre GL CSS) are copied into `WebATM/static/vendor/` by the `vendor-assets` prebuild step.
+
 ```bash
-# Navigate to TypeScript directory
-cd WebATM/static/ts/
+# Navigate to frontend directory
+cd frontend/
 
 # Install dependencies
 npm install
 
-# Build TypeScript
-npm run build
+# Production build (also runs vendor-assets prebuild)
+npm run build              # alias for build:production
+npm run build:production   # NODE_ENV=production webpack
+npm run build:dev          # development build
 
 # Watch for changes during development
 npm run watch
 
 # Type checking only
 npm run type-check
+
+# Copy vendored assets only
+npm run vendor-assets
 ```
+
+A convenience script `script/build_frontend.sh` runs the full production build from the repo root.
 
 ### Docker Deployment
 
@@ -118,69 +127,96 @@ WebATM/
 │   │   ├── bluesky_server_status.py  # BlueSky server status management
 │   │   ├── session_manager.py  # Session management
 │   │   └── socket_handlers.py  # Socket.IO event handlers
-│   ├── static/                 # Static web assets
-│   │   ├── css/               # Stylesheets
-│   │   │   └── style.css      # Main stylesheet
-│   │   ├── favicon.png        # Application favicon
-│   │   └── ts/                # TypeScript source and build
-│   │       ├── src/           # TypeScript source code
-│   │       │   ├── main.ts    # Application entry point
-│   │       │   ├── core/      # Core application logic
-│   │       │   │   ├── App.ts
-│   │       │   │   ├── ConnectionStatusService.ts
-│   │       │   │   ├── SocketManager.ts
-│   │       │   │   └── StateManager.ts
-│   │       │   ├── data/      # Data processing and types
-│   │       │   │   ├── CommandHandler.ts
-│   │       │   │   ├── DataProcessor.ts
-│   │       │   │   └── types.ts
-│   │       │   ├── ui/        # User interface components
-│   │       │   │   ├── ConnectionManager.ts
-│   │       │   │   ├── Console.ts
-│   │       │   │   ├── ConsoleManager.ts
-│   │       │   │   ├── Controls.ts
-│   │       │   │   ├── EchoManager.ts
-│   │       │   │   ├── Header.ts
-│   │       │   │   ├── ModalManager.ts
-│   │       │   │   ├── Modals.ts
-│   │       │   │   ├── ServerManager.ts
-│   │       │   │   ├── SettingsModal.ts
-│   │       │   │   ├── map/   # Map-related components
-│   │       │   │   │   ├── EntityRenderer.ts
-│   │       │   │   │   ├── MapDisplay.ts
-│   │       │   │   │   ├── MapOverlay.ts
-│   │       │   │   │   ├── aircraft/
-│   │       │   │   │   │   ├── AircraftCreationManager.ts
-│   │       │   │   │   │   ├── AircraftInteractionManager.ts
-│   │       │   │   │   │   ├── AircraftRenderer.ts
-│   │       │   │   │   │   ├── AircraftRouteRenderer.ts
-│   │       │   │   │   │   ├── AircraftRoutes.ts
-│   │       │   │   │   │   └── AircraftShapes.ts
-│   │       │   │   │   └── shapes/
-│   │       │   │   │       ├── ShapeDrawingManager.ts
-│   │       │   │   │       └── ShapeRenderer.ts
-│   │       │   │   └── panels/ # UI panels
-│   │       │   │       ├── BasePanel.ts
-│   │       │   │       ├── PanelResizer.ts
-│   │       │   │       ├── left/
-│   │       │   │       │   ├── DisplayOptionsPanel.ts
-│   │       │   │       │   ├── MapControlsPanel.ts
-│   │       │   │       │   └── SimulationNodesPanel.ts
-│   │       │   │       └── right/
-│   │       │   │           ├── AircraftInfoPanel.ts
-│   │       │   │           ├── ConflictsPanel.ts
-│   │       │   │           └── TrafficListPanel.ts
-│   │       │   └── utils/     # Utility functions
-│   │       │       ├── Logger.ts
-│   │       │       └── StorageManager.ts
-│   │       ├── package.json   # TypeScript dependencies
-│   │       ├── tsconfig.json  # TypeScript configuration
-│   │       └── webpack.config.js # Webpack build configuration
+│   ├── static/                 # Static web assets (served by Flask)
+│   │   ├── css/               # Stylesheets (style.css)
+│   │   ├── dist/              # Webpack build output (bundles + manifest.json)
+│   │   ├── map/               # Offline MapLibre style JSON (light/dark)
+│   │   ├── models/            # 3D aircraft .glb models (A320/A350/A380/EVTOL)
+│   │   ├── tiles/             # Map tile assets
+│   │   ├── vendor/            # Vendored third-party assets (fontawesome, maplibre-gl)
+│   │   └── favicon.png        # Application favicon
 │   └── templates/              # HTML templates
 │       └── index.html         # Main web interface
+├── frontend/                   # TypeScript frontend (separate from Python package)
+│   ├── src/                   # TypeScript source code
+│   │   ├── main.ts            # Application entry point
+│   │   ├── core/              # Core application logic
+│   │   │   ├── App.ts
+│   │   │   ├── ConnectionStatusService.ts
+│   │   │   ├── SocketManager.ts
+│   │   │   └── StateManager.ts
+│   │   ├── data/              # Data processing, types, and command metadata
+│   │   │   ├── CommandHandler.ts
+│   │   │   ├── CommandSignature.ts
+│   │   │   ├── DataProcessor.ts
+│   │   │   ├── aircraftCategories.ts
+│   │   │   ├── aircraftDimensions.ts
+│   │   │   ├── aircraftTypes.ts
+│   │   │   └── types.ts
+│   │   ├── ui/                # User interface components
+│   │   │   ├── BlueSkyFileManager.ts
+│   │   │   ├── CommandListView.ts
+│   │   │   ├── CommandPaletteModal.ts
+│   │   │   ├── ConnectionManager.ts
+│   │   │   ├── Console.ts
+│   │   │   ├── ConsoleManager.ts
+│   │   │   ├── ConsoleMapPicker.ts
+│   │   │   ├── Controls.ts
+│   │   │   ├── EchoManager.ts
+│   │   │   ├── Header.ts
+│   │   │   ├── ModalManager.ts
+│   │   │   ├── Modals.ts
+│   │   │   ├── ServerManager.ts
+│   │   │   ├── SettingsModal.ts
+│   │   │   ├── map/           # Map-related components
+│   │   │   │   ├── EntityRenderer.ts
+│   │   │   │   ├── MapDisplay.ts
+│   │   │   │   ├── MapOverlay.ts
+│   │   │   │   ├── aircraft/  # 2D and 3D aircraft renderers
+│   │   │   │   │   ├── Aircraft2DRenderer.ts
+│   │   │   │   │   ├── Aircraft3DRenderer.ts
+│   │   │   │   │   ├── AircraftCreationManager.ts
+│   │   │   │   │   ├── AircraftInteractionManager.ts
+│   │   │   │   │   ├── AircraftRenderer.ts
+│   │   │   │   │   ├── AircraftRendererFactory.ts
+│   │   │   │   │   ├── AircraftRoute3DRenderer.ts
+│   │   │   │   │   ├── AircraftRouteRenderer.ts
+│   │   │   │   │   ├── AircraftRoutes.ts
+│   │   │   │   │   └── AircraftShapes.ts
+│   │   │   │   ├── rendering/ # Shared 3D rendering primitives
+│   │   │   │   │   ├── CustomLayer3D.ts
+│   │   │   │   │   └── IEntityRenderer.ts
+│   │   │   │   ├── routes/    # Route drawing UI
+│   │   │   │   │   ├── RouteConstraintsModal.ts
+│   │   │   │   │   ├── RouteDrawingManager.ts
+│   │   │   │   │   └── RouteDrawingPreview.ts
+│   │   │   │   └── shapes/    # 2D and 3D shape rendering
+│   │   │   │       ├── Shape3DRenderer.ts
+│   │   │   │       ├── ShapeDrawingManager.ts
+│   │   │   │       └── ShapeRenderer.ts
+│   │   │   └── panels/        # UI panels
+│   │   │       ├── BasePanel.ts
+│   │   │       ├── PanelResizer.ts
+│   │   │       ├── left/
+│   │   │       │   ├── DisplayOptionsPanel.ts
+│   │   │       │   ├── MapControlsPanel.ts
+│   │   │       │   └── SimulationNodesPanel.ts
+│   │   │       └── right/
+│   │   │           ├── AircraftInfoPanel.ts
+│   │   │           ├── ConflictsPanel.ts
+│   │   │           └── TrafficListPanel.ts
+│   │   └── utils/             # Utility functions
+│   │       ├── Logger.ts
+│   │       └── StorageManager.ts
+│   ├── scripts/
+│   │   └── vendor-assets.js   # Copies vendor assets into WebATM/static/vendor/
+│   ├── dist/                  # Local webpack output (mirrored to WebATM/static/dist/)
+│   ├── package.json           # TypeScript dependencies
+│   ├── tsconfig.json          # TypeScript configuration
+│   └── webpack.config.js      # Webpack build configuration
 ├── script/                     # Build and utility scripts
 │   ├── build_docker.sh        # Docker build script
-│   ├── build_ts.sh            # TypeScript build script
+│   ├── build_frontend.sh      # Frontend (TypeScript) build script
 │   ├── run_webatm.sh          # Application startup script
 │   └── wsgi.py                # WSGI configuration
 ├── requirements.txt            # Python dependencies (core)
@@ -209,11 +245,12 @@ WebATM/
   - `subscribers.py` - Handler registration system
 - **Server Package** (`WebATM/server/`) - Flask routes, session management, and Socket.IO handlers
 
-**Frontend Architecture:**
-- **TypeScript Core** (`WebATM/static/ts/src/core/`) - Application controller, socket management, state management
-- **User Interface** (`WebATM/static/ts/src/ui/`) - Modular components for map, panels, controls, and modals
-- **Data Layer** (`WebATM/static/ts/src/data/`) - Command handling, data processing, and type definitions
-- **MapLibre GL Integration** - Interactive map with aircraft tracking and visualization
+**Frontend Architecture (top-level `frontend/` package):**
+- **TypeScript Core** (`frontend/src/core/`) - Application controller, socket management, state management
+- **User Interface** (`frontend/src/ui/`) - Modular components for map, panels, controls, modals, command palette, and BlueSky file management
+- **Data Layer** (`frontend/src/data/`) - Command handling/signatures, data processing, type definitions, and aircraft category/type/dimension catalogs
+- **MapLibre GL + Three.js Integration** - Interactive 2D map plus 3D aircraft, route, and shape rendering via custom MapLibre layers
+- **Build Output** - Webpack emits hashed bundles to `WebATM/static/dist/` (with `manifest.json`); `frontend/scripts/vendor-assets.js` mirrors third-party assets into `WebATM/static/vendor/`
 
 ### Network Integration
 
@@ -230,7 +267,7 @@ WebATM/
 **Data Flow:**
 1. WebATM starts → Auto-launches BlueSky headless server
 2. BlueSkyProxy connects → Manages network client connection
-3. Real-time data → Socket.IO → TypeScript client → MapLibre GL visualization
+3. Real-time data → Socket.IO → TypeScript client → MapLibre GL (2D) / Three.js custom layers (3D)
 4. User commands → WebSocket → BlueSky server
 
 ## Development Guide
@@ -244,9 +281,12 @@ WebATM/
 - gunicorn (production serving)
 
 **TypeScript:**
-- MapLibre GL (map visualization)
+- MapLibre GL (2D map visualization)
+- Three.js (3D aircraft, routes, shapes)
 - Socket.IO client (real-time communication)
-- Turf.js (geospatial operations)
+- @turf/circle (geospatial operations)
+- pmtiles (offline tile bundles)
+- FontAwesome (icons, vendored at build time)
 - Webpack (bundling)
 
 **Installation:** See `requirements.txt` (core), `requirements-dev.txt` (development), `requirements-prod.txt` (production), and `pyproject.toml` (full configuration)
@@ -261,7 +301,7 @@ ruff format .                   # Auto-format code
 mypy WebATM/                    # Type checking (if installed)
 
 # TypeScript
-cd WebATM/static/ts/
+cd frontend/
 npm run type-check              # Type checking only
 ```
 
@@ -271,9 +311,10 @@ npm run type-check              # Type checking only
 3. Use `ruff check .` and `ruff format .` before committing
 
 **Frontend Development:**
-1. Edit TypeScript files in `WebATM/static/ts/src/`
-2. Build: `npm run build` or watch: `npm run watch`
+1. Edit TypeScript files in `frontend/src/`
+2. Build: `cd frontend && npm run build` or watch: `npm run watch`
 3. Run `npm run type-check` for validation
+4. Built bundles are emitted to `WebATM/static/dist/` and referenced from `WebATM/templates/index.html` via the webpack manifest
 
 ### Extension Guidelines
 

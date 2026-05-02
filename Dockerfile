@@ -37,15 +37,20 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy entire WebATM directory and build TypeScript
+# Copy WebATM package and the sibling frontend/ directory.
+# The webpack config emits to ../WebATM/static/dist relative to frontend/,
+# and the vendor-assets prebuild script copies fonts/CSS into
+# ../WebATM/static/vendor — both require WebATM/ to exist as a sibling.
 USER webatm
 WORKDIR /home/webatm
 COPY --chown=webatm:webatm WebATM/ ./WebATM/
+COPY --chown=webatm:webatm frontend/ ./frontend/
 
-# Build TypeScript in place and clean up
-WORKDIR /home/webatm/WebATM/static/ts
+# Build the frontend bundles, then drop the entire frontend/ source tree
+# (including node_modules) since it's not needed at runtime.
+WORKDIR /home/webatm/frontend
 RUN npm ci && npm run build:production \
-    && rm -rf node_modules src webpack.config.js tsconfig.json package*.json
+    && cd /home/webatm && rm -rf frontend
 
 # Return to home directory and copy application entry points
 WORKDIR /home/webatm
