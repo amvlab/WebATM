@@ -89,7 +89,6 @@ export class StateManager {
                 show3DOverlay: false,
                 aircraft3DModelQuality: 'medium',
                 aircraft3DScale: 2.0,
-                altitudeExaggeration: 2.0,
                 selectedAircraftModel: AUTO_MODEL_SENTINEL, // per-type category-based model selection by default
                 threeDVisible: false // 3D section collapsed by default
             }

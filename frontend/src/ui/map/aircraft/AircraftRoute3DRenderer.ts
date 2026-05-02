@@ -15,8 +15,6 @@ import { logger } from '../../../utils/Logger';
  * Altitude rule per segment endpoint:
  *   - If `wpalt[i] > 0`: use that constraint altitude (meters)
  *   - Otherwise: use the aircraft's current altitude
- * All altitudes are multiplied by `displayOptions.altitudeExaggeration`
- * so the route lines up with the exaggerated 3D aircraft position.
  *
  * NOTE: v1 uses scene-relative mercator positioning only. Globe-projection
  * support is a known follow-up (would need per-vertex getMatrixForModel).
@@ -247,16 +245,14 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
         const aircraft = this.aircraftState!;
         this.updateSceneOrigin();
 
-        const exag = this.displayOptions.altitudeExaggeration || 1;
         const iactwp = Math.max(0, Math.min(data.iactwp || 0, data.wplat.length - 1));
 
         const altFor = (i: number): number => {
             const wpalt = data.wpalt && data.wpalt[i] !== undefined ? data.wpalt[i] : -1;
-            const raw = wpalt > 0 ? wpalt : aircraft.alt;
-            return raw * exag;
+            return wpalt > 0 ? wpalt : aircraft.alt;
         };
 
-        const aircraftPos = this.toScenePos(aircraft.lat, aircraft.lon, aircraft.alt * exag);
+        const aircraftPos = this.toScenePos(aircraft.lat, aircraft.lon, aircraft.alt);
 
         const waypointPositions: THREE.Vector3[] = [];
         for (let i = 0; i < data.wplat.length; i++) {

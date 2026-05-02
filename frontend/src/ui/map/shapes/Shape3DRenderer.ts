@@ -81,7 +81,6 @@ export class Shape3DRenderer {
         if (!map) return;
 
         const displayOptions = this.stateManager.getDisplayOptions();
-        const exaggeration = displayOptions.altitudeExaggeration || 1.0;
         const DEFAULT_EXTRUSION_HEIGHT = 1000; // meters - default height for polygons without altitude
 
         const features = polygons.map(poly => {
@@ -90,10 +89,10 @@ export class Shape3DRenderer {
 
             const hasAltitude = poly.topAltitude !== undefined && poly.topAltitude !== null;
             const topAlt = hasAltitude
-                ? (poly.topAltitude || 0) * exaggeration
-                : DEFAULT_EXTRUSION_HEIGHT * exaggeration;
+                ? (poly.topAltitude || 0)
+                : DEFAULT_EXTRUSION_HEIGHT;
             const bottomAlt = hasAltitude
-                ? (poly.bottomAltitude || 0) * exaggeration
+                ? (poly.bottomAltitude || 0)
                 : 0;
 
             return {

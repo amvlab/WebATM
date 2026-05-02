@@ -813,9 +813,9 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
     private updateMeshTransform(mesh: THREE.Object3D, data: AircraftMeshData): void {
         // Calculate position relative to scene origin in meters
         const relativePos = this.calculateRelativePosition(data.lat, data.lon);
-        
-        // Apply altitude exaggeration for visibility (altitude already in meters from BlueSky)
-        const altitudeMeters = data.alt * this.displayOptions.altitudeExaggeration;
+
+        // Altitude already in meters from BlueSky
+        const altitudeMeters = data.alt;
 
         // Convert aircraft heading to radians (0° = North, clockwise)
         const headingRad = THREE.MathUtils.degToRad(data.hdg);
@@ -864,8 +864,8 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
      */
     private updateMeshTransformForGlobe(mesh: THREE.Object3D, data: AircraftMeshData): void {
         try {
-            // Apply altitude exaggeration for visibility (altitude already in meters from BlueSky)
-            const altitudeMeters = data.alt * this.displayOptions.altitudeExaggeration;
+            // Altitude already in meters from BlueSky
+            const altitudeMeters = data.alt;
 
             // Convert aircraft heading to radians (0° = North, clockwise)
             const headingRad = THREE.MathUtils.degToRad(data.hdg);
@@ -921,8 +921,8 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
      * Used as fallback when aircraft are spread too far apart
      */
     private updateMeshTransformForMercator(mesh: THREE.Object3D, data: AircraftMeshData): void {
-        // Apply altitude exaggeration for visibility (altitude already in meters from BlueSky)
-        const altitudeMeters = data.alt * this.displayOptions.altitudeExaggeration;
+        // Altitude already in meters from BlueSky
+        const altitudeMeters = data.alt;
 
         // Convert aircraft heading to radians (0° = North, clockwise)
         const headingRad = THREE.MathUtils.degToRad(data.hdg);

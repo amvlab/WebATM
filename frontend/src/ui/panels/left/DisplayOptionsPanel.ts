@@ -46,7 +46,6 @@ export class DisplayOptionsPanel extends BasePanel {
         this.setupAircraftShapeControl();
         this.setupRenderModeControl();
         this.setup3DScaleControl();
-        this.setupAltitudeExaggerationControl();
         this.setupAircraftModelControl();
         this.setupCollapsibleSections();
         this.setupColorControls();
@@ -96,9 +95,6 @@ export class DisplayOptionsPanel extends BasePanel {
 
         // Load aircraft 3D scale from storage
         const aircraft3DScale = storage.get<number>('aircraft-3d-scale', displayOptions.aircraft3DScale) || displayOptions.aircraft3DScale;
-
-        // Load altitude exaggeration from storage
-        const altitudeExaggeration = storage.get<number>('altitude-exaggeration', displayOptions.altitudeExaggeration) || displayOptions.altitudeExaggeration;
 
         // Load aircraft icon size from storage
         const aircraftIconSize = storage.get<number>('aircraft-icon-size', displayOptions.aircraftIconSize) || displayOptions.aircraftIconSize;
@@ -163,7 +159,6 @@ export class DisplayOptionsPanel extends BasePanel {
             aircraftShape,
             show3DOverlay,
             aircraft3DScale,
-            altitudeExaggeration,
             aircraftIconSize,
             mapLabelsTextSize,
             aircraftIconColor,
@@ -238,13 +233,6 @@ export class DisplayOptionsPanel extends BasePanel {
         if (aircraft3DScaleInput) {
             aircraft3DScaleInput.value = aircraft3DScale.toString();
         }
-
-        const altitudeExaggerationInput = document.getElementById('altitude-exaggeration') as HTMLInputElement;
-        if (altitudeExaggerationInput) {
-            altitudeExaggerationInput.value = altitudeExaggeration.toString();
-        }
-        const altitudeExaggerationValue = document.getElementById('altitude-exaggeration-value');
-        if (altitudeExaggerationValue) altitudeExaggerationValue.textContent = altitudeExaggeration.toFixed(1);
 
         // Update aircraft icon size UI
         const iconSizeInput = document.getElementById('aircraft-icon-size') as HTMLInputElement;
@@ -562,36 +550,6 @@ export class DisplayOptionsPanel extends BasePanel {
         }
 
         logger.debug('DisplayOptionsPanel', `3D aircraft scale updated to: ${value}x`);
-    }
-
-    private setupAltitudeExaggerationControl(): void {
-        const altitudeExaggerationSlider = document.getElementById('altitude-exaggeration') as HTMLInputElement;
-        if (!altitudeExaggerationSlider) return;
-
-        // Handle slider input changes
-        altitudeExaggerationSlider.addEventListener('input', (e) => {
-            const value = parseFloat((e.target as HTMLInputElement).value);
-            this.updateAltitudeExaggerationValue(value);
-        });
-    }
-
-    /**
-     * Update altitude exaggeration value from slider
-     */
-    private updateAltitudeExaggerationValue(value: number): void {
-        // Update display value
-        const valueSpan = document.getElementById('altitude-exaggeration-value');
-        if (valueSpan) valueSpan.textContent = value.toFixed(1);
-
-        // Save to storage
-        storage.set('altitude-exaggeration', value);
-
-        // Update state manager
-        if (this.stateManager) {
-            this.stateManager.updateDisplayOptions({ altitudeExaggeration: value });
-        }
-
-        logger.debug('DisplayOptionsPanel', `Altitude exaggeration updated to: ${value}x`);
     }
 
     private setupAircraftModelControl(): void {

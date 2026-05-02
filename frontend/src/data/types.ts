@@ -466,7 +466,6 @@ export interface DisplayOptions {
   // 3D-specific options (only used when show3DOverlay === true)
   aircraft3DModelQuality?: 'low' | 'medium' | 'high';
   aircraft3DScale: number;
-  altitudeExaggeration: number;
   selectedAircraftModel: string;
   threeDVisible: boolean;
 }
