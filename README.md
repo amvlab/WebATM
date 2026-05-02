@@ -10,21 +10,28 @@ A modern web client for the [BlueSky Air Traffic Management (ATM) simulator](htt
 
 - **Intuitive Aircraft Interaction**: Single-click to fly to any aircraft, double-click to activate follow mode
 - **Customizable Aircraft Display**: Toggle visibility of labels, icons, trails, routes, and shapes
+- **Aircraft Type in Labels & Info Panel**: View aircraft type directly on map labels and in the aircraft information panel
 - **Flexible Aircraft Styling**: Choose from chevron, drone, triangle, or aircraft icon styles and customise colors
+- **3D Aircraft Visualization**: Render aircraft as 3D models (A320, A350, A380, drones, and more) on the globe view
 - **Smart Command Input**: Tab completion for BlueSky commands with autosuggestion
+- **Command Palette**: Quickly browse and search available BlueSky stack commands from the console
+- **Console Map Picker**: Select coordinates directly from the map when entering commands
+- **Scenario File Management**: Upload, organize, and run BlueSky scenario (`.scn`) files and folders straight from the web interface
 - **Flexible Map Projection**: Switch between Web Mercator and 3D globe view powered by [MapLibre GL](https://maplibre.org/maplibre-gl-js/docs/)
 - **Custom Map Sources**: Configure custom tile sources to personalize your base map layer
+- **Configurable Scenario Path**: Set your BlueSky scenario directory from the settings modal
 - **BlueSky Integration**: Seamless connection to BlueSky ATM simulator servers
 - **Modern TypeScript Architecture**: Fully type-safe, maintainable client-side codebase
 
 ## 🚀 WebATM Pro Version Available
 
-**Looking for more advanced features?** WebATM Pro includes additional capabilities not available in this open source version:
+**Looking for more advanced features?** WebATM Pro includes everything in the open source version, plus additional capabilities:
 
-- **Server Development Environment**: Modify and develop BlueSky server code directly from the web interface
-- **3D Visualisation**: Advanced 3D aircraft and terrain visualization
-- **Enhanced Server Management**: Full control over BlueSky server lifecycle (stat/stop/restart)
-- **Multi-Server Support**: Connect and manage multiple BlueSky simulation servers
+- **Custom Simulation Engine**: Built on amvlab's custom simulator, controllable end-to-end from the WebATM interface
+- **Multi-Node Simulation**: Spawn and manage multiple parallel simulation nodes from one interface
+- **Server Development Environment**: Modify and develop simulation server code directly from the web interface
+- **Enhanced Server Management**: Full control over server lifecycle (start/stop/restart)
+- **Pro-Only Roadmap**: In-browser scenario editor, simulation rewind, and client-side command validation
 - **Flexible Deployment**: amvlab can provide managed hosting or deploy on your local network for full data sovereignty
 
 **[Visit amvlab.eu for Pro Version](https://amvlab.eu)**
@@ -55,9 +62,9 @@ WebATM works best with the [amvlab fork of BlueSky](https://github.com/amvlab/bl
    pip install -r requirements.txt
    ```
 
-3. **Build TypeScript assets**
+3. **Build frontend assets**
    ```bash
-   script/build_ts.sh
+   script/build_frontend.sh
    ```
 
 4. **Start the application**
@@ -120,7 +127,7 @@ ruff format .
 
 **TypeScript:**
 ```bash
-cd WebATM/static/ts/
+cd frontend/
 npm run type-check
 ```
 
