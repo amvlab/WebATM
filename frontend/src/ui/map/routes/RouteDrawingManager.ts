@@ -1,0 +1,444 @@
+import { MapDisplay } from '../MapDisplay';
+import { MapMouseEvent } from 'maplibre-gl';
+import type { App } from '../../../core/App';
+import { StateManager } from '../../../core/StateManager';
+import { AltitudeUnit, SpeedUnit } from '../../../data/types';
+import { logger } from '../../../utils/Logger';
+import { RouteDrawingPreview } from './RouteDrawingPreview';
+import { RouteConstraintsModal } from './RouteConstraintsModal';
+
+/**
+ * RouteDrawingManager - Interactive waypoint route creation.
+ *
+ * Flow:
+ *  1. User selects an aircraft (StateManager.selectedAircraft).
+ *     - The "Draw Route" button is disabled + tooltipped until an aircraft is
+ *       selected; subscribing to selectedAircraft state changes keeps the
+ *       button in sync.
+ *  2. Click "Draw Route" → toggleDrawing() → startDrawingForSelectedAircraft().
+ *     - We capture the aircraft's current position and a snapshot of its
+ *       existing route (if any) so that the leader line anchors correctly.
+ *  3. Click on the map to drop waypoints. A solid line connects placed
+ *     waypoints; a dashed "leader line" runs from either the aircraft's
+ *     current position, or the last existing waypoint of an aircraft that
+ *     already has a route, to the first new waypoint. A dashed cursor preview
+ *     chases the pointer.
+ *  4. Right-click / Enter finishes; Esc cancels.
+ *  5. On finish the constraints modal opens. Each row has optional alt/spd
+ *     inputs (blank = unconstrained). Units default to the GUI's current
+ *     display units and are converted to feet/knots before being sent.
+ *  6. On submit we emit one ADDWPT command per waypoint (BlueSky's canonical
+ *     waypoint-add command, which natively supports optional alt/spd). This
+ *     sidesteps the broken ADDWAYPOINTS len%6 / reshape(n,5) logic.
+ *
+ * Responsibilities are split across:
+ *  - RouteDrawingManager (this file): state, map event wiring, banner + draw
+ *    button UI, orchestration of the preview and modal.
+ *  - RouteDrawingPreview: temporary MapLibre sources/layers for the preview.
+ *  - RouteConstraintsModal: per-waypoint constraints UI + ADDWPT command
+ *    build/send pipeline.
+ */
+export class RouteDrawingManager {
+    private mapDisplay: MapDisplay;
+    private app: App;
+    private stateManager: StateManager;
+    private preview: RouteDrawingPreview;
+    private modal: RouteConstraintsModal;
+
+    private drawingMode: boolean = false;
+    private routePoints: Array<{ lat: number; lng: number }> = [];
+    private targetAircraftId: string | null = null;
+
+    // Anchor for the leader line. Either the aircraft's current position, or
+    // the last existing waypoint of an aircraft that already has a route.
+    private leaderAnchor: { lat: number; lng: number } | null = null;
+
+    // Units snapshotted at draw start so the constraints modal is stable even
+    // if the user toggles display units mid-flow.
+    private capturedAltUnit: AltitudeUnit = 'ft';
+    private capturedSpeedUnit: SpeedUnit = 'knots';
+
+    // Event handler refs for clean teardown
+    private mapClickHandler: ((e: MapMouseEvent) => void) | null = null;
+    private mapRightClickHandler: ((e: MapMouseEvent) => void) | null = null;
+    private mapMouseMoveHandler: ((e: MapMouseEvent) => void) | null = null;
+    private keyDownHandler: ((e: KeyboardEvent) => void) | null = null;
+
+    constructor(mapDisplay: MapDisplay, app: App, stateManager: StateManager) {
+        this.mapDisplay = mapDisplay;
+        this.app = app;
+        this.stateManager = stateManager;
+        this.preview = new RouteDrawingPreview(mapDisplay, stateManager);
+        this.modal = new RouteConstraintsModal(
+            app,
+            () => this.stopDrawing(),
+            () => this.cancelDrawing()
+        );
+        this.setupDrawRouteDisabledTooltip();
+
+        // Keep the Draw Route button's enabled state in sync with whether an
+        // aircraft is selected. Initial sync handles the page-load state.
+        // NOTE: we do NOT cancel an in-progress draw when selectedAircraft
+        // flips to null - the draw captured targetAircraftId at start time and
+        // is independent of the live selection from then on.
+        this.stateManager.subscribe('selectedAircraft', (next) => {
+            this.updateDrawRouteButtonState(next);
+        });
+        this.updateDrawRouteButtonState(
+            this.stateManager.getState().selectedAircraft
+        );
+    }
+
+    /**
+     * Show a "please select an aircraft" tooltip while hovering the Draw
+     * Route button in its disabled state. The tooltip is position:fixed so
+     * it isn't clipped by panel overflow/borders; we compute its location
+     * from the button's viewport rect on each mouseenter.
+     */
+    private setupDrawRouteDisabledTooltip(): void {
+        const wrapper = document.querySelector('.draw-route-btn-wrapper') as HTMLElement | null;
+        const btn = document.getElementById('draw-route-btn') as HTMLButtonElement | null;
+        const tooltip = document.querySelector('.draw-route-disabled-tooltip') as HTMLElement | null;
+        if (!wrapper || !btn || !tooltip) return;
+
+        const positionAndShow = () => {
+            if (!btn.classList.contains('disabled')) {
+                tooltip.style.display = 'none';
+                return;
+            }
+            // Show first (offscreen) so we can measure the tooltip's size
+            // before clamping it to the viewport.
+            tooltip.style.display = 'block';
+            tooltip.style.left = '-9999px';
+            tooltip.style.top = '-9999px';
+
+            const btnRect = btn.getBoundingClientRect();
+            const tipRect = tooltip.getBoundingClientRect();
+            const margin = 8;
+
+            // Prefer centered under the button, then clamp horizontally so
+            // the tooltip stays fully inside the viewport (the button lives
+            // in a narrow left panel, so it would otherwise overhang the
+            // browser's left edge).
+            const centered = btnRect.left + btnRect.width / 2 - tipRect.width / 2;
+            const maxLeft = window.innerWidth - tipRect.width - margin;
+            const minLeft = margin;
+            const left = Math.max(minLeft, Math.min(centered, maxLeft));
+
+            // Flip above the button if placing it below would overflow the
+            // viewport bottom.
+            let top = btnRect.bottom + 6;
+            if (top + tipRect.height + margin > window.innerHeight) {
+                top = btnRect.top - tipRect.height - 6;
+            }
+
+            tooltip.style.left = `${left}px`;
+            tooltip.style.top = `${top}px`;
+        };
+        const hide = () => {
+            tooltip.style.display = 'none';
+        };
+
+        wrapper.addEventListener('mouseenter', positionAndShow);
+        wrapper.addEventListener('mouseleave', hide);
+        // If the viewport scrolls/resizes while the tooltip is visible,
+        // reposition it so it stays anchored to the button.
+        window.addEventListener('scroll', () => {
+            if (tooltip.style.display === 'block') positionAndShow();
+        }, true);
+        window.addEventListener('resize', () => {
+            if (tooltip.style.display === 'block') positionAndShow();
+        });
+    }
+
+    /**
+     * Public - whether interactive route drawing is currently active.
+     * Consumed by AircraftInteractionManager to suppress its empty-map-click
+     * "unselect aircraft" behavior while a route is being drawn.
+     */
+    public isDrawing(): boolean {
+        return this.drawingMode;
+    }
+
+    /**
+     * Enable/disable the Draw Route button based on whether an aircraft is
+     * currently selected. Also sets a tooltip explaining the disabled state.
+     *
+     * While a draw is in progress the button shows "Stop Drawing Route" and
+     * must stay enabled regardless of the live selection (the draw captured
+     * its target at start time), so we skip updates in that state.
+     */
+    private updateDrawRouteButtonState(selectedAircraft: string | null): void {
+        if (this.drawingMode) return;
+
+        const btn = document.getElementById('draw-route-btn') as HTMLButtonElement | null;
+        if (!btn) return;
+
+        if (selectedAircraft) {
+            btn.disabled = false;
+            btn.title = `Draw a route for ${selectedAircraft}`;
+            btn.classList.remove('disabled');
+        } else {
+            btn.disabled = true;
+            btn.title = 'Select an aircraft first (click its icon on the map or in the traffic list) to draw a route';
+            btn.classList.add('disabled');
+        }
+    }
+
+    /**
+     * Public entry point - toggles drawing mode.
+     */
+    public toggleDrawing(): void {
+        if (this.drawingMode) {
+            this.cancelDrawing();
+        } else {
+            this.startDrawingForSelectedAircraft();
+        }
+    }
+
+    private getCurrentAltitudeUnit(): AltitudeUnit {
+        const sel = document.getElementById('altitude-unit-select') as HTMLSelectElement | null;
+        return (sel?.value as AltitudeUnit) || 'ft';
+    }
+
+    private getCurrentSpeedUnit(): SpeedUnit {
+        const sel = document.getElementById('speed-unit-select') as HTMLSelectElement | null;
+        return (sel?.value as SpeedUnit) || 'knots';
+    }
+
+    /**
+     * Begin drawing a route for the currently selected aircraft.
+     */
+    private startDrawingForSelectedAircraft(): void {
+        const selected = this.stateManager.getState().selectedAircraft;
+        if (!selected) {
+            alert(
+                'Select an aircraft first (click its icon on the map or in the traffic list) before drawing a route.'
+            );
+            return;
+        }
+
+        this.targetAircraftId = selected;
+        this.capturedAltUnit = this.getCurrentAltitudeUnit();
+        this.capturedSpeedUnit = this.getCurrentSpeedUnit();
+        this.drawingMode = true;
+        this.routePoints = [];
+
+        // Resolve the leader anchor: last existing waypoint if the aircraft
+        // already has a route, otherwise the aircraft's current position.
+        this.leaderAnchor = this.resolveLeaderAnchor(selected);
+
+        const drawBtn = document.getElementById('draw-route-btn');
+        if (drawBtn) {
+            drawBtn.textContent = 'Stop Drawing Route';
+            drawBtn.classList.add('active');
+        }
+
+        const anchorLabel = this.leaderAnchorLabel();
+        this.showDrawingBanner(
+            `Drawing route for ${this.targetAircraftId} (leader from ${anchorLabel}) - Click to add waypoints, right-click or Enter to finish, Esc to cancel`
+        );
+        this.enableMapDrawing();
+        this.preview.updateDrawing(this.routePoints, this.leaderAnchor);
+
+        logger.info(
+            'RouteDrawingManager',
+            `Started drawing route for ${this.targetAircraftId}; leader anchor = ${anchorLabel}`
+        );
+    }
+
+    /**
+     * Resolve the leader-line anchor: last existing waypoint if the aircraft
+     * already has a route, else the aircraft's current position.
+     */
+    private resolveLeaderAnchor(
+        aircraftId: string
+    ): { lat: number; lng: number } | null {
+        const route = this.app.getRouteData();
+        if (
+            route &&
+            route.acid === aircraftId &&
+            route.wplat &&
+            route.wplon &&
+            route.wplat.length > 0 &&
+            route.wplat.length === route.wplon.length
+        ) {
+            const lastIdx = route.wplat.length - 1;
+            return { lat: route.wplat[lastIdx], lng: route.wplon[lastIdx] };
+        }
+
+        const ac = this.stateManager.getAircraftById(aircraftId);
+        if (ac) {
+            return { lat: ac.lat, lng: ac.lon };
+        }
+
+        return null;
+    }
+
+    private leaderAnchorLabel(): string {
+        const route = this.app.getRouteData();
+        const hasExistingRoute =
+            route &&
+            route.acid === this.targetAircraftId &&
+            route.wplat &&
+            route.wplat.length > 0;
+        return hasExistingRoute ? 'last existing waypoint' : 'aircraft';
+    }
+
+    /**
+     * Stop drawing and clean up state. Called both on user cancel and on
+     * successful submission of the constraints modal.
+     */
+    private stopDrawing(): void {
+        this.drawingMode = false;
+        this.routePoints = [];
+        this.targetAircraftId = null;
+        this.leaderAnchor = null;
+
+        const drawBtn = document.getElementById('draw-route-btn');
+        if (drawBtn) {
+            drawBtn.textContent = 'Draw Route';
+            drawBtn.classList.remove('active');
+        }
+
+        // Re-apply disabled state based on current selection.
+        this.updateDrawRouteButtonState(
+            this.stateManager.getState().selectedAircraft
+        );
+
+        this.hideDrawingBanner();
+        this.disableMapDrawing();
+
+        logger.debug('RouteDrawingManager', 'Stopped route drawing');
+    }
+
+    private cancelDrawing(): void {
+        logger.info('RouteDrawingManager', 'Route drawing cancelled');
+        this.stopDrawing();
+    }
+
+    private enableMapDrawing(): void {
+        const map = this.mapDisplay.getMap();
+        if (!map) return;
+
+        map.getCanvas().style.cursor = 'crosshair';
+
+        this.preview.setup();
+
+        this.mapClickHandler = this.onMapClick.bind(this);
+        this.mapRightClickHandler = this.onMapRightClick.bind(this);
+        this.mapMouseMoveHandler = this.onMapMouseMove.bind(this);
+        this.keyDownHandler = this.onKeyDown.bind(this);
+
+        map.on('click', this.mapClickHandler);
+        map.on('contextmenu', this.mapRightClickHandler);
+        map.on('mousemove', this.mapMouseMoveHandler);
+        document.addEventListener('keydown', this.keyDownHandler);
+    }
+
+    private disableMapDrawing(): void {
+        const map = this.mapDisplay.getMap();
+        if (!map) return;
+
+        map.getCanvas().style.cursor = '';
+
+        if (this.mapClickHandler) {
+            map.off('click', this.mapClickHandler);
+            this.mapClickHandler = null;
+        }
+        if (this.mapRightClickHandler) {
+            map.off('contextmenu', this.mapRightClickHandler);
+            this.mapRightClickHandler = null;
+        }
+        if (this.mapMouseMoveHandler) {
+            map.off('mousemove', this.mapMouseMoveHandler);
+            this.mapMouseMoveHandler = null;
+        }
+        if (this.keyDownHandler) {
+            document.removeEventListener('keydown', this.keyDownHandler);
+            this.keyDownHandler = null;
+        }
+
+        this.preview.clear();
+        this.preview.teardown();
+    }
+
+    private onMapClick(e: MapMouseEvent): void {
+        if (!this.drawingMode) return;
+
+        const point = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+        this.routePoints.push(point);
+
+        const anchorLabel = this.leaderAnchorLabel();
+        this.showDrawingBanner(
+            `Drawing route for ${this.targetAircraftId} (leader from ${anchorLabel}) - ${this.routePoints.length} waypoint(s) (right-click or Enter to finish, Esc to cancel)`
+        );
+        this.preview.updateDrawing(this.routePoints, this.leaderAnchor);
+
+        logger.debug(
+            'RouteDrawingManager',
+            `Added waypoint ${this.routePoints.length}: ${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`
+        );
+    }
+
+    private onMapRightClick(e: MapMouseEvent): void {
+        e.preventDefault();
+        if (!this.drawingMode) return;
+        this.finishDrawing();
+    }
+
+    private onMapMouseMove(e: MapMouseEvent): void {
+        if (!this.drawingMode) return;
+        this.preview.updateCursor(
+            { lat: e.lngLat.lat, lng: e.lngLat.lng },
+            this.routePoints,
+            this.leaderAnchor
+        );
+    }
+
+    private onKeyDown(e: KeyboardEvent): void {
+        if (!this.drawingMode) return;
+
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            this.cancelDrawing();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            this.finishDrawing();
+        }
+    }
+
+    private finishDrawing(): void {
+        if (this.routePoints.length < 1) {
+            alert('Add at least 1 waypoint to create a route');
+            return;
+        }
+        if (!this.targetAircraftId) return;
+
+        this.modal.show(
+            this.targetAircraftId,
+            this.routePoints,
+            this.capturedAltUnit,
+            this.capturedSpeedUnit
+        );
+    }
+
+    /**
+     * Show the shared drawing banner with a message.
+     */
+    private showDrawingBanner(message: string): void {
+        const banner = document.getElementById('drawing-banner');
+        const bannerText = document.getElementById('drawing-banner-text');
+        if (banner && bannerText) {
+            bannerText.textContent = message;
+            banner.style.display = 'flex';
+        }
+    }
+
+    private hideDrawingBanner(): void {
+        const banner = document.getElementById('drawing-banner');
+        if (banner) {
+            banner.style.display = 'none';
+        }
+    }
+}
