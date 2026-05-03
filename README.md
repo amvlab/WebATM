@@ -154,9 +154,52 @@ WebATM connects to BlueSky servers using the standard BlueSky network ports (110
 
 ### Offline Basemap
 
-WebATM can render the map from a local PMTiles archive instead of an online tile provider — useful for air-gapped deployments or unreliable networks. The prebuilt release tarball (Option 1) already includes `world.pmtiles`; if you built from source, advanced users can generate their own archive with the `pmtiles` CLI — see the instructions in [.gitignore](.gitignore).
+WebATM can render the map from a local [PMTiles](https://docs.protomaps.com/pmtiles/) archive instead of an online tile provider — useful for air-gapped deployments or unreliable networks. The offline MapLibre styles live in `WebATM/static/map/` (`offline-style.json` and `offline-style-light.json`) and expect a tile archive at `WebATM/static/tiles/world.pmtiles`.
 
-Once `WebATM/static/tiles/world.pmtiles` exists, enable it via **Settings → Map Display Configuration → Offline (Local PMTiles)**.
+The prebuilt release tarball (Option 1) already ships `world.pmtiles`. If you built from source, generate your own archive as follows.
+
+#### 1. Install the `pmtiles` CLI
+
+```bash
+# macOS / Linux with Go installed:
+go install github.com/protomaps/go-pmtiles@latest
+export PATH="$HOME/go/bin:$PATH"
+ln -sf "$HOME/go/bin/go-pmtiles" "$HOME/go/bin/pmtiles"   # optional alias
+```
+
+Or download a prebuilt binary from the [go-pmtiles releases page](https://github.com/protomaps/go-pmtiles/releases).
+
+#### 2. Extract a worldwide tile archive
+
+Pick a daily planet build date from [maps.protomaps.com/builds](https://maps.protomaps.com/builds/) (e.g. `20260415`) and extract only the zoom levels you need. Zoom 0–8 worldwide is roughly 400 MB – 1.2 GB and covers coastlines, major roads, and country/state boundaries — enough context for ATM visualization:
+
+```bash
+mkdir -p WebATM/static/tiles
+pmtiles extract \
+  https://build.protomaps.com/<YYYYMMDD>.pmtiles \
+  WebATM/static/tiles/world.pmtiles \
+  --maxzoom=8
+```
+
+To add street-level detail for a specific region, run a second extract with a bounding box and a higher max zoom, then add it as an extra source in `WebATM/static/map/offline-style.json`:
+
+```bash
+pmtiles extract \
+  https://build.protomaps.com/<YYYYMMDD>.pmtiles \
+  WebATM/static/tiles/region.pmtiles \
+  --bbox=<minLon,minLat,maxLon,maxLat> \
+  --maxzoom=12
+```
+
+#### 3. Verify and enable
+
+```bash
+pmtiles show WebATM/static/tiles/world.pmtiles
+```
+
+Then enable it in the UI via **Settings → Map Display Configuration → Offline (Local PMTiles)**.
+
+> The `*.pmtiles` archives can grow to hundreds of MB or more, so distribute them via GitHub releases rather than committing them to the repository.
 
 
 ### Code Quality
