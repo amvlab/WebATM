@@ -313,8 +313,8 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
             path,
             (gltf) => {
                 this.loadingModels.delete(path);
-                this.normalizeModel(gltf.scene, path);
-                this.loadedModels.set(path, gltf.scene);
+                const centered = this.normalizeModel(gltf.scene, path);
+                this.loadedModels.set(path, centered);
                 logger.info('Aircraft3DCustomLayer', `Aircraft model loaded: ${path}`);
                 this.processPendingAircraft(path);
             },
@@ -340,11 +340,12 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
      * per-aircraft scale is then computed in updateMeshTransform*
      * using real-world dimensions for the aircraft's ICAO type.
      */
-    private normalizeModel(model: THREE.Group, path: string): void {
+    private normalizeModel(model: THREE.Group, path: string): THREE.Group {
         // Record raw bounding-box extent so per-aircraft scaling can
         // convert GLB units to real-world meters for any ICAO type.
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
         const rawMax = Math.max(size.x, size.y, size.z) || 1;
         this.modelRawMaxDim.set(path, rawMax);
 
@@ -408,7 +409,19 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
         // The rotation is applied in updateMeshTransform() via the transform matrix
         // This ensures heading rotation works correctly
 
-        logger.debug('Aircraft3DCustomLayer', `Model normalized: path=${path}, rawMax=${rawMax.toFixed(2)}, size=${size.x.toFixed(1)}x${size.y.toFixed(1)}x${size.z.toFixed(1)}, anisotropy=${maxAnisotropy}`);
+        // Wrap the GLB scene so the cached model's local origin sits at the
+        // geometric center. GLBs are authored with origins at the wheels,
+        // nose, etc., which makes the visible body float above/below the
+        // route altitude line (the route waypoint spheres are plain geometry
+        // centered at altitudeMeters). Recentering also makes yaw rotation
+        // pivot through the aircraft's vertical centerline.
+        model.position.sub(center);
+        const wrapper = new THREE.Group();
+        wrapper.add(model);
+
+        logger.debug('Aircraft3DCustomLayer', `Model normalized: path=${path}, rawMax=${rawMax.toFixed(2)}, size=${size.x.toFixed(1)}x${size.y.toFixed(1)}x${size.z.toFixed(1)}, center=(${center.x.toFixed(2)},${center.y.toFixed(2)},${center.z.toFixed(2)}), anisotropy=${maxAnisotropy}`);
+
+        return wrapper;
     }
 
     /**
