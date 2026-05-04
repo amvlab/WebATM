@@ -717,7 +717,7 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
 
         const originMercator = MercatorCoordinate.fromLngLat([this.sceneOrigin.lng, this.sceneOrigin.lat]);
         const targetMercator = MercatorCoordinate.fromLngLat([lng, lat]);
-        
+
         const mercatorPerMeter = originMercator.meterInMercatorCoordinateUnits();
         const dEast = targetMercator.x - originMercator.x;
         const dEastMeter = dEast / mercatorPerMeter;
@@ -725,6 +725,22 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
         const dNorthMeter = dNorth / mercatorPerMeter;
 
         return { east: dEastMeter, north: dNorthMeter };
+    }
+
+    /**
+     * Pre-scale altitude so that, after the camera projection multiplies
+     * mesh.position.y by `meterInMercatorCoordinateUnits` at the SCENE
+     * ORIGIN's lat, the resulting world Z equals altitude × per-point
+     * mercator scale. This makes altitude rendering independent of which
+     * scene origin this layer happens to be using, so the 3D aircraft
+     * (whose origin is the centroid of all aircraft) and the 3D route
+     * (whose origin is the selected aircraft) agree on visual height.
+     */
+    private altitudeForOrigin(altMeters: number, lat: number, lon: number): number {
+        if (!this.sceneOrigin) return altMeters;
+        const pointMpm = MercatorCoordinate.fromLngLat([lon, lat]).meterInMercatorCoordinateUnits();
+        const originMpm = MercatorCoordinate.fromLngLat([this.sceneOrigin.lng, this.sceneOrigin.lat]).meterInMercatorCoordinateUnits();
+        return altMeters * (pointMpm / originMpm);
     }
 
     /**
@@ -814,8 +830,9 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
         // Calculate position relative to scene origin in meters
         const relativePos = this.calculateRelativePosition(data.lat, data.lon);
 
-        // Altitude already in meters from BlueSky
-        const altitudeMeters = data.alt;
+        // Altitude in meters from BlueSky, lat-corrected so the world Z
+        // matches the route renderer (which has a different scene origin).
+        const altitudeMeters = this.altitudeForOrigin(data.alt, data.lat, data.lon);
 
         // Convert aircraft heading to radians (0° = North, clockwise)
         const headingRad = THREE.MathUtils.degToRad(data.hdg);

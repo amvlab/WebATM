@@ -371,10 +371,23 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
     /**
      * Convert lat/lon/alt to scene-relative meter coordinates for the mercator group.
      * Scene axes after group rotation: x=east, y=up, z=north. Altitude in meters.
+     *
+     * Altitude is pre-scaled by the per-point / scene-origin mercator-per-meter
+     * ratio so that, after the camera projection multiplies y by the scene
+     * origin's mercator-per-meter, world Z equals altitude × per-point
+     * mercator scale. This is what the 3D aircraft renderer also does, so
+     * both layers agree on visual height regardless of where each puts its
+     * scene origin.
      */
     private toScenePos(lat: number, lon: number, altitudeMeters: number): THREE.Vector3 {
         const rel = this.calculateRelativePosition(lat, lon);
-        return new THREE.Vector3(rel.east, altitudeMeters, rel.north);
+        if (!this.sceneOrigin) {
+            return new THREE.Vector3(rel.east, altitudeMeters, rel.north);
+        }
+        const pointMpm = MercatorCoordinate.fromLngLat([lon, lat]).meterInMercatorCoordinateUnits();
+        const originMpm = MercatorCoordinate.fromLngLat([this.sceneOrigin.lng, this.sceneOrigin.lat]).meterInMercatorCoordinateUnits();
+        const altScaled = altitudeMeters * (pointMpm / originMpm);
+        return new THREE.Vector3(rel.east, altScaled, rel.north);
     }
 
     private calculateRelativePosition(lat: number, lng: number): { east: number; north: number } {
