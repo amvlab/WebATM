@@ -490,6 +490,20 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
 
         for (let i = 0; i < aircraftData.id.length; i++) {
             const id = aircraftData.id[i];
+
+            // Skip aircraft with invalid coordinates — matches the 2D
+            // renderer's guard. MercatorCoordinate.fromLngLat throws on
+            // out-of-range values, which would crash the whole tick.
+            const lat = aircraftData.lat[i];
+            const lon = aircraftData.lon[i];
+            if (
+                typeof lat !== 'number' || typeof lon !== 'number' ||
+                isNaN(lat) || isNaN(lon) ||
+                lat < -90 || lat > 90 || lon < -180 || lon > 180
+            ) {
+                continue;
+            }
+
             activeIds.add(id);
 
             const actype = aircraftData.actype?.[i] ?? '';
