@@ -2,7 +2,7 @@
 
 A modern web client for the [BlueSky Air Traffic Management (ATM) simulator](https://github.com/TUDelft-CNS-ATM/bluesky). WebATM provides a standalone web interface with interactive aircraft visualization to control air traffic management simulations from the Web.
 
-<img width="1916" height="1079" alt="webatm" src="https://github.com/user-attachments/assets/3c57d8ff-35c9-40fc-9f9c-20c1beae2384" />
+<img width="1909" height="1048" alt="image" src="https://github.com/user-attachments/assets/15401992-a349-4a40-8088-229966c94717" />
 
 **[Try WebATM Demo](https://webatm.amvlab.eu/)** 
 
