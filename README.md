@@ -23,6 +23,8 @@ A modern web client for the [BlueSky Air Traffic Management (ATM) simulator](htt
 - **BlueSky Integration**: Seamless connection to BlueSky ATM simulator servers
 - **Modern TypeScript Architecture**: Fully type-safe, maintainable client-side codebase
 
+<img width="1200" height="658" alt="webatm_demo" src="https://github.com/user-attachments/assets/fa43352c-c463-4f8f-bc9d-03e01f82b4ac" />
+
 ## 🚀 WebATM Pro Version Available
 
 **Looking for more advanced features?** WebATM Pro includes everything in the open source version, plus additional capabilities:
