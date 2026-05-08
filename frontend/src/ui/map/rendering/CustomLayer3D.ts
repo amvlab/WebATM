@@ -72,14 +72,15 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
      * Override this method to customize lighting for your scene
      */
     protected setupLighting(): void {
-        // Main directional light from above
+        // Main directional light. z<0 matches the mercator group's rotateX(π/2),
+        // which places the model's "up" along scene -Z.
         const directionalLight1 = new THREE.DirectionalLight(0xffffff, 1.5);
-        directionalLight1.position.set(0, -70, 100).normalize();
+        directionalLight1.position.set(0, -70, -100).normalize();
         this.scene.add(directionalLight1);
 
         // Fill light from below to reduce harsh shadows
         const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight2.position.set(0, 70, 100).normalize();
+        directionalLight2.position.set(0, 70, -100).normalize();
         this.scene.add(directionalLight2);
 
         // Ambient light for overall scene illumination

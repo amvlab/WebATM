@@ -272,11 +272,14 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
         // Create two separate groups for different projection modes
         // This allows us to handle coordinate systems differently for each mode
 
-        // Mercator group: uses scene-based coordinate system with rotation
-        // Coordinate system: (x=east, y=up, z=north)
+        // Mercator group: uses scene-based coordinate system with rotation only.
+        // Coordinate system: (x=east, y=up, z=north).
+        // A single rotateX(π/2) maps (east, up, north) → (east, -north, up), which,
+        // paired with a positive-scaled projection below, lands in MapLibre mercator
+        // coords (Y = south). No mirror/negative scales are used so text on the 3D
+        // models (registration IDs, liveries, etc.) never renders reversed.
         this.mercatorGroup = new THREE.Group();
         this.mercatorGroup.rotateX(Math.PI / 2);
-        this.mercatorGroup.scale.multiply(new THREE.Vector3(1, 1, -1));
         this.scene.add(this.mercatorGroup);
 
         // Globe group: uses raw getMatrixForModel transforms (no scene rotation)
@@ -883,11 +886,6 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
 
         // Enable automatic matrix updates for this positioning approach
         mesh.matrixAutoUpdate = true;
-
-        // Debug: Log position for first few aircraft
-        if (this.aircraft.size < 3) {
-            logger.debug('Aircraft3DCustomLayer', `Aircraft position: east=${relativePos.east.toFixed(1)}m, north=${relativePos.north.toFixed(1)}m, alt=${altitudeMeters.toFixed(1)}m, hdg=${data.hdg.toFixed(0)}°`);
-        }
     }
 
     /**
@@ -910,11 +908,6 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
             if (this.map?.transform?.getMatrixForModel) {
                 // Based on MapLibre globe examples, getMatrixForModel expects [lng, lat] order
                 const modelMatrix = this.map.transform.getMatrixForModel([data.lon, data.lat], altitudeMeters);
-
-                // Debug logging for first few aircraft
-                if (this.aircraft.size <= 3) {
-                    logger.debug('Aircraft3DCustomLayer', `[GLOBE] Aircraft at lat=${data.lat.toFixed(6)}, lon=${data.lon.toFixed(6)}, alt=${data.alt}ft, scale=${finalScale}`);
-                }
 
                 const l = new THREE.Matrix4().fromArray(modelMatrix)
                     .scale(new THREE.Vector3(finalScale, finalScale, finalScale));
@@ -1068,12 +1061,15 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
                     scale: sceneOriginMercator.meterInMercatorCoordinateUnits()
                 };
 
-                // Apply transform: mainMatrix * translation * scale
-                // The mercatorGroup already has rotation applied, so we just need position/scale
+                // Apply transform: mainMatrix * translation * scale.
+                // The mercatorGroup's rotateX(π/2) already flips scene-north into
+                // mercator-south, so we use a pure positive scale here (no Y mirror).
+                // Keeping all scales positive avoids mirroring the texture content
+                // of aircraft models (which would otherwise render text reversed).
                 const m = new THREE.Matrix4().fromArray(args.defaultProjectionData.mainMatrix);
                 const l = new THREE.Matrix4()
                     .makeTranslation(sceneTransform.translateX, sceneTransform.translateY, sceneTransform.translateZ)
-                    .scale(new THREE.Vector3(sceneTransform.scale, -sceneTransform.scale, sceneTransform.scale));
+                    .scale(new THREE.Vector3(sceneTransform.scale, sceneTransform.scale, sceneTransform.scale));
 
                 this.camera.projectionMatrix = m.multiply(l);
 
