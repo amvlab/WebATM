@@ -2811,3 +2811,16 @@ button.disabled:hover {
     flex: 1;
     height: 60vh;
 }
+
+/* Terrain toggle control: greyed out when the active style has no
+   raster-dem source, highlighted when terrain is currently enabled. */
+.maplibregl-ctrl-terrain-disabled,
+.maplibregl-ctrl-terrain-disabled:hover {
+    opacity: 0.45;
+    cursor: not-allowed;
+    background-color: transparent;
+}
+
+.maplibregl-ctrl-terrain-enabled .maplibregl-ctrl-icon {
+    filter: invert(45%) sepia(85%) saturate(1500%) hue-rotate(175deg);
+}

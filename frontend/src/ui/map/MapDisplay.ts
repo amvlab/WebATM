@@ -3,6 +3,7 @@ import { Protocol } from 'pmtiles';
 import { storage } from '../../utils/StorageManager';
 import { settingsModal } from '../SettingsModal';
 import { logger } from '../../utils/Logger';
+import { TerrainToggleControl } from './TerrainToggleControl';
 
 // Register the `pmtiles://` protocol once for the lifetime of the page so
 // offline styles can read directly from a static .pmtiles archive. Guarded so
@@ -39,6 +40,11 @@ export class MapDisplay {
     // network failure, so we don't trigger the fallback repeatedly.
     private hasFallenBackToOffline = false;
     private currentStyle: string = '';
+
+    // Always-present terrain toggle. Self-disables when the active style has
+    // no raster-dem source. Created once in addControls() and refreshed on
+    // every style.load.
+    private terrainControl: TerrainToggleControl | null = null;
 
     // Default center and zoom for Amsterdam
     private readonly DEFAULT_CENTER: [number, number] = [4.9, 52.3];
@@ -127,6 +133,11 @@ export class MapDisplay {
         // Add scale control
         this.map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
 
+        // Add terrain toggle. Stays disabled until a style with a raster-dem
+        // source is loaded.
+        this.terrainControl = new TerrainToggleControl(1);
+        this.map.addControl(this.terrainControl, 'top-left');
+
         logger.debug('MapDisplay', 'Map controls added');
     }
 
@@ -194,6 +205,10 @@ export class MapDisplay {
         });
 
         logger.debug('MapDisplay', 'Map style loaded, projection set to:', this.currentProjection);
+
+        // Refresh terrain control: enable if the new style declares a
+        // raster-dem source, disable otherwise.
+        this.terrainControl?.refresh();
 
         // Notify listeners that style has changed (for re-adding layers)
         if (this.styleChangeCallback) {

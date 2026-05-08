@@ -9,6 +9,11 @@
             "type": "vector",
             "url": "pmtiles:///static/tiles/world.pmtiles",
             "attribution": "<a href=\"https://protomaps.com\">Protomaps</a> © <a href=\"https://openstreetmap.org\">OpenStreetMap</a>"
+        },
+        "terrain-dem": {
+            "type": "raster-dem",
+            "url": "https://tiles.mapterhorn.com/tilejson.json",
+            "attribution": "<a href=\"https://mapterhorn.com/attribution/\" target=\"_blank\" rel=\"noopener\">© Mapterhorn</a>"
         }
     },
     "layers": [
@@ -46,6 +51,18 @@
             "source": "protomaps",
             "source-layer": "water",
             "paint": { "fill-color": "#05131f" }
+        },
+        {
+            "id": "hillshade",
+            "type": "hillshade",
+            "source": "terrain-dem",
+            "layout": { "visibility": "none" },
+            "paint": {
+                "hillshade-shadow-color": "#000000",
+                "hillshade-highlight-color": "#1a2029",
+                "hillshade-accent-color": "#0b0f15",
+                "hillshade-exaggeration": 0.4
+            }
         },
         {
             "id": "physical_line-river",
