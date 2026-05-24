@@ -2482,26 +2482,6 @@ body {
     word-wrap: break-word;
 }
 
-/* Make modify settings modal wider */
-#modify-settings-modal .modal-content {
-    width: 90%;
-    max-width: 800px;
-}
-
-.demo-buttons {
-    display: flex;
-    gap: 10px;
-    margin: 15px 0;
-    justify-content: center;
-}
-
-.demo-note {
-    font-style: italic;
-    color: #aaaaaa;
-    text-align: center;
-    margin-top: 10px;
-}
-
 .plugin-list {
     background-color: #2b2b2b;
     border: 1px solid #505050;

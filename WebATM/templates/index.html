@@ -54,11 +54,9 @@
                     <button id="menu-dropdown-btn" class="control-btn dropdown-btn" title="Menu">☰</button>
                     <div id="menu-dropdown" class="dropdown-menu" style="display: none;">
                         <a href="#" id="upload-files-btn" class="dropdown-item">Upload Files</a>
-                        <a href="#" id="modify-settings-btn" class="dropdown-item">Modify settings.cfg</a>
                         <a href="#" id="download-logs-btn" class="dropdown-item">Download Simulation Logs</a>
                     </div>
                 </div>
-                <button id="reset-layout-btn" class="control-btn" title="Reset Panel Layout">📐</button>
                 <button id="settings-btn" class="control-btn" title="Settings">⚙️</button>
             </div>
         </header>
@@ -1029,134 +1027,6 @@
             </div>
             <div class="modal-footer">
                 <button id="upload-files-close-footer" class="btn-secondary">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modify Settings Modal -->
-    <div id="modify-settings-modal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Modify settings.cfg</h3>
-                <button class="modal-close" id="modify-settings-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="setting-group">
-                    <div class="demo-message">
-                        <span class="demo-badge">UNDER DEVELOPMENT</span>
-                        <p><strong>Settings modification is currently under development.</strong></p>
-                        <p>Example settings configuration:</p>
-                    </div>
-                    <div class="settings-content">
-                        <pre id="settings-text" readonly># Network ports used by BlueSky
-event_port=11000
-stream_port=11001
-
-# Select the performance model. options: 'openap', 'bada', 'legacy'
-performance_model = 'openap'
-
-# Verbose internal logging
-verbose = False
-
-# Indicate the logfile path
-log_path = 'output'
-
-# Indicate the scenario path
-scenario_path = 'scenario'
-
-# Indicate the graphics data path
-gfx_path = 'graphics'
-
-# Indicate the path for cache data
-cache_path = 'cache'
-
-# Indicate the path for navigation data
-navdata_path = 'navdata'
-
-# Indicate the path for the aircraft performance data
-perf_path = 'performance'
-
-# Indicate the path for the BADA aircraft performance data (leave empty if BADA is not available)
-perf_path_bada = 'performance/BADA'
-
-# Indicate the plugins path
-plugin_path = 'plugins'
-
-# Specify a list of plugins that need to be enabled by default
-enabled_plugins = ['area', 'datafeed']
-
-# Indicate the start location of the radar screen (e.g. [lat, lon], or airport ICAO code)
-start_location = 'EHAM'
-
-# Simulation timestep [seconds]
-simdt = 0.05
-
-# Performance timestep [seconds]
-performance_dt = 1.0
-
-# FMS timestep [seconds]
-fms_dt = 1.0
-
-# Prefer compiled BlueSky modules (cgeo, casas)
-prefer_compiled = True
-
-# Limit the max number of cpu nodes for parallel simulation
-max_nnodes = 999
-
-#=========================================================================
-#=  ASAS default settings
-#=========================================================================
-
-# ASAS lookahead time [sec]
-asas_dtlookahead = 300.0
-
-# ASAS update interval [sec]
-asas_dt = 1.0
-
-# ASAS horizontal PZ margin [nm]
-asas_pzr = 5.0
-
-# ASAS vertical PZ margin [ft]
-asas_pzh = 1000.0
-
-# ASAS factors applied on protected zone for resolution horizontally and vertically [-]
-asas_marh = 1.05
-asas_marv = 1.05
-#=============================================================================
-#=   QTGL Gui specific settings below
-#=   Pygame Gui options in graphics/scr_cfg.dat
-#=============================================================================
-
-# Radarscreen font size in pixels
-text_size = 13
-
-# Radarscreen airport symbol size in pixels
-apt_size = 10
-
-# Radarscreen waypoint symbol size in pixels
-wpt_size = 10
-
-# Radarscreen aircraft symbol size in pixels
-ac_size = 16
-
-# Stack and command line text color
-stack_text_color = 0, 255, 0
-
-# Stack and command line background color
-stack_background_color = 102, 102, 102</pre>
-                    </div>
-                    <div class="demo-buttons">
-                        <button class="btn-secondary" disabled style="opacity: 0.6;">Upload New Settings</button>
-                        <button class="btn-secondary" disabled style="opacity: 0.6;">Modify Settings</button>
-                    </div>
-                    <div class="demo-note">
-                        <p><em>When fully developed, you will be able to upload new settings files and modify
-                                configurations directly through the editor.</em></p>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="modify-settings-ok" class="btn-primary">OK</button>
             </div>
         </div>
     </div>

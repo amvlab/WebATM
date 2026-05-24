@@ -31,7 +31,6 @@ export class Header {
     private menuDropdownButton: HTMLElement | null = null;
     private menuDropdown: HTMLElement | null = null;
     private settingsButton: HTMLElement | null = null;
-    private resetLayoutButton: HTMLElement | null = null;
 
     // DOM Elements - Simulation display
     private simTimeElement: HTMLElement | null = null;
@@ -87,7 +86,6 @@ export class Header {
         this.menuDropdownButton = document.getElementById('menu-dropdown-btn');
         this.menuDropdown = document.getElementById('menu-dropdown');
         this.settingsButton = document.getElementById('settings-btn');
-        this.resetLayoutButton = document.getElementById('reset-layout-btn');
 
         // Simulation display elements
         this.simTimeElement = document.getElementById('sim-time');
@@ -138,13 +136,6 @@ export class Header {
         if (this.settingsButton) {
             this.addEventListener(this.settingsButton, 'click', () => {
                 this.handleSettingsClick();
-            });
-        }
-
-        // Reset layout button
-        if (this.resetLayoutButton) {
-            this.addEventListener(this.resetLayoutButton, 'click', () => {
-                this.handleResetLayoutClick();
             });
         }
 
@@ -249,17 +240,6 @@ export class Header {
         // Open settings modal using the SettingsModal singleton
         settingsModal.open();
         logger.debug('Header', 'Settings modal opened via Header');
-    }
-
-    /**
-     * Handle reset layout button click
-     */
-    private handleResetLayoutClick(): void {
-        // This will be handled by PanelResizer
-        // We emit a custom event that the App can listen to
-        const event = new CustomEvent('resetLayout');
-        window.dispatchEvent(event);
-        logger.info('Header', 'Reset layout requested');
     }
 
     /**

@@ -98,7 +98,6 @@ export class Controls {
      * NOTE: Header UI controls are now handled by Header.ts
      */
     private bindUIControls(): void {
-        // Settings button, menu dropdown, and reset layout button are now handled by Header.ts
         logger.debug('Controls', 'Header UI controls are now handled by Header.ts');
 
         // Menu dropdown items are handled by Modals class - no duplication
@@ -252,14 +251,6 @@ export class Controls {
      */
     private openSettings(): void {
         settingsModal.open();
-    }
-
-    /**
-     * Reset panel layout
-     */
-    private resetLayout(): void {
-        // This will be implemented by the panel manager
-        logger.info('Controls', 'Resetting panel layout');
     }
 
     /**
