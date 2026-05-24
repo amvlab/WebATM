@@ -401,51 +401,6 @@ export class PanelResizer {
     }
 
     /**
-     * Public method to reset panels to default sizes
-     */
-    public resetToDefaults(): void {
-        const leftPanel = document.querySelector('.left-panel') as HTMLElement | null;
-        const rightPanel = document.querySelector('.right-panel') as HTMLElement | null;
-        const consoleContainer = document.querySelector('.console-container') as HTMLElement | null;
-        const consoleSection = document.querySelector('.console-section') as HTMLElement | null;
-        const echoSection = document.querySelector('.echo-section') as HTMLElement | null;
-        const trafficPanel = document.querySelector('.traffic-panel') as HTMLElement | null;
-        const aircraftPanel = document.querySelector('.aircraft-panel') as HTMLElement | null;
-        const conflictsPanel = document.querySelector('.conflicts-panel') as HTMLElement | null;
-
-        // Reset main panels
-        if (leftPanel) leftPanel.style.flexBasis = '250px';
-        if (rightPanel) rightPanel.style.flexBasis = '250px';
-        if (consoleContainer) consoleContainer.style.flexBasis = '200px';
-
-        // Reset console sections (centered 50/50 split)
-        if (consoleSection) consoleSection.style.flexBasis = '50%';
-        if (echoSection) echoSection.style.flexBasis = '50%';
-
-        // Reset right panel sections
-        if (trafficPanel) trafficPanel.style.flexBasis = '200px';
-        if (aircraftPanel) aircraftPanel.style.flexBasis = '150px';
-        if (conflictsPanel) conflictsPanel.style.flexBasis = ''; // Let it flex naturally
-
-        // Reset left panel sections
-        const nodePanel = document.querySelector('.node-panel') as HTMLElement | null;
-        const navPanel = document.querySelector('.nav-panel') as HTMLElement | null;
-        const displayPanel = document.querySelector('.display-panel') as HTMLElement | null;
-
-        if (nodePanel) nodePanel.style.flexBasis = '320px';
-        if (navPanel) navPanel.style.flexBasis = '160px';
-        if (displayPanel) displayPanel.style.flexBasis = ''; // Let it flex naturally
-
-        // Clear saved sizes from localStorage
-        this.clearSavedSizes();
-
-        // Trigger map resize if MapLibre instance exists and has resize method
-        if (window.map && typeof window.map.resize === 'function') {
-            setTimeout(() => window.map!.resize(), 100);
-        }
-    }
-
-    /**
      * Save current panel sizes to localStorage
      */
     private savePanelSizes(): void {

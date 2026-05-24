@@ -30,7 +30,6 @@ export class Modals {
         // Register all standard modals with the modal manager
         const standardModals = [
             'upload-files-modal',
-            'modify-settings-modal',
             'download-logs-modal',
             'create-aircraft-modal',
             'polygon-name-modal',
@@ -53,7 +52,6 @@ export class Modals {
         // Button handlers to open modals
         const modalButtons = [
             { buttonId: 'upload-files-btn', modalId: 'upload-files-modal' },
-            { buttonId: 'modify-settings-btn', modalId: 'modify-settings-modal' },
             { buttonId: 'download-logs-btn', modalId: 'download-logs-modal' }
         ];
 
@@ -81,7 +79,6 @@ export class Modals {
         // Close button handlers
         const closeButtons = [
             { buttonId: 'upload-files-close', modalId: 'upload-files-modal' },
-            { buttonId: 'modify-settings-close', modalId: 'modify-settings-modal' },
             { buttonId: 'download-logs-close', modalId: 'download-logs-modal' },
             { buttonId: 'create-aircraft-modal-close', modalId: 'create-aircraft-modal' },
             { buttonId: 'polygon-name-modal-close', modalId: 'polygon-name-modal' }
@@ -103,7 +100,6 @@ export class Modals {
 
         // OK button handlers (typically just close the modal)
         const okButtons = [
-            { buttonId: 'modify-settings-ok', modalId: 'modify-settings-modal' },
             { buttonId: 'download-logs-ok', modalId: 'download-logs-modal' }
         ];
 
