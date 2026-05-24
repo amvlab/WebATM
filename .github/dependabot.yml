@@ -1,0 +1,39 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      prod-minor-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
