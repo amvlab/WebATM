@@ -54,7 +54,6 @@
                     <button id="menu-dropdown-btn" class="control-btn dropdown-btn" title="Menu">☰</button>
                     <div id="menu-dropdown" class="dropdown-menu" style="display: none;">
                         <a href="#" id="upload-files-btn" class="dropdown-item">Upload Files</a>
-                        <a href="#" id="download-logs-btn" class="dropdown-item">Download Simulation Logs</a>
                     </div>
                 </div>
                 <button id="settings-btn" class="control-btn" title="Settings">⚙️</button>
@@ -523,10 +522,40 @@
 
             <div class="echo-section">
                 <div class="echo-header">
-                    <h3>Echo Messages</h3>
-                    <button id="clear-echo" class="console-btn">Clear</button>
+                    <div class="echo-tab-bar">
+                        <button id="echo-tab-btn" class="echo-tab active">Echo</button>
+                        <button id="log-stream-tab-btn" class="echo-tab">Output Log</button>
+                    </div>
+                    <div class="echo-header-controls">
+                        <span id="log-stream-filename"></span>
+                        <button id="clear-echo" class="console-btn">Clear</button>
+                        <button id="refresh-output-files" class="console-btn" style="display: none;">Reload</button>
+                        <button id="clear-log-stream" class="console-btn" style="display: none;">Clear</button>
+                        <button id="stop-log-stream" class="console-btn" style="display: none;">Exit Stream</button>
+                    </div>
                 </div>
                 <div class="echo-output" id="echo-output">
+                </div>
+                <div id="output-log-container" style="display: none; flex: 1; overflow: hidden;">
+                    <div id="output-file-browser" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
+                        <div id="output-not-configured" style="padding: 12px; color: #ffa500; display: none;">
+                            BlueSky base directory not configured. Configure it in Settings.
+                        </div>
+                        <div class="output-search-bar">
+                            <input id="output-search-input" type="text" placeholder="Filter files..." class="output-search-field">
+                        </div>
+                        <div id="output-file-list" style="flex: 1; overflow-y: auto;">
+                        </div>
+                    </div>
+                    <div class="log-stream-output" id="log-stream-output" style="display: none;">
+                    </div>
+                    <div id="log-search-bar" class="log-search-bar" style="display: none;">
+                        <input id="log-search-input" type="text" placeholder="Search log..." class="log-search-field">
+                        <span id="log-search-count" class="log-search-count"></span>
+                        <button id="log-search-prev" class="console-btn log-search-btn">&#9650;</button>
+                        <button id="log-search-next" class="console-btn log-search-btn">&#9660;</button>
+                        <button id="log-search-close" class="console-btn log-search-btn">&times;</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -617,6 +646,7 @@
                                 <div>📁 Scenarios: <span id="scenario-path-display-settings">-</span></div>
                                 <div>🧩 Plugins: <span id="plugins-path-display-settings">-</span></div>
                                 <div>⚙️ Settings: <span id="settings-path-display-settings">-</span></div>
+                                <div>📄 Output: <span id="output-path-display-settings">-</span></div>
                             </div>
                         </div>
                     </div>
@@ -932,6 +962,7 @@
                                 <div>📁 Scenarios: <span id="scenario-path-display">-</span></div>
                                 <div>🧩 Plugins: <span id="plugins-path-display">-</span></div>
                                 <div>⚙️ Settings: <span id="settings-path-display">-</span></div>
+                                <div>📄 Output: <span id="output-path-display">-</span></div>
                             </div>
                         </div>
                     </div>
@@ -1027,35 +1058,6 @@
             </div>
             <div class="modal-footer">
                 <button id="upload-files-close-footer" class="btn-secondary">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Download Logs Modal -->
-    <div id="download-logs-modal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Download Simulation Logs</h3>
-                <button class="modal-close" id="download-logs-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="setting-group">
-                    <div class="demo-message">
-                        <span class="demo-badge">UNDER DEVELOPMENT</span>
-                        <p><strong>Downloading simulation logs is currently under development.</strong></p>
-                        <p>When fully developed, you will be able to:</p>
-                        <ul style="margin: 10px 0; padding-left: 20px; color: #cccccc;">
-                            <li>Download complete simulation logs</li>
-                            <li>Export aircraft trajectory data</li>
-                            <li>Save conflict detection results</li>
-                            <li>Export performance metrics</li>
-                        </ul>
-                        <p><em>This feature will allow comprehensive analysis of your simulation results.</em></p>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="download-logs-ok" class="btn-primary">OK</button>
             </div>
         </div>
     </div>

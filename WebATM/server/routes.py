@@ -11,7 +11,7 @@ import socket
 import time
 from pathlib import Path
 
-from flask import current_app, jsonify, render_template, request
+from flask import current_app, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
 from ..logger import get_logger
@@ -458,6 +458,7 @@ def register_basic_routes(app, session_manager):
                             "scenario": str(scenario_dir),
                             "plugins": str(plugins_dir),
                             "settings": str(path_obj / "settings.cfg"),
+                            "output": str(path_obj / "output"),
                         },
                     }
                 )
@@ -616,6 +617,7 @@ def register_basic_routes(app, session_manager):
                 "scenario": {"extension": ".scn", "directory": "scenario"},
                 "plugins": {"extension": ".py", "directory": "plugins"},
                 "settings": {"extension": ".cfg", "filepath": "settings.cfg"},
+                "output": {"extension": "", "directory": "output"},
             }
 
             if file_type not in file_type_config:
@@ -654,17 +656,22 @@ def register_basic_routes(app, session_manager):
                                 }
                             )
 
-                    # Add files with the specified extension
-                    for file_path in target_dir.glob(f"*{config['extension']}"):
-                        stat_info = file_path.stat()
-                        files.append(
-                            {
-                                "filename": file_path.name,
-                                "size": stat_info.st_size,
-                                "modified": stat_info.st_mtime,
-                                "type": "file",
-                            }
-                        )
+                    # Add files (filtered by extension if specified, all files otherwise)
+                    if config["extension"]:
+                        file_iter = target_dir.glob(f"*{config['extension']}")
+                    else:
+                        file_iter = target_dir.iterdir()
+                    for file_path in file_iter:
+                        if file_path.is_file():
+                            stat_info = file_path.stat()
+                            files.append(
+                                {
+                                    "filename": file_path.name,
+                                    "size": stat_info.st_size,
+                                    "modified": stat_info.st_mtime,
+                                    "type": "file",
+                                }
+                            )
 
             return jsonify(
                 {
@@ -699,6 +706,7 @@ def register_basic_routes(app, session_manager):
                 "scenario": {"extension": ".scn", "directory": "scenario"},
                 "plugins": {"extension": ".py", "directory": "plugins"},
                 "settings": {"extension": ".cfg", "filepath": "settings.cfg"},
+                "output": {"extension": "", "directory": "output"},
             }
 
             if file_type not in file_type_config:
@@ -803,8 +811,12 @@ def register_basic_routes(app, session_manager):
                             }
                         )
 
-                # Add files with the specified extension
-                for file_path in target_dir.glob(f"*{config['extension']}"):
+                # Add files (filtered by extension if specified, all files otherwise)
+                if config["extension"]:
+                    file_iter = target_dir.glob(f"*{config['extension']}")
+                else:
+                    file_iter = target_dir.iterdir()
+                for file_path in file_iter:
                     if file_path.is_file():
                         stat_info = file_path.stat()
                         files.append(
@@ -849,6 +861,136 @@ def register_basic_routes(app, session_manager):
             logger.error(f"Error browsing {file_type} directory: {e}")
             return jsonify(
                 {"success": False, "error": f"Failed to browse directory: {str(e)}"}
+            ), 500
+
+    def _validate_output_path(filepath):
+        """Validate and resolve a filepath within the output directory.
+
+        Returns (resolved_path, error_response) tuple. If validation fails,
+        resolved_path is None and error_response contains the Flask response.
+        """
+        if not hasattr(current_app, "bluesky_base_path"):
+            return None, (
+                jsonify(
+                    {"success": False, "error": "BlueSky base path not configured"}
+                ),
+                400,
+            )
+
+        base_path = Path(current_app.bluesky_base_path)
+        output_base = base_path / "output"
+
+        # Clean and validate the path
+        normalized = Path(filepath).as_posix()
+        path_parts = [
+            part
+            for part in normalized.split("/")
+            if part and part != "." and part != ".."
+        ]
+
+        if not path_parts:
+            return None, (
+                jsonify({"success": False, "error": "No file specified"}),
+                400,
+            )
+
+        target = output_base
+        for part in path_parts:
+            target = target / part
+
+        # Security check
+        try:
+            resolved_target = target.resolve()
+            resolved_base = output_base.resolve()
+            if not str(resolved_target).startswith(str(resolved_base)):
+                return None, (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Access denied: Path outside allowed directory",
+                        }
+                    ),
+                    403,
+                )
+        except (OSError, ValueError):
+            return None, (
+                jsonify({"success": False, "error": "Invalid path"}),
+                400,
+            )
+
+        if not resolved_target.exists() or not resolved_target.is_file():
+            return None, (
+                jsonify({"success": False, "error": "File not found"}),
+                404,
+            )
+
+        return resolved_target, None
+
+    @app.route("/api/bluesky/output/download/<path:filepath>", methods=["GET"])
+    def download_output_file(filepath):
+        """Download a file from the BlueSky output directory."""
+        try:
+            resolved_path, error = _validate_output_path(filepath)
+            if error:
+                return error
+
+            return send_file(
+                resolved_path,
+                as_attachment=True,
+                download_name=resolved_path.name,
+            )
+
+        except Exception as e:
+            logger.error(f"Error downloading output file: {e}")
+            return jsonify(
+                {"success": False, "error": f"Failed to download file: {str(e)}"}
+            ), 500
+
+    @app.route("/api/bluesky/output/content/<path:filepath>", methods=["GET"])
+    def get_output_file_content(filepath):
+        """Read content from an output file for log streaming.
+
+        Query params:
+            offset: byte offset to read from (0 = use tail mode for initial load)
+            lines: max lines for initial tail load (default 200)
+        """
+        try:
+            resolved_path, error = _validate_output_path(filepath)
+            if error:
+                return error
+
+            offset = request.args.get("offset", type=int, default=0)
+            max_lines = request.args.get("lines", type=int, default=200)
+            file_size = resolved_path.stat().st_size
+
+            if offset > 0:
+                # Incremental read from offset to end
+                with open(resolved_path, errors="replace") as f:
+                    f.seek(min(offset, file_size))
+                    content = f.read()
+                    new_offset = f.tell()
+            else:
+                # Initial load: tail the last N lines
+                with open(resolved_path, errors="replace") as f:
+                    all_lines = f.readlines()
+                    tail_lines = all_lines[-max_lines:]
+                    content = "".join(tail_lines)
+                    new_offset = f.tell()
+
+            return jsonify(
+                {
+                    "success": True,
+                    "content": content,
+                    "offset": new_offset,
+                    "total_size": file_size,
+                    "filename": resolved_path.name,
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Error reading output file content: {e}")
+            return jsonify(
+                {"success": False, "error": f"Failed to read file: {str(e)}"}
             ), 500
 
     @app.route("/api/bluesky/<file_type>/<filename>", methods=["DELETE"])
@@ -938,6 +1080,7 @@ def register_basic_routes(app, session_manager):
                         "scenario": str(base_path / "scenario"),
                         "plugins": str(base_path / "plugins"),
                         "settings": str(base_path / "settings.cfg"),
+                        "output": str(base_path / "output"),
                     },
                     "path_exists": base_path.exists(),
                     "path_writable": os.access(str(base_path), os.W_OK)
