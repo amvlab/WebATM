@@ -21,6 +21,7 @@ interface BlueSkyFileStatus {
         scenario: string;
         plugins: string;
         settings: string;
+        output: string;
     };
     path_exists?: boolean;
     path_writable?: boolean;
@@ -174,6 +175,7 @@ export class BlueSkyFileManager {
             document.getElementById('scenario-path-display-settings')!.textContent = status.derived_paths.scenario;
             document.getElementById('plugins-path-display-settings')!.textContent = status.derived_paths.plugins;
             document.getElementById('settings-path-display-settings')!.textContent = status.derived_paths.settings;
+            document.getElementById('output-path-display-settings')!.textContent = status.derived_paths.output;
             statusDiv.style.display = 'block';
         }
 
@@ -191,10 +193,12 @@ export class BlueSkyFileManager {
             const scenarioDisplay = document.getElementById('scenario-path-display');
             const pluginsDisplay = document.getElementById('plugins-path-display');
             const settingsDisplay = document.getElementById('settings-path-display');
-            
+            const outputDisplay = document.getElementById('output-path-display');
+
             if (scenarioDisplay) scenarioDisplay.textContent = status.derived_paths.scenario;
             if (pluginsDisplay) pluginsDisplay.textContent = status.derived_paths.plugins;
             if (settingsDisplay) settingsDisplay.textContent = status.derived_paths.settings;
+            if (outputDisplay) outputDisplay.textContent = status.derived_paths.output;
             configuredStatusDiv.style.display = 'block';
         }
 
