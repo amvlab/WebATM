@@ -371,63 +371,7 @@ export class App {
      * Initialize panel resizing
      */
     private initializePanelResizing(): void {
-        // Panel resizer is already instantiated as a singleton
-        // Set up the reset layout button handler
-        const resetButton = document.getElementById('reset-layout-btn');
-        if (resetButton) {
-            resetButton.addEventListener('click', () => {
-                panelResizer.resetToDefaults();
-                logger.info('App', 'Panel layout reset to defaults');
-
-                // Also reset font sizes to defaults
-                this.resetFontSizesToDefaults();
-            });
-            logger.debug('App', 'Reset layout button handler attached');
-        } else {
-            logger.warn('App', '✗ Reset layout button not found');
-        }
-
         logger.debug('App', 'Panel resizing initialized');
-    }
-
-    /**
-     * Reset all font sizes to default values
-     */
-    private resetFontSizesToDefaults(): void {
-        const defaultFontSize = 11; // Default font size in pixels
-
-        // Clear font size values from storage using StorageManager
-        storage.remove('console-font-size');
-        storage.remove('panel-font-size');
-
-        // Update state manager with default font sizes
-        this.stateManager.updateDisplayOptions({
-            consoleFontSize: defaultFontSize,  // Applies to both console and echo
-            panelFontSize: defaultFontSize
-        });
-
-        // Apply CSS variables directly
-        document.documentElement.style.setProperty('--console-font-size', `${defaultFontSize}px`);
-        document.documentElement.style.setProperty('--echo-font-size', `${defaultFontSize}px`);
-        document.documentElement.style.setProperty('--console-input-font-size', `${defaultFontSize}px`);
-        document.documentElement.style.setProperty('--panel-font-size', `${defaultFontSize}px`);
-
-        // Update the UI controls in DisplayOptionsPanel to reflect the reset values
-        this.updateFontSizeUIControls('console-font-size', 'console-font-size-value', defaultFontSize);
-        this.updateFontSizeUIControls('panel-font-size', 'panel-font-size-value', defaultFontSize);
-
-        logger.info('App', 'Font sizes reset to defaults:', defaultFontSize);
-    }
-
-    /**
-     * Update font size UI controls (slider and display value)
-     */
-    private updateFontSizeUIControls(inputId: string, valueId: string, size: number): void {
-        const input = document.getElementById(inputId) as HTMLInputElement;
-        if (input) input.value = size.toString();
-
-        const valueSpan = document.getElementById(valueId);
-        if (valueSpan) valueSpan.textContent = size.toString();
     }
 
     /**

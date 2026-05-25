@@ -30,8 +30,6 @@ export class Modals {
         // Register all standard modals with the modal manager
         const standardModals = [
             'upload-files-modal',
-            'modify-settings-modal',
-            'download-logs-modal',
             'create-aircraft-modal',
             'polygon-name-modal',
             'route-constraints-modal'
@@ -52,9 +50,7 @@ export class Modals {
 
         // Button handlers to open modals
         const modalButtons = [
-            { buttonId: 'upload-files-btn', modalId: 'upload-files-modal' },
-            { buttonId: 'modify-settings-btn', modalId: 'modify-settings-modal' },
-            { buttonId: 'download-logs-btn', modalId: 'download-logs-modal' }
+            { buttonId: 'upload-files-btn', modalId: 'upload-files-modal' }
         ];
 
         modalButtons.forEach(({ buttonId, modalId }) => {
@@ -64,8 +60,7 @@ export class Modals {
                 button.addEventListener('click', (e) => {
                     e.preventDefault();
                     logger.debug('Modals', `Opening modal: ${modalId}`);
-                    
-                    // Special handling for upload files modal
+
                     if (modalId === 'upload-files-modal') {
                         blueSkyFileManager.openModal();
                     } else {
@@ -81,8 +76,6 @@ export class Modals {
         // Close button handlers
         const closeButtons = [
             { buttonId: 'upload-files-close', modalId: 'upload-files-modal' },
-            { buttonId: 'modify-settings-close', modalId: 'modify-settings-modal' },
-            { buttonId: 'download-logs-close', modalId: 'download-logs-modal' },
             { buttonId: 'create-aircraft-modal-close', modalId: 'create-aircraft-modal' },
             { buttonId: 'polygon-name-modal-close', modalId: 'polygon-name-modal' }
         ];
@@ -91,7 +84,6 @@ export class Modals {
             const button = document.getElementById(buttonId);
             if (button) {
                 button.addEventListener('click', () => {
-                    // Special handling for upload files modal
                     if (modalId === 'upload-files-modal') {
                         blueSkyFileManager.closeModal();
                     } else {
@@ -101,18 +93,6 @@ export class Modals {
             }
         });
 
-        // OK button handlers (typically just close the modal)
-        const okButtons = [
-            { buttonId: 'modify-settings-ok', modalId: 'modify-settings-modal' },
-            { buttonId: 'download-logs-ok', modalId: 'download-logs-modal' }
-        ];
-
-        okButtons.forEach(({ buttonId, modalId }) => {
-            const button = document.getElementById(buttonId);
-            if (button) {
-                button.addEventListener('click', () => this.closeModal(modalId));
-            }
-        });
 
         // Cancel button handlers for aircraft and polygon modals
         // Note: These modals have special functionality managed by their respective managers

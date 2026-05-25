@@ -2,6 +2,8 @@ import { App } from './core/App';
 import { echoManager } from './ui/EchoManager';
 import { connectionStatus } from './core/ConnectionStatusService';
 import { logger } from './utils/Logger';
+import './ui/LogStreamManager';
+import './ui/OutputFileBrowser';
 
 /**
  * Entry point for WebATM TypeScript application
