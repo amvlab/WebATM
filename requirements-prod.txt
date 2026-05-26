@@ -7,5 +7,6 @@
 # Production WSGI server
 gunicorn>=20.0.0
 
-# Async Socket.IO support with gunicorn
-eventlet>=0.33.0
+# Socket.IO WebSocket support for Flask-SocketIO's `async_mode="threading"`
+# (paired with gunicorn's built-in `gthread` worker — no gevent/eventlet needed)
+simple-websocket>=1.0.0
