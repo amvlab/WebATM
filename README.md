@@ -53,7 +53,7 @@ WebATM works best with the [amvlab fork of BlueSky](https://github.com/amvlab/bl
 
 ### Option 1: Docker Compose (prebuilt image, fastest)
 
-The quickest way to run WebATM — no clone, no build, no Python or Node.js required. The provided `docker-compose.yml` pulls the prebuilt image from GHCR.
+The quickest way to run WebATM is to use the provided `docker-compose.yml` to pull the prebuilt image from GHCR.
 
 1. **Download the compose file**
    ```bash
