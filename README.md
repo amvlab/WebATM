@@ -51,9 +51,34 @@ WebATM works best with the [amvlab fork of BlueSky](https://github.com/amvlab/bl
 
 ## Quick Start
 
-### Option 1: Prebuilt Release (no Node.js required)
+### Option 1: Docker Compose (prebuilt image, fastest)
 
-Use this if you just want to run WebATM without installing Node.js or building the frontend yourself. You still clone the repo for the Python source, then drop in a single tarball that contains all the runtime assets that aren't checked into git.
+The quickest way to run WebATM — no clone, no build, no Python or Node.js required. The provided `docker-compose.yml` pulls the prebuilt image from GHCR.
+
+1. **Download the compose file**
+   ```bash
+   wget https://raw.githubusercontent.com/amvlab/WebATM/main/docker-compose.yml
+   ```
+
+2. **Start the stack**
+   ```bash
+   docker compose up -d
+   ```
+
+3. **Access the web interface**
+
+   Open your browser to: http://localhost:8082
+
+4. **View logs**
+   ```bash
+   docker compose logs -f webatm
+   ```
+
+By default the container connects to a BlueSky server on the Docker host via `host.docker.internal`. To enable the in-app file manager for scenarios, plugins, and settings, uncomment the `volumes:` block in `docker-compose.yml` and point it at your local BlueSky working directory.
+
+### Option 2: Prebuilt Release (no Node.js required)
+
+Use this if you want to run WebATM directly from source without installing Node.js or building the frontend yourself. You still clone the repo for the Python source, then drop in a single tarball that contains all the runtime assets that aren't checked into git.
 
 1. **Clone the repository**
    ```bash
@@ -90,7 +115,7 @@ Use this if you just want to run WebATM without installing Node.js or building t
 
    The tarball already includes `WebATM/static/tiles/world.pmtiles`. To use it, open **Settings → Map Display Configuration → Offline (Local PMTiles)** in the web UI.
 
-### Option 2: Local Deployment (build from source)
+### Option 3: Local Deployment (build from source)
 
 1. **Clone the repository**
    ```bash
@@ -116,27 +141,6 @@ Use this if you just want to run WebATM without installing Node.js or building t
 5. **Access the web interface**
 
    Open your browser to: http://localhost:8082
-
-### Option 3: Docker Deployment
-
-1. **Build the Docker image**
-   ```bash
-   docker build -t webatm:latest .
-   ```
-
-2. **Start with Docker Compose**
-   ```bash
-   docker compose up -d
-   ```
-
-3. **Access the web interface**
-
-   Open your browser to: http://localhost:8082
-
-4. **View logs**
-   ```bash
-   docker compose logs -f webatm
-   ```
 
 ## Configuration
 
