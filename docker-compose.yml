@@ -11,6 +11,6 @@ services:
     # Mount your BlueSky working directory to enable the in-app file manager
     # (scenario/, plugins/, settings.cfg, output/). Configure the same target
     # path in WebATM's UI under Settings → BlueSky base path.
-    volumes:
+    # volumes:
       # - /path/to/your/bluesky:/bluesky
 
