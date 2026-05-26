@@ -36,8 +36,8 @@ cleanup_existing() {
         docker rm $STOPPED_CONTAINERS
     fi
     
-    # Remove existing webatm images
-    EXISTING_IMAGES=$(docker images -q webatm)
+    # Remove existing webatm images (both short tag and GHCR-namespaced tag)
+    EXISTING_IMAGES=$(docker images -q webatm ghcr.io/amvlab/webatm | sort -u)
     if [ ! -z "$EXISTING_IMAGES" ]; then
         echo "Removing existing WebATM images..."
         docker rmi $EXISTING_IMAGES -f
@@ -62,8 +62,14 @@ build_image() {
     # Cleanup existing containers and images
     cleanup_existing
 
-    docker buildx build -f Dockerfile -t webatm . --no-cache --load
-    
+    # Tag with both the short name and the GHCR name so docker-compose.yml
+    # (which references ghcr.io/amvlab/webatm:latest) picks up the local build
+    # instead of pulling the published image.
+    docker buildx build -f Dockerfile \
+        -t webatm:latest \
+        -t ghcr.io/amvlab/webatm:latest \
+        . --no-cache --load
+
     echo "Starting local services with docker compose..."
     docker compose up -d
 }

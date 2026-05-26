@@ -49,7 +49,7 @@ COPY --chown=webatm:webatm frontend/ ./frontend/
 # Build the frontend bundles, then drop the entire frontend/ source tree
 # (including node_modules) since it's not needed at runtime.
 WORKDIR /home/webatm/frontend
-RUN npm ci && npm run build:production \
+RUN npm ci && npm run build \
     && cd /home/webatm && rm -rf frontend
 
 # Return to home directory and copy application entry points
@@ -70,5 +70,6 @@ ENV WEB_HOST=0.0.0.0 \
 # Add current directory to Python path so WebATM package can be found
 ENV PYTHONPATH="/home/webatm"
 
-# Start WebATM with gunicorn for production (eventlet worker for Socket.IO support)
-CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:8082", "wsgi:app"]
+# Start WebATM with gunicorn for production (gthread worker — pairs with
+# Flask-SocketIO's threading async_mode and simple-websocket for WebSocket support)
+CMD ["gunicorn", "--worker-class", "gthread", "-w", "1", "--threads", "4", "--bind", "0.0.0.0:8082", "wsgi:app"]
