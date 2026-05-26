@@ -21,6 +21,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The world.pmtiles offline map is gitignored (~520MB) and shipped via
+      # the prebuilt release tarball, so a fresh checkout has no tile. Pull it
+      # from the most recent published release so the resulting image contains
+      # a working offline basemap. Note: when the tile itself changes, the new
+      # tile lands in Docker one release after the tarball is published (this
+      # workflow runs before the current tag's release is created).
+      - name: Hydrate world.pmtiles from latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/prebuilt WebATM/static/tiles
+          LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          echo "Pulling world.pmtiles from release: $LATEST_TAG"
+          gh release download "$LATEST_TAG" \
+            --pattern 'webatm-prebuilt-*.tar.gz' \
+            --dir /tmp/prebuilt
+          tar -xzf /tmp/prebuilt/webatm-prebuilt-*.tar.gz \
+            -C . WebATM/static/tiles/world.pmtiles
+          ls -lh WebATM/static/tiles/world.pmtiles
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
