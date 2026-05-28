@@ -253,17 +253,6 @@ export class Controls {
         settingsModal.open();
     }
 
-    /**
-     * Toggle menu dropdown
-     */
-    private toggleMenuDropdown(): void {
-        const menuDropdown = document.getElementById('menu-dropdown');
-        if (menuDropdown) {
-            const isVisible = menuDropdown.style.display === 'block';
-            menuDropdown.style.display = isVisible ? 'none' : 'block';
-        }
-    }
-
     // Public API Methods
 
     /**
