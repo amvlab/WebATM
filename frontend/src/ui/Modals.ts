@@ -66,7 +66,6 @@ export class Modals {
                     } else {
                         this.openModal(modalId);
                     }
-                    this.closeMenuDropdown();
                 });
             } else {
                 logger.warn('Modals', `✗ Button not found: ${buttonId}`);
@@ -155,20 +154,6 @@ export class Modals {
 
     public getModalManager() {
         return modalManager;
-    }
-
-    /**
-     * Helper method to close menu dropdown
-     */
-    private closeMenuDropdown(): void {
-        const dropdown = document.getElementById('menu-dropdown');
-        if (dropdown) {
-            dropdown.style.display = 'none';
-        }
-
-        // Emit event for menu dropdown close
-        const event = new CustomEvent('menuDropdownClosed');
-        document.dispatchEvent(event);
     }
 
     /**

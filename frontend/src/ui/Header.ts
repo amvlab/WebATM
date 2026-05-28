@@ -5,7 +5,6 @@
  * - Simulation controls (play, pause, reset, speed adjustment)
  * - Connection status display
  * - Simulation time and rate display
- * - Menu dropdown
  * - Settings button
  * - Layout reset button
  *
@@ -28,8 +27,6 @@ export class Header {
     private playPauseButton: HTMLElement | null = null;
     private resetButton: HTMLElement | null = null;
     private speedSelect: HTMLSelectElement | null = null;
-    private menuDropdownButton: HTMLElement | null = null;
-    private menuDropdown: HTMLElement | null = null;
     private settingsButton: HTMLElement | null = null;
 
     // DOM Elements - Simulation display
@@ -83,8 +80,6 @@ export class Header {
         this.playPauseButton = document.getElementById('play-pause-btn');
         this.resetButton = document.getElementById('reset-btn');
         this.speedSelect = document.getElementById('speed-select') as HTMLSelectElement;
-        this.menuDropdownButton = document.getElementById('menu-dropdown-btn');
-        this.menuDropdown = document.getElementById('menu-dropdown');
         this.settingsButton = document.getElementById('settings-btn');
 
         // Simulation display elements
@@ -124,25 +119,12 @@ export class Header {
             });
         }
 
-        // Menu dropdown button
-        if (this.menuDropdownButton) {
-            this.addEventListener(this.menuDropdownButton, 'click', (e) => {
-                e.stopPropagation();
-                this.toggleMenuDropdown();
-            });
-        }
-
         // Settings button
         if (this.settingsButton) {
             this.addEventListener(this.settingsButton, 'click', () => {
                 this.handleSettingsClick();
             });
         }
-
-        // Close menu dropdown when clicking outside
-        this.addEventListener(document, 'click', (e) => {
-            this.handleDocumentClick(e as MouseEvent);
-        });
     }
 
     /**
@@ -240,52 +222,6 @@ export class Header {
         // Open settings modal using the SettingsModal singleton
         settingsModal.open();
         logger.debug('Header', 'Settings modal opened via Header');
-    }
-
-    /**
-     * Handle document click for closing dropdown
-     */
-    private handleDocumentClick(event: MouseEvent): void {
-        if (!this.menuDropdown || !this.menuDropdownButton) return;
-
-        const target = event.target as Node;
-
-        // Close dropdown if clicking outside
-        if (!this.menuDropdown.contains(target) && !this.menuDropdownButton.contains(target)) {
-            this.closeMenuDropdown();
-        }
-    }
-
-    // ========================================
-    // Menu Dropdown Methods
-    // ========================================
-
-    /**
-     * Toggle menu dropdown visibility
-     */
-    private toggleMenuDropdown(): void {
-        if (!this.menuDropdown) return;
-
-        const isVisible = this.menuDropdown.style.display === 'block';
-        this.menuDropdown.style.display = isVisible ? 'none' : 'block';
-    }
-
-    /**
-     * Close menu dropdown
-     */
-    private closeMenuDropdown(): void {
-        if (this.menuDropdown) {
-            this.menuDropdown.style.display = 'none';
-        }
-    }
-
-    /**
-     * Open menu dropdown
-     */
-    public openMenuDropdown(): void {
-        if (this.menuDropdown) {
-            this.menuDropdown.style.display = 'block';
-        }
     }
 
     // ========================================

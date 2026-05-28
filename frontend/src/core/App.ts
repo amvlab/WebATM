@@ -344,7 +344,6 @@ export class App {
         // Verify controls are working by checking if key elements exist
         const playBtn = document.getElementById('play-btn');
         const settingsBtn = document.getElementById('settings-btn');
-        const menuDropdownBtn = document.getElementById('menu-dropdown-btn');
 
         if (playBtn) {
             logger.verbose('App', 'Play button found');
@@ -356,12 +355,6 @@ export class App {
             logger.verbose('App', 'Settings button found');
         } else {
             logger.warn('App', '✗ Settings button not found');
-        }
-
-        if (menuDropdownBtn) {
-            logger.verbose('App', 'Menu dropdown button found');
-        } else {
-            logger.warn('App', '✗ Menu dropdown button not found');
         }
 
         logger.debug('App', 'Controls event handlers should be active');
