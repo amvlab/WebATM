@@ -30,7 +30,7 @@
     "webpack-manifest-plugin": "^5.0.0"
   },
   "dependencies": {
-    "@fortawesome/fontawesome-free": "^6.6.0",
+    "@fortawesome/fontawesome-free": "^7.2.0",
     "@turf/circle": "^7.2.0",
     "maplibre-gl": "^5.8.0",
     "pmtiles": "^4.4.1",
