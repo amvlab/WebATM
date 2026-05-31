@@ -22,7 +22,7 @@
   "type": "commonjs",
   "devDependencies": {
     "@types/node": "^25.9.1",
-    "@types/three": "^0.169.0",
+    "@types/three": "^0.184.1",
     "ts-loader": "^9.5.4",
     "typescript": "^5.9.3",
     "webpack": "^5.102.0",
