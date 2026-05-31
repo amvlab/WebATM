@@ -53,8 +53,13 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
         // Don't auto-clear - MapLibre manages the clear
         this.renderer.autoClear = false;
 
-        // Set pixel ratio for high-DPI displays (reduces graininess)
-        this.renderer.setPixelRatio(window.devicePixelRatio);
+        // Match the Three.js drawing buffer to MapLibre's canvas buffer.
+        // MapLibre already sizes the canvas for the device pixel ratio (e.g. 2x on
+        // Retina), so we keep Three's pixelRatio at 1 and size it to the physical
+        // buffer. Calling setPixelRatio(devicePixelRatio) here would instead make
+        // Three's WebGL viewport twice the canvas size on HiDPI displays, distorting
+        // the scene until a manual window resize re-synced it.
+        this.syncRendererSize();
 
         // Set color space for accurate color rendering
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -65,6 +70,29 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
 
         // Subclass-specific initialization
         this.onSceneReady();
+    }
+
+    /**
+     * Keep the Three.js renderer's drawing buffer matched to MapLibre's canvas.
+     *
+     * The renderer shares MapLibre's canvas and GL context. MapLibre owns the
+     * drawing-buffer size (already scaled for the device pixel ratio), so we mirror
+     * that physical size into Three with pixelRatio = 1. This avoids the HiDPI/Retina
+     * distortion that occurs when Three's viewport drifts out of sync with the canvas,
+     * and self-heals on every window/canvas resize.
+     */
+    private syncRendererSize(): void {
+        const canvas = this.map.getCanvas();
+        const size = this.renderer.getSize(new THREE.Vector2());
+        if (
+            this.renderer.getPixelRatio() !== 1 ||
+            size.width !== canvas.width ||
+            size.height !== canvas.height
+        ) {
+            this.renderer.setPixelRatio(1);
+            // updateStyle = false: never touch the canvas CSS; MapLibre owns layout.
+            this.renderer.setSize(canvas.width, canvas.height, false);
+        }
     }
 
     /**
@@ -106,6 +134,10 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
         const args = Array.isArray(matrixOrArgs)
             ? { defaultProjectionData: { mainMatrix: matrixOrArgs } }
             : matrixOrArgs;
+
+        // Keep the renderer's drawing buffer in sync with MapLibre's canvas so the
+        // WebGL viewport stays correct after resizes / DPR changes (Retina toggles).
+        this.syncRendererSize();
 
         // Update scene objects first (subclass may override camera projection)
         this.updateScene(args);

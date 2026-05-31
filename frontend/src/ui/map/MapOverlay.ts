@@ -560,6 +560,20 @@ export class MapOverlay {
 
         logger.info('MapOverlay', 'Disabling 3D overlay...');
 
+        // Save current view state before removing the 3D layer. Removing the
+        // Three.js custom layer disrupts MapLibre's viewport/projection the same
+        // way adding it does, which otherwise snaps the map back to its default
+        // view. We restore the saved view once the map settles.
+        const map = this.mapDisplay.getMap();
+        const savedView = map
+            ? {
+                  center: map.getCenter(),
+                  zoom: map.getZoom(),
+                  pitch: map.getPitch(),
+                  bearing: map.getBearing()
+              }
+            : null;
+
         if (this.aircraftRoute3DRenderer) {
             this.aircraftRoute3DRenderer.destroy();
             this.aircraftRoute3DRenderer = null;
@@ -571,6 +585,15 @@ export class MapOverlay {
         }
 
         this.is3DOverlayActive = false;
+
+        // Restore the view after the map settles from removing the 3D layer.
+        if (map && savedView) {
+            map.once('idle', () => {
+                map.jumpTo(savedView);
+                this.mapDisplay.resize();
+            });
+        }
+
         logger.info('MapOverlay', '3D overlay disabled');
     }
 
