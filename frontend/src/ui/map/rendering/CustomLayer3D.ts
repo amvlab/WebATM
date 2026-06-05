@@ -53,12 +53,12 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
         // Don't auto-clear - MapLibre manages the clear
         this.renderer.autoClear = false;
 
-        // Match the Three.js drawing buffer to MapLibre's canvas buffer.
+        // Match the Three.js WebGL viewport to MapLibre's canvas buffer.
         // MapLibre already sizes the canvas for the device pixel ratio (e.g. 2x on
-        // Retina), so we keep Three's pixelRatio at 1 and size it to the physical
-        // buffer. Calling setPixelRatio(devicePixelRatio) here would instead make
-        // Three's WebGL viewport twice the canvas size on HiDPI displays, distorting
-        // the scene until a manual window resize re-synced it.
+        // Retina), so we keep Three's pixelRatio at 1 and point its viewport at the
+        // physical buffer. Calling setPixelRatio(devicePixelRatio) here would instead
+        // make Three's WebGL viewport twice the canvas size on HiDPI displays,
+        // distorting the scene until a manual window resize re-synced it.
         this.syncRendererSize();
 
         // Set color space for accurate color rendering
@@ -73,26 +73,26 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
     }
 
     /**
-     * Keep the Three.js renderer's drawing buffer matched to MapLibre's canvas.
+     * Keep the Three.js renderer's WebGL viewport matched to MapLibre's canvas.
      *
-     * The renderer shares MapLibre's canvas and GL context. MapLibre owns the
-     * drawing-buffer size (already scaled for the device pixel ratio), so we mirror
-     * that physical size into Three with pixelRatio = 1. This avoids the HiDPI/Retina
-     * distortion that occurs when Three's viewport drifts out of sync with the canvas,
-     * and self-heals on every window/canvas resize.
+     * The renderer shares MapLibre's canvas and GL context. MapLibre owns the canvas
+     * and its drawing-buffer size (already scaled for the device pixel ratio), so we
+     * keep Three's pixelRatio = 1 and only point its viewport at the physical buffer.
+     *
+     * We deliberately use setViewport() rather than setSize(): setSize() writes to
+     * canvas.width / canvas.height, and assigning to those attributes resets the
+     * shared WebGL drawing buffer on every resize (even when the value is unchanged,
+     * notably on Safari / HiDPI MacBooks). That reset desyncs MapLibre's painter from
+     * the buffer and distorts the whole map. setViewport() only updates Three's
+     * internal viewport, leaving the canvas entirely under MapLibre's control, and
+     * self-heals on every window/canvas resize and DPR change.
      */
     private syncRendererSize(): void {
         const canvas = this.map.getCanvas();
-        const size = this.renderer.getSize(new THREE.Vector2());
-        if (
-            this.renderer.getPixelRatio() !== 1 ||
-            size.width !== canvas.width ||
-            size.height !== canvas.height
-        ) {
+        if (this.renderer.getPixelRatio() !== 1) {
             this.renderer.setPixelRatio(1);
-            // updateStyle = false: never touch the canvas CSS; MapLibre owns layout.
-            this.renderer.setSize(canvas.width, canvas.height, false);
         }
+        this.renderer.setViewport(0, 0, canvas.width, canvas.height);
     }
 
     /**
