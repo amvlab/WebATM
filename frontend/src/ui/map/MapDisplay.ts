@@ -46,6 +46,22 @@ export class MapDisplay {
     // every style.load.
     private terrainControl: TerrainToggleControl | null = null;
 
+    // Keeps the map's internal transform (size + projection matrix) in sync
+    // with the on-screen canvas. MapLibre only recomputes these on resize(),
+    // but the container can change size from layout settling, scrollbars, or
+    // panel drags without firing a window 'resize' event. A stale transform
+    // makes unproject() (and therefore every e.lngLat) drift from the real
+    // cursor position - which shows up as drawing previews not lining up with
+    // the pointer. The observer resyncs on any container size change.
+    private containerResizeObserver: ResizeObserver | null = null;
+
+    // Detects device-pixel-ratio changes (e.g. dragging the window between a
+    // Retina display and an external monitor). DPR changes do not fire a
+    // 'resize' event, yet they require a resize() to keep the canvas buffer
+    // and transform correct.
+    private dprMediaQuery: MediaQueryList | null = null;
+    private dprListener: (() => void) | null = null;
+
     // Default center and zoom for Amsterdam
     private readonly DEFAULT_CENTER: [number, number] = [4.9, 52.3];
     private readonly DEFAULT_ZOOM = 8;
@@ -114,6 +130,11 @@ export class MapDisplay {
 
         // Set up event handlers
         this.setupEventHandlers();
+
+        // Keep the map transform synced to the container/canvas so cursor
+        // positions (e.lngLat) always match the on-screen pointer.
+        this.observeContainerResize();
+        this.watchDevicePixelRatio();
 
         // Hide the map style message since we have a default style
         this.hideMapStyleMessage();
@@ -552,6 +573,71 @@ export class MapDisplay {
     }
 
     /**
+     * Observe the map container for size changes and resync the map transform.
+     *
+     * The ad-hoc window-resize and panel-drag listeners elsewhere only cover
+     * a subset of the ways the container can change size. Layout settling
+     * after fonts load, scrollbars appearing/disappearing, and flexbox
+     * reflows can all resize the container without a window 'resize' event,
+     * leaving MapLibre's cached transform stale. A stale transform makes
+     * unproject() drift from the real pointer, so drawing previews (heading
+     * guides, polygon/route lines) no longer line up with the cursor.
+     *
+     * The resize() call is deferred to the next animation frame to avoid the
+     * "ResizeObserver loop completed with undelivered notifications" warning
+     * that fires when resizing synchronously inside the observer callback.
+     */
+    private observeContainerResize(): void {
+        if (typeof ResizeObserver === 'undefined') return;
+
+        const container = document.getElementById(this.mapContainer);
+        if (!container) {
+            logger.warn('MapDisplay', 'Map container not found; cannot observe resize');
+            return;
+        }
+
+        this.containerResizeObserver = new ResizeObserver(() => {
+            requestAnimationFrame(() => {
+                this.map?.resize();
+            });
+        });
+        this.containerResizeObserver.observe(container);
+
+        logger.debug('MapDisplay', 'Container resize observer attached');
+    }
+
+    /**
+     * Resync the map when the device pixel ratio changes. This happens when
+     * the browser window moves between displays with different scaling (for
+     * example a Retina laptop screen and a 1x external monitor), which does
+     * not fire a window 'resize' event but does require a resize() so the
+     * canvas backing buffer and transform stay correct. matchMedia queries
+     * are DPR-specific, so we re-arm the listener after each change.
+     */
+    private watchDevicePixelRatio(): void {
+        if (typeof window.matchMedia !== 'function') return;
+
+        // Tear down any previous query/listener before re-arming.
+        if (this.dprMediaQuery && this.dprListener) {
+            this.dprMediaQuery.removeEventListener('change', this.dprListener);
+        }
+
+        this.dprListener = () => {
+            this.map?.resize();
+            // The matched DPR has changed, so the query no longer applies;
+            // build a fresh one for the new ratio.
+            this.watchDevicePixelRatio();
+        };
+
+        this.dprMediaQuery = window.matchMedia(
+            `(resolution: ${window.devicePixelRatio}dppx)`
+        );
+        this.dprMediaQuery.addEventListener('change', this.dprListener, {
+            once: true
+        });
+    }
+
+    /**
      * Get the map center
      */
     public getCenter(): [number, number] {
@@ -661,6 +747,17 @@ export class MapDisplay {
      * Destroy the map and clean up resources
      */
     public destroy(): void {
+        if (this.containerResizeObserver) {
+            this.containerResizeObserver.disconnect();
+            this.containerResizeObserver = null;
+        }
+
+        if (this.dprMediaQuery && this.dprListener) {
+            this.dprMediaQuery.removeEventListener('change', this.dprListener);
+            this.dprMediaQuery = null;
+            this.dprListener = null;
+        }
+
         if (this.map) {
             this.map.remove();
             this.map = null;
