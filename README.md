@@ -207,6 +207,10 @@ Then enable it in the UI via **Settings → Map Display Configuration → Offlin
 
 > The `*.pmtiles` archives can grow to hundreds of MB or more, so distribute them via GitHub releases rather than committing them to the repository.
 
+#### Navdata overlay (airports, runways, waypoints)
+
+WebATM can also render an offline navdata overlay (airports, heliports, runways, taxiways, and waypoints) with a search box backed by a local SQLite index. This is built from X-Plane `apt.dat`/`earth_fix.dat` plus OurAirports and produces `WebATM/static/tiles/navdata.pmtiles` and `WebATM/static/navdata/navdata.sqlite`. See [script/README.md](script/README.md) for the build pipeline and tuning options.
+
 
 ### Code Quality
 
