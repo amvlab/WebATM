@@ -270,3 +270,5 @@ WebATM/static/vendor/
 #   4. In WebATM:   Settings -> Map Display Configuration -> Offline (Local PMTiles)
 WebATM/static/tiles/*.pmtiles
 
+WebATM/static/glyphs/*
+WebATM/static/navdata/*
