@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # The world.pmtiles offline map is gitignored (~520MB) and shipped via
       # the prebuilt release tarball, so a fresh checkout has no tile. Pull it
