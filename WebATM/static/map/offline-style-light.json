@@ -1,8 +1,9 @@
 {
     "version": 8,
     "name": "WebATM Offline Light",
+    "glyphs": "/static/glyphs/{fontstack}/{range}.pbf",
     "metadata": {
-        "description": "Minimal Protomaps-schema light basemap for WebATM offline mode. Rendered directly from a local .pmtiles archive served by Flask; no glyphs or sprites so the style is fully self-contained."
+        "description": "Minimal Protomaps-schema light basemap for WebATM offline mode. Rendered directly from a local .pmtiles archive served by Flask. The basemap itself has no labels; glyphs are referenced only so WebATM's overlay labels (airports/waypoints, shapes, aircraft) can render offline - see WebATM/static/glyphs/README.md to populate them."
     },
     "sources": {
         "protomaps": {
