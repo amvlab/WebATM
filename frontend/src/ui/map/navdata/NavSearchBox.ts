@@ -1,5 +1,5 @@
-import type { MapDisplay } from './MapDisplay';
-import { logger } from '../../utils/Logger';
+import type { MapDisplay } from '../MapDisplay';
+import { logger } from '../../../utils/Logger';
 
 interface NavSearchResult {
     kind: 'airport' | 'heliport' | 'waypoint';

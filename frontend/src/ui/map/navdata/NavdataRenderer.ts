@@ -1,8 +1,8 @@
 import { Map as MapLibreMap } from 'maplibre-gl';
-import { DisplayOptions } from '../../data/types';
-import type { MapDisplay } from './MapDisplay';
-import type { StateManager } from '../../core/StateManager';
-import { logger } from '../../utils/Logger';
+import { DisplayOptions } from '../../../data/types';
+import type { MapDisplay } from '../MapDisplay';
+import type { StateManager } from '../../../core/StateManager';
+import { logger } from '../../../utils/Logger';
 
 /**
  * NavdataRenderer - renders the static airports + waypoints overlay.

@@ -1,7 +1,7 @@
 import { Map as MapLibreMap, MapMouseEvent, GeoJSONSource } from 'maplibre-gl';
 import type { MapDisplay } from './map/MapDisplay';
 import type { Console } from './Console';
-import type { NavaidSnapper } from './map/NavaidSnapper';
+import type { NavaidSnapper } from './map/navdata/NavaidSnapper';
 import { logger } from '../utils/Logger';
 
 /**

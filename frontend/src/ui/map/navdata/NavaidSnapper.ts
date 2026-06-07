@@ -1,7 +1,7 @@
 import { GeoJSONSource, MapMouseEvent } from 'maplibre-gl';
-import type { MapDisplay } from './MapDisplay';
-import type { StateManager } from '../../core/StateManager';
-import { logger } from '../../utils/Logger';
+import type { MapDisplay } from '../MapDisplay';
+import type { StateManager } from '../../../core/StateManager';
+import { logger } from '../../../utils/Logger';
 
 /**
  * Result of a successful snap: the navaid coordinate plus its identity so

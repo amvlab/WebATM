@@ -6,7 +6,7 @@ import { AltitudeUnit, SpeedUnit } from '../../../data/types';
 import { logger } from '../../../utils/Logger';
 import { RouteDrawingPreview } from './RouteDrawingPreview';
 import { RouteConstraintsModal } from './RouteConstraintsModal';
-import type { NavaidSnapper } from '../NavaidSnapper';
+import type { NavaidSnapper } from '../navdata/NavaidSnapper';
 
 /**
  * RouteDrawingManager - Interactive waypoint route creation.

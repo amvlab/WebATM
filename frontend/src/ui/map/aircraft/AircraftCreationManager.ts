@@ -4,7 +4,7 @@ import { Map as MapLibreMap } from 'maplibre-gl';
 import { SpeedUnit, AltitudeUnit } from '../../../data/types';
 import { OPENAP_AIRCRAFT_TYPES, isOpenapAircraftType } from '../../../data/aircraftTypes';
 import type { App } from '../../../core/App';
-import type { NavaidSnapper } from '../NavaidSnapper';
+import type { NavaidSnapper } from '../navdata/NavaidSnapper';
 import { logger } from '../../../utils/Logger';
 
 /**

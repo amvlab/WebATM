@@ -6,7 +6,7 @@ import { OPENAP_AIRCRAFT_TYPES } from '../data/aircraftTypes';
 import { logger } from '../utils/Logger';
 import { ConsoleMapPicker, GeoContext } from './ConsoleMapPicker';
 import type { MapDisplay } from './map/MapDisplay';
-import type { NavaidSnapper } from './map/NavaidSnapper';
+import type { NavaidSnapper } from './map/navdata/NavaidSnapper';
 import {
     parseSignature,
     currentArgIndex,

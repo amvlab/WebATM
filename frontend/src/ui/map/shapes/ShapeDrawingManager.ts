@@ -2,7 +2,7 @@ import { MapDisplay } from '../MapDisplay';
 import { modalManager } from '../../ModalManager';
 import { Map as MapLibreMap, MapMouseEvent, MapLayerMouseEvent, GeoJSONSource } from 'maplibre-gl';
 import type { App } from '../../../core/App';
-import type { NavaidSnapper } from '../NavaidSnapper';
+import type { NavaidSnapper } from '../navdata/NavaidSnapper';
 import { logger } from '../../../utils/Logger';
 
 /**
