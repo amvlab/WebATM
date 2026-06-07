@@ -451,6 +451,25 @@ export interface DisplayOptions {
   showShapeFill: boolean;
   showShapeLines: boolean;
   showShapeLabels: boolean;
+  // Navigation data overlay (airports + waypoints from X-Plane navdata,
+  // served as vector tiles - see scripts/navdata/)
+  showAirports: boolean;
+  showAirportIcons: boolean;
+  showAirportLabels: boolean;
+  showHeliports: boolean;
+  showWaypoints: boolean;
+  showWaypointIcons: boolean;
+  showWaypointLabels: boolean;
+  showRunways: boolean;
+  showRunwayLabels: boolean;
+  showPavement: boolean;
+  // Snap drawing/creation clicks to the nearest navaid (airport/heliport/waypoint).
+  snapToNavaids: boolean;
+  airportColor: string;
+  heliportColor: string;
+  waypointColor: string;
+  runwayColor: string;
+  pavementColor: string;
   aircraftIconSize: number;
   mapLabelsTextSize: number;
   aircraftShape: AircraftShapeType;

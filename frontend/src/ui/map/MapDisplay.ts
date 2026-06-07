@@ -556,6 +556,20 @@ export class MapDisplay {
     }
 
     /**
+     * Classify the active basemap as 'light' or 'dark' so overlays (e.g. the
+     * navdata renderer) can pick a palette that reads well against it. Only the
+     * two bundled offline styles and the default Dark Matter style are known;
+     * everything else (MapTiler, MapLibre demo, custom URLs) is treated as a
+     * non-local style and uses the light palette.
+     */
+    public getMapTheme(): 'light' | 'dark' {
+        const s = this.currentStyle || '';
+        if (s.includes('offline-style-light')) return 'light';
+        if (s.includes('dark-matter') || s.includes('offline-style.json')) return 'dark';
+        return 'light';
+    }
+
+    /**
      * Check if map is initialized
      */
     public isInitialized(): boolean {

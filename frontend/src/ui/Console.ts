@@ -6,6 +6,7 @@ import { OPENAP_AIRCRAFT_TYPES } from '../data/aircraftTypes';
 import { logger } from '../utils/Logger';
 import { ConsoleMapPicker, GeoContext } from './ConsoleMapPicker';
 import type { MapDisplay } from './map/MapDisplay';
+import type { NavaidSnapper } from './map/NavaidSnapper';
 import {
     parseSignature,
     currentArgIndex,
@@ -121,8 +122,8 @@ export class Console {
      * Provide a MapDisplay reference so the console can offer map-click
      * coordinate/heading insertion while the user types a command.
      */
-    public setMapDisplay(mapDisplay: MapDisplay): void {
-        this.mapPicker = new ConsoleMapPicker(mapDisplay, this);
+    public setMapDisplay(mapDisplay: MapDisplay, navaidSnapper: NavaidSnapper): void {
+        this.mapPicker = new ConsoleMapPicker(mapDisplay, this, navaidSnapper);
     }
 
     /**

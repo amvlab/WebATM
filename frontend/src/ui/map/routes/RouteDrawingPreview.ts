@@ -103,7 +103,7 @@ export class RouteDrawingPreview {
                 type: 'symbol',
                 layout: {
                     'text-field': ['get', 'label'],
-                    'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+                    'text-font': ['Open Sans Regular'],
                     'text-size': labelSize,
                     'text-offset': [0, -1.4],
                     'text-anchor': 'bottom'

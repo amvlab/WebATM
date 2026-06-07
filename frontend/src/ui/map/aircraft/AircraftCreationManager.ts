@@ -4,6 +4,7 @@ import { Map as MapLibreMap } from 'maplibre-gl';
 import { SpeedUnit, AltitudeUnit } from '../../../data/types';
 import { OPENAP_AIRCRAFT_TYPES, isOpenapAircraftType } from '../../../data/aircraftTypes';
 import type { App } from '../../../core/App';
+import type { NavaidSnapper } from '../NavaidSnapper';
 import { logger } from '../../../utils/Logger';
 
 /**
@@ -33,6 +34,7 @@ declare const window: AppWindow;
 
 export class AircraftCreationManager {
     private mapDisplay: MapDisplay;
+    private navaidSnapper: NavaidSnapper;
     private creationMode: 'manual' | 'map' = 'manual';
     private aircraftDrawingMode: boolean = false;
     private aircraftDrawingPoints: [number, number][] = [];
@@ -42,14 +44,16 @@ export class AircraftCreationManager {
     // Event handlers - stored as references for proper cleanup
     private aircraftMapClickHandler: ((e: any) => void) | null = null;
     private aircraftMouseMoveHandler: ((e: any) => void) | null = null;
+    private aircraftSnapHoverHandler: ((e: any) => void) | null = null;
     private aircraftEscapeHandler: ((e: KeyboardEvent) => void) | null = null;
 
     // Aircraft type dropdown state (for the Create Aircraft modal)
     private typeDropdownSuggestions: string[] = [];
     private typeDropdownSelectedIndex: number = -1;
 
-    constructor(mapDisplay: MapDisplay) {
+    constructor(mapDisplay: MapDisplay, navaidSnapper: NavaidSnapper) {
         this.mapDisplay = mapDisplay;
+        this.navaidSnapper = navaidSnapper;
         this.setupModalHandlers();
     }
 
@@ -803,6 +807,16 @@ export class AircraftCreationManager {
 
         map.on('click', this.aircraftMapClickHandler);
 
+        // Highlight the navaid the cursor would snap to. This runs for both
+        // phases: the first click (position) and the second click (heading
+        // direction), so the user can aim the heading at a known navaid.
+        this.aircraftSnapHoverHandler = (e: any) => {
+            if (this.aircraftDrawingPoints.length < 2) {
+                this.navaidSnapper.highlight(e);
+            }
+        };
+        map.on('mousemove', this.aircraftSnapHoverHandler);
+
         // Show drawing banner
         logger.debug('AircraftCreationManager', 'About to show drawing mode and banner');
         this.showDrawingBanner();
@@ -829,6 +843,12 @@ export class AircraftCreationManager {
             this.aircraftMouseMoveHandler = null;
         }
 
+        if (this.aircraftSnapHoverHandler) {
+            map.off('mousemove', this.aircraftSnapHoverHandler);
+            this.aircraftSnapHoverHandler = null;
+        }
+        this.navaidSnapper.clearHighlight();
+
         // Remove escape key handler
         if (this.aircraftEscapeHandler) {
             document.removeEventListener('keydown', this.aircraftEscapeHandler);
@@ -853,13 +873,19 @@ export class AircraftCreationManager {
             return;
         }
 
-        const point: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+        // Snap both clicks to a nearby navaid when enabled: the first click sets
+        // the spawn position, the second sets the heading/direction (aim at a
+        // known navaid for a precise heading).
+        let point: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+        const snapped = this.navaidSnapper.snap(e);
+        if (snapped) point = [snapped.lng, snapped.lat];
         this.aircraftDrawingPoints.push(point);
 
         logger.debug('AircraftCreationManager', `Aircraft click ${this.aircraftDrawingPoints.length} at [${point[1].toFixed(4)}, ${point[0].toFixed(4)}]`);
 
         if (this.aircraftDrawingPoints.length === 1) {
-            // First click - set position
+            // First click - set position. Keep the snap highlight active so the
+            // heading click can also snap to a navaid.
             this.updateDrawingBanner('Move mouse to see heading guide, then click to confirm direction');
             this.visualizeAircraftPosition(point);
         } else if (this.aircraftDrawingPoints.length === 2) {
@@ -915,9 +941,13 @@ export class AircraftCreationManager {
         // Store position for guide line
         this.aircraftPosition = position;
 
-        // Add mouse move handler for guide line
+        // Add mouse move handler for guide line. Snap the guide endpoint to a
+        // nearby navaid so the previewed heading matches what the second click
+        // will commit.
         this.aircraftMouseMoveHandler = (e: any) => {
-            this.updateHeadingGuideLine(e.lngLat);
+            const snapped = this.navaidSnapper.snap(e);
+            const guidePos = snapped ? { lng: snapped.lng, lat: snapped.lat } : e.lngLat;
+            this.updateHeadingGuideLine(guidePos);
         };
 
         map.on('mousemove', this.aircraftMouseMoveHandler);

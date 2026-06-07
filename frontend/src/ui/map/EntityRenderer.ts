@@ -390,7 +390,7 @@ export abstract class EntityRenderer<T extends EntityData> {
                 type: 'symbol',
                 layout: {
                     'text-field': ['get', 'label_text'],
-                    'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+                    'text-font': ['Open Sans Regular'],
                     'text-offset': [0, 1.5],
                     'text-anchor': 'top',
                     'text-size': this.displayOptions.mapLabelsTextSize,

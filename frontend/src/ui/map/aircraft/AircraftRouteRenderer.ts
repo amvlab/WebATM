@@ -209,7 +209,7 @@ export class AircraftRouteRenderer {
                 type: 'symbol',
                 layout: {
                     'text-field': ['get', 'name'],
-                    'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+                    'text-font': ['Open Sans Regular'],
                     'text-offset': ['get', 'offset'],
                     'text-anchor': ['get', 'anchor'],
                     'text-size': this.displayOptions.mapLabelsTextSize,
