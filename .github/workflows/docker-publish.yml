@@ -21,26 +21,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # The world.pmtiles offline map is gitignored (~520MB) and shipped via
-      # the prebuilt release tarball, so a fresh checkout has no tile. Pull it
-      # from the most recent published release so the resulting image contains
-      # a working offline basemap. Note: when the tile itself changes, the new
-      # tile lands in Docker one release after the tarball is published (this
-      # workflow runs before the current tag's release is created).
-      - name: Hydrate world.pmtiles from latest release
+      # Large/binary static assets (offline tiles, glyphs, navdata) are
+      # gitignored and shipped via a separate "assets" GitHub release that
+      # changes rarely (decoupled from the per-version code tarball). The
+      # tag to pull is pinned in .assets-version at the repo root — bump that
+      # file to roll Docker images onto a new asset bundle.
+      - name: Hydrate static assets from pinned assets release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/prebuilt WebATM/static/tiles
-          LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
-          echo "Pulling world.pmtiles from release: $LATEST_TAG"
-          gh release download "$LATEST_TAG" \
-            --pattern 'webatm-prebuilt-*.tar.gz' \
-            --dir /tmp/prebuilt
-          tar -xzf /tmp/prebuilt/webatm-prebuilt-*.tar.gz \
-            -C . WebATM/static/tiles/world.pmtiles
-          ls -lh WebATM/static/tiles/world.pmtiles
+          mkdir -p /tmp/assets
+          ASSETS_TAG="$(tr -d '[:space:]' < .assets-version)"
+          if [ -z "$ASSETS_TAG" ]; then
+            echo "ERROR: .assets-version is empty or missing" >&2
+            exit 1
+          fi
+          echo "Pulling static assets from release: $ASSETS_TAG"
+          gh release download "$ASSETS_TAG" \
+            --pattern 'webatm-assets-*.tar.gz' \
+            --dir /tmp/assets
+          tar -xzf /tmp/assets/webatm-assets-*.tar.gz \
+            -C . \
+            WebATM/static/tiles \
+            WebATM/static/glyphs \
+            WebATM/static/navdata
+          ls -lh WebATM/static/tiles/ WebATM/static/glyphs/ WebATM/static/navdata/
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4

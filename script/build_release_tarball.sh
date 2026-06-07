@@ -2,9 +2,12 @@
 #
 # Build the prebuilt release tarball
 #
-# Bundles WebATM/static/{tiles,vendor,dist} into webatm-prebuilt-<version>.tar.gz
+# Bundles WebATM/static/{vendor,dist} into webatm-prebuilt-<version>.tar.gz
 # for attaching to a GitHub release. Entries are prefixed with WebATM/ so the
 # archive extracts cleanly at the repo root.
+#
+# Large/rarely-changing assets (tiles, glyphs, navdata) live in a separate
+# assets release built by build_assets_tarball.sh and pinned via .assets-version.
 #
 # Version is read from pyproject.toml. Optional first argument overrides the
 # output directory (default: project root).
@@ -23,14 +26,13 @@ if [ -z "$VERSION" ]; then
 fi
 
 ASSETS=(
-    "WebATM/static/tiles"
     "WebATM/static/vendor"
     "WebATM/static/dist"
 )
 
 for path in "${ASSETS[@]}"; do
     if [ ! -d "$PROJECT_ROOT/$path" ]; then
-        echo "ERROR: missing $path — run script/build_frontend.sh and ensure the world.pmtiles tile exists" >&2
+        echo "ERROR: missing $path — run script/build_frontend.sh" >&2
         exit 1
     fi
 done

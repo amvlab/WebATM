@@ -78,7 +78,7 @@ By default the container connects to a BlueSky server on the Docker host via `ho
 
 ### Option 2: Prebuilt Release (no Node.js required)
 
-Use this if you want to run WebATM directly from source without installing Node.js or building the frontend yourself. You still clone the repo for the Python source, then drop in a single tarball that contains all the runtime assets that aren't checked into git.
+Use this if you want to run WebATM directly from source without installing Node.js or building the frontend yourself. You still clone the repo for the Python source, then drop in two tarballs that contain the runtime assets that aren't checked into git: a small per-version code tarball and a larger static-asset tarball that changes rarely.
 
 1. **Clone the repository**
    ```bash
@@ -86,34 +86,46 @@ Use this if you want to run WebATM directly from source without installing Node.
    cd WebATM
    ```
 
-2. **Download and extract the prebuilt assets**
+2. **Download and extract the prebuilt code tarball**
 
    Grab the latest `webatm-prebuilt-<version>.tar.gz` from the [Releases page](https://github.com/amvlab/WebATM/releases) and extract it from the repo root:
    ```bash
    tar -xzf ~/Downloads/webatm-prebuilt-<version>.tar.gz
    ```
-   The tarball uses repo-relative paths, so extracting from the WebATM root lands the files in the right places:
+   This lands:
    - `WebATM/static/dist/` — prebuilt webpack bundles
    - `WebATM/static/vendor/` — third-party CSS/fonts (FontAwesome, MapLibre)
-   - `WebATM/static/tiles/world.pmtiles` — offline basemap (optional but bundled)
 
-3. **Install Python dependencies**
+3. **Download and extract the static-asset tarball**
+
+   Grab the assets tarball pinned by [`.assets-version`](./.assets-version) in this repo (e.g. `webatm-assets-v1.tar.gz`) from the [Releases page](https://github.com/amvlab/WebATM/releases) and extract it from the repo root:
+   ```bash
+   tar -xzf ~/Downloads/webatm-assets-<tag>.tar.gz
+   ```
+   This lands:
+   - `WebATM/static/tiles/` — offline basemap (`world.pmtiles`) and navigation overlay (`navdata.pmtiles`)
+   - `WebATM/static/glyphs/` — map fonts
+   - `WebATM/static/navdata/` — navigation database
+
+   This bundle changes rarely (only when tiles, fonts, or navdata roll), so a single download usually carries across many code releases.
+
+4. **Install Python dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Start the application**
+5. **Start the application**
    ```bash
    script/run_webatm.sh
    ```
 
-5. **Access the web interface**
+6. **Access the web interface**
 
    Open your browser to: http://localhost:8082
 
-6. **(Optional) Enable the offline basemap**
+7. **(Optional) Enable the offline basemap**
 
-   The tarball already includes `WebATM/static/tiles/world.pmtiles`. To use it, open **Settings → Map Display Configuration → Offline (Local PMTiles)** in the web UI.
+   The assets tarball already includes `WebATM/static/tiles/world.pmtiles`. To use it, open **Settings → Map Display Configuration → Offline (Local PMTiles)** in the web UI.
 
 ### Option 3: Local Deployment (build from source)
 
