@@ -337,6 +337,102 @@ def register_basic_routes(app, session_manager):
                 }
             ), 500
 
+    @app.route("/api/navdata/search", methods=["GET"])
+    def search_navdata():
+        """Search airports and waypoints by identifier for the map "go to" box.
+
+        Backed by the SQLite index built offline from X-Plane data
+        (see scripts/navdata/). Query params:
+            q:     identifier prefix to match (min 1 char), required
+            limit: max results (default 10, capped at 50)
+            kind:  optional filter, "airport" or "waypoint"
+        """
+        try:
+            query = (request.args.get("q") or "").strip()
+            if not query:
+                return jsonify({"success": True, "results": []})
+
+            limit = request.args.get("limit", type=int, default=10)
+            limit = max(1, min(limit, 50))
+            kind = request.args.get("kind")
+
+            db_path = (
+                Path(__file__).parent.parent / "static" / "navdata" / "navdata.sqlite"
+            )
+            if not db_path.exists():
+                # Index hasn't been built yet - degrade gracefully so the UI
+                # can show "navdata not available" rather than erroring.
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": "navdata index not built",
+                        "results": [],
+                    }
+                ), 503
+
+            # Build a safe FTS5 prefix query: keep only alphanumeric tokens
+            # (this also strips any FTS syntax the user might type) and turn
+            # each into a prefix term so "heath" matches "Heathrow" and "kse"
+            # matches "KSEA". Multiple tokens are implicitly AND-ed.
+            import re
+
+            tokens = re.findall(r"[A-Za-z0-9]+", query)
+            if not tokens:
+                return jsonify({"success": True, "results": []})
+            match_expr = " ".join(f"{t}*" for t in tokens)
+
+            import sqlite3
+
+            # Open read-only so a concurrent rebuild can't be corrupted.
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                conn.row_factory = sqlite3.Row
+                sql = (
+                    "SELECT n.kind, n.ident, n.name, n.lat, n.lon, n.score, n.rank, "
+                    "n.iata, "
+                    "(n.ident = ? COLLATE NOCASE) AS exact "
+                    "FROM navaids_fts JOIN navaids n ON n.id = navaids_fts.rowid "
+                    "WHERE navaids_fts MATCH ?"
+                )
+                params: list = [query, match_expr]
+                if kind in ("airport", "heliport", "waypoint"):
+                    sql += " AND n.kind = ?"
+                    params.append(kind)
+                # Exact ident match first, then a strict kind hierarchy
+                # (airports, then heliports, then waypoints), then importance
+                # (score), then FTS relevance and shorter idents.
+                sql += (
+                    " ORDER BY exact DESC, "
+                    "CASE n.kind WHEN 'airport' THEN 0 "
+                    "WHEN 'heliport' THEN 1 ELSE 2 END, "
+                    "n.score DESC, navaids_fts.rank, length(n.ident) LIMIT ?"
+                )
+                params.append(limit)
+                rows = conn.execute(sql, params).fetchall()
+            finally:
+                conn.close()
+
+            results = [
+                {
+                    "kind": r["kind"],
+                    "ident": r["ident"],
+                    "name": r["name"],
+                    "lat": r["lat"],
+                    "lon": r["lon"],
+                    "rank": r["rank"],
+                    "score": r["score"],
+                    "iata": r["iata"],
+                }
+                for r in rows
+            ]
+            return jsonify({"success": True, "results": results})
+
+        except Exception as e:
+            logger.error(f"Error searching navdata: {e}")
+            return jsonify(
+                {"success": False, "error": "navdata search failed", "results": []}
+            ), 500
+
     @app.route("/health")
     def health_check():
         """Health check endpoint for Traefik - always returns 200 if Flask is running."""

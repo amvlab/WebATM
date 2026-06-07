@@ -141,6 +141,19 @@ export class DisplayOptionsPanel extends BasePanel {
         const showShapeLines = storage.get<boolean>('show-shape-lines') ?? displayOptions.showShapeLines;
         const showShapeLabels = storage.get<boolean>('show-shape-labels') ?? displayOptions.showShapeLabels;
 
+        // Load navdata (airports/waypoints) display options from storage
+        const showAirports = storage.get<boolean>('show-airports') ?? displayOptions.showAirports;
+        const showAirportIcons = storage.get<boolean>('show-airport-icons') ?? displayOptions.showAirportIcons;
+        const showAirportLabels = storage.get<boolean>('show-airport-labels') ?? displayOptions.showAirportLabels;
+        const showHeliports = storage.get<boolean>('show-heliports') ?? displayOptions.showHeliports;
+        const showWaypoints = storage.get<boolean>('show-waypoints') ?? displayOptions.showWaypoints;
+        const showWaypointIcons = storage.get<boolean>('show-waypoint-icons') ?? displayOptions.showWaypointIcons;
+        const showWaypointLabels = storage.get<boolean>('show-waypoint-labels') ?? displayOptions.showWaypointLabels;
+        const showRunways = storage.get<boolean>('show-runways') ?? displayOptions.showRunways;
+        const showRunwayLabels = storage.get<boolean>('show-runway-labels') ?? displayOptions.showRunwayLabels;
+        const showPavement = storage.get<boolean>('show-pavement') ?? displayOptions.showPavement;
+        const snapToNavaids = storage.get<boolean>('snap-to-navaids') ?? displayOptions.snapToNavaids;
+
         // Load route display options from storage
         const showRoutes = storage.get<boolean>('show-routes') ?? displayOptions.showRoutes;
         const showRouteLines = storage.get<boolean>('show-route-lines') ?? displayOptions.showRouteLines;
@@ -191,6 +204,17 @@ export class DisplayOptionsPanel extends BasePanel {
             showShapeFill,
             showShapeLines,
             showShapeLabels,
+            showAirports,
+            showAirportIcons,
+            showAirportLabels,
+            showHeliports,
+            showWaypoints,
+            showWaypointIcons,
+            showWaypointLabels,
+            showRunways,
+            showRunwayLabels,
+            showPavement,
+            snapToNavaids,
             showRoutes,
             showRouteLines,
             showRouteLabels,
@@ -283,6 +307,54 @@ export class DisplayOptionsPanel extends BasePanel {
 
         const showShapeLabelsCheckbox = document.getElementById('show-shape-labels') as HTMLInputElement;
         if (showShapeLabelsCheckbox) showShapeLabelsCheckbox.checked = showShapeLabels;
+
+        // Update navdata (airports/waypoints) checkboxes to reflect loaded values
+        const showAirportsCheckbox = document.getElementById('show-airports') as HTMLInputElement;
+        if (showAirportsCheckbox) showAirportsCheckbox.checked = showAirports;
+
+        const showAirportIconsCheckbox = document.getElementById('show-airport-icons') as HTMLInputElement;
+        if (showAirportIconsCheckbox) showAirportIconsCheckbox.checked = showAirportIcons;
+
+        const showAirportLabelsCheckbox = document.getElementById('show-airport-labels') as HTMLInputElement;
+        if (showAirportLabelsCheckbox) showAirportLabelsCheckbox.checked = showAirportLabels;
+
+        const showHeliportsCheckbox = document.getElementById('show-heliports') as HTMLInputElement;
+        if (showHeliportsCheckbox) showHeliportsCheckbox.checked = showHeliports;
+
+        const showWaypointsCheckbox = document.getElementById('show-waypoints') as HTMLInputElement;
+        if (showWaypointsCheckbox) showWaypointsCheckbox.checked = showWaypoints;
+
+        const showWaypointIconsCheckbox = document.getElementById('show-waypoint-icons') as HTMLInputElement;
+        if (showWaypointIconsCheckbox) showWaypointIconsCheckbox.checked = showWaypointIcons;
+
+        const showWaypointLabelsCheckbox = document.getElementById('show-waypoint-labels') as HTMLInputElement;
+        if (showWaypointLabelsCheckbox) showWaypointLabelsCheckbox.checked = showWaypointLabels;
+
+        // Reflect master-toggle collapse state for the airport/waypoint groups
+        this.toggleSubOptionContainers([
+            'show-airport-icons-container',
+            'show-airport-labels-container',
+            'show-heliports-container',
+            'show-runways-container',
+            'show-runway-labels-container',
+            'show-pavement-container'
+        ], showAirports);
+        this.toggleSubOptionContainers([
+            'show-waypoint-icons-container',
+            'show-waypoint-labels-container'
+        ], showWaypoints);
+
+        const showRunwaysCheckbox = document.getElementById('show-runways') as HTMLInputElement;
+        if (showRunwaysCheckbox) showRunwaysCheckbox.checked = showRunways;
+
+        const showRunwayLabelsCheckbox = document.getElementById('show-runway-labels') as HTMLInputElement;
+        if (showRunwayLabelsCheckbox) showRunwayLabelsCheckbox.checked = showRunwayLabels;
+
+        const showPavementCheckbox = document.getElementById('show-pavement') as HTMLInputElement;
+        if (showPavementCheckbox) showPavementCheckbox.checked = showPavement;
+
+        const snapToNavaidsCheckbox = document.getElementById('snap-to-navaids') as HTMLInputElement;
+        if (snapToNavaidsCheckbox) snapToNavaidsCheckbox.checked = snapToNavaids;
 
         // Update route display checkboxes to reflect loaded values
         const showRoutesCheckbox = document.getElementById('show-routes') as HTMLInputElement;
@@ -1086,6 +1158,199 @@ export class DisplayOptionsPanel extends BasePanel {
                 storage.set('show-shape-labels', checked);
                 if (this.stateManager) {
                     this.stateManager.updateDisplayOptions({ showShapeLabels: checked });
+                }
+            });
+        }
+
+        // Navdata (airports / waypoints) display options
+        // Airports master toggle controls all airport sub-options
+        const showAirportsCheckbox = document.getElementById('show-airports') as HTMLInputElement;
+        if (showAirportsCheckbox) {
+            showAirportsCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+
+                // Save the main airports toggle state
+                storage.set('show-airports', checked);
+
+                // Update all airport sub-options to match
+                storage.set('show-airport-icons', checked);
+                storage.set('show-airport-labels', checked);
+                storage.set('show-heliports', checked);
+                storage.set('show-runways', checked);
+                storage.set('show-runway-labels', checked);
+                storage.set('show-pavement', checked);
+
+                // Update the UI checkboxes for each sub-option
+                const subCheckboxIds = [
+                    'show-airport-icons',
+                    'show-airport-labels',
+                    'show-heliports',
+                    'show-runways',
+                    'show-runway-labels',
+                    'show-pavement'
+                ];
+                subCheckboxIds.forEach(id => {
+                    const cb = document.getElementById(id) as HTMLInputElement;
+                    if (cb) cb.checked = checked;
+                });
+
+                // Toggle visibility of sub-option containers
+                this.toggleSubOptionContainers([
+                    'show-airport-icons-container',
+                    'show-airport-labels-container',
+                    'show-heliports-container',
+                    'show-runways-container',
+                    'show-runway-labels-container',
+                    'show-pavement-container'
+                ], checked);
+
+                // Update state manager with all values
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({
+                        showAirports: checked,
+                        showAirportIcons: checked,
+                        showAirportLabels: checked,
+                        showHeliports: checked,
+                        showRunways: checked,
+                        showRunwayLabels: checked,
+                        showPavement: checked
+                    });
+                }
+            });
+        }
+
+        const showAirportIconsCheckbox = document.getElementById('show-airport-icons') as HTMLInputElement;
+        if (showAirportIconsCheckbox) {
+            showAirportIconsCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                storage.set('show-airport-icons', checked);
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({ showAirportIcons: checked });
+                }
+            });
+        }
+
+        const showAirportLabelsCheckbox = document.getElementById('show-airport-labels') as HTMLInputElement;
+        if (showAirportLabelsCheckbox) {
+            showAirportLabelsCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                storage.set('show-airport-labels', checked);
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({ showAirportLabels: checked });
+                }
+            });
+        }
+
+        const showHeliportsCheckbox = document.getElementById('show-heliports') as HTMLInputElement;
+        if (showHeliportsCheckbox) {
+            showHeliportsCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                storage.set('show-heliports', checked);
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({ showHeliports: checked });
+                }
+            });
+        }
+
+        // Waypoints master toggle controls all waypoint sub-options
+        const showWaypointsCheckbox = document.getElementById('show-waypoints') as HTMLInputElement;
+        if (showWaypointsCheckbox) {
+            showWaypointsCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+
+                // Save the main waypoints toggle state
+                storage.set('show-waypoints', checked);
+
+                // Update all waypoint sub-options to match
+                storage.set('show-waypoint-icons', checked);
+                storage.set('show-waypoint-labels', checked);
+
+                // Update the UI checkboxes for each sub-option
+                const showWaypointIconsCb = document.getElementById('show-waypoint-icons') as HTMLInputElement;
+                if (showWaypointIconsCb) showWaypointIconsCb.checked = checked;
+
+                const showWaypointLabelsCb = document.getElementById('show-waypoint-labels') as HTMLInputElement;
+                if (showWaypointLabelsCb) showWaypointLabelsCb.checked = checked;
+
+                // Toggle visibility of sub-option containers
+                this.toggleSubOptionContainers([
+                    'show-waypoint-icons-container',
+                    'show-waypoint-labels-container'
+                ], checked);
+
+                // Update state manager with all values
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({
+                        showWaypoints: checked,
+                        showWaypointIcons: checked,
+                        showWaypointLabels: checked
+                    });
+                }
+            });
+        }
+
+        const showWaypointIconsCheckbox = document.getElementById('show-waypoint-icons') as HTMLInputElement;
+        if (showWaypointIconsCheckbox) {
+            showWaypointIconsCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                storage.set('show-waypoint-icons', checked);
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({ showWaypointIcons: checked });
+                }
+            });
+        }
+
+        const showWaypointLabelsCheckbox = document.getElementById('show-waypoint-labels') as HTMLInputElement;
+        if (showWaypointLabelsCheckbox) {
+            showWaypointLabelsCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                storage.set('show-waypoint-labels', checked);
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({ showWaypointLabels: checked });
+                }
+            });
+        }
+
+        const showRunwaysCheckbox = document.getElementById('show-runways') as HTMLInputElement;
+        if (showRunwaysCheckbox) {
+            showRunwaysCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                storage.set('show-runways', checked);
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({ showRunways: checked });
+                }
+            });
+        }
+
+        const showRunwayLabelsCheckbox = document.getElementById('show-runway-labels') as HTMLInputElement;
+        if (showRunwayLabelsCheckbox) {
+            showRunwayLabelsCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                storage.set('show-runway-labels', checked);
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({ showRunwayLabels: checked });
+                }
+            });
+        }
+
+        const showPavementCheckbox = document.getElementById('show-pavement') as HTMLInputElement;
+        if (showPavementCheckbox) {
+            showPavementCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                storage.set('show-pavement', checked);
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({ showPavement: checked });
+                }
+            });
+        }
+
+        const snapToNavaidsCheckbox = document.getElementById('snap-to-navaids') as HTMLInputElement;
+        if (snapToNavaidsCheckbox) {
+            snapToNavaidsCheckbox.addEventListener('change', (e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                storage.set('snap-to-navaids', checked);
+                if (this.stateManager) {
+                    this.stateManager.updateDisplayOptions({ snapToNavaids: checked });
                 }
             });
         }

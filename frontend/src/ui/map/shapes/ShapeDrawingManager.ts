@@ -2,6 +2,7 @@ import { MapDisplay } from '../MapDisplay';
 import { modalManager } from '../../ModalManager';
 import { Map as MapLibreMap, MapMouseEvent, MapLayerMouseEvent, GeoJSONSource } from 'maplibre-gl';
 import type { App } from '../../../core/App';
+import type { NavaidSnapper } from '../navdata/NavaidSnapper';
 import { logger } from '../../../utils/Logger';
 
 /**
@@ -16,6 +17,7 @@ import { logger } from '../../../utils/Logger';
 export class ShapeDrawingManager {
     private mapDisplay: MapDisplay;
     private app: App;
+    private navaidSnapper: NavaidSnapper;
     private drawingMode: boolean = false;
     private currentShapeName: string | null = null;
     private currentShapeType: 'area' | 'line' = 'area';
@@ -29,9 +31,10 @@ export class ShapeDrawingManager {
     private mapMouseMoveHandler: ((e: MapMouseEvent) => void) | null = null;
     private keyDownHandler: ((e: KeyboardEvent) => void) | null = null;
 
-    constructor(mapDisplay: MapDisplay, app: App) {
+    constructor(mapDisplay: MapDisplay, app: App, navaidSnapper: NavaidSnapper) {
         this.mapDisplay = mapDisplay;
         this.app = app;
+        this.navaidSnapper = navaidSnapper;
         this.setupModalHandlers();
     }
 
@@ -309,6 +312,7 @@ export class ShapeDrawingManager {
         // Clear and remove temporary drawing layers
         this.clearTemporaryDrawing();
         this.removeTemporaryDrawingLayers();
+        this.navaidSnapper.clearHighlight();
 
         logger.debug('ShapeDrawingManager', 'Map drawing handlers disabled');
     }
@@ -319,10 +323,11 @@ export class ShapeDrawingManager {
     private onMapClick(e: MapMouseEvent): void {
         if (!this.drawingMode) return;
 
-        const point = {
-            lat: e.lngLat.lat,
-            lng: e.lngLat.lng
-        };
+        // Snap the vertex to a nearby navaid when enabled, else use the raw click.
+        const snapped = this.navaidSnapper.snap(e);
+        const point = snapped
+            ? { lat: snapped.lat, lng: snapped.lng }
+            : { lat: e.lngLat.lat, lng: e.lngLat.lng };
 
         this.drawingPoints.push(point);
 
@@ -366,7 +371,12 @@ export class ShapeDrawingManager {
      * Handle mouse move - update cursor preview
      */
     private onMapMouseMove(e: MapMouseEvent): void {
-        if (!this.drawingMode || this.drawingPoints.length === 0) return;
+        if (!this.drawingMode) return;
+
+        // Highlight the navaid the next click would snap to (from the first move).
+        this.navaidSnapper.highlight(e);
+
+        if (this.drawingPoints.length === 0) return;
 
         const currentPoint = {
             lat: e.lngLat.lat,

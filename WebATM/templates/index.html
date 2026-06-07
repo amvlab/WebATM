@@ -205,6 +205,50 @@
                                 <input type="checkbox" id="show-shape-labels" checked>
                                 Shape Labels
                             </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="show-airports" checked>
+                                Airports
+                            </label>
+                            <label class="checkbox-label route-sub-option" id="show-airport-icons-container">
+                                <input type="checkbox" id="show-airport-icons" checked>
+                                Airport Icons
+                            </label>
+                            <label class="checkbox-label route-sub-option" id="show-airport-labels-container">
+                                <input type="checkbox" id="show-airport-labels" checked>
+                                Airport Labels
+                            </label>
+                            <label class="checkbox-label route-sub-option" id="show-heliports-container">
+                                <input type="checkbox" id="show-heliports">
+                                Heliports
+                            </label>
+                            <label class="checkbox-label route-sub-option" id="show-runways-container">
+                                <input type="checkbox" id="show-runways" checked>
+                                Runways
+                            </label>
+                            <label class="checkbox-label route-sub-option" id="show-runway-labels-container">
+                                <input type="checkbox" id="show-runway-labels" checked>
+                                Runway Labels
+                            </label>
+                            <label class="checkbox-label route-sub-option" id="show-pavement-container">
+                                <input type="checkbox" id="show-pavement" checked>
+                                Taxiways &amp; Aprons
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="show-waypoints" checked>
+                                Waypoints
+                            </label>
+                            <label class="checkbox-label route-sub-option" id="show-waypoint-icons-container">
+                                <input type="checkbox" id="show-waypoint-icons" checked>
+                                Waypoint Icons
+                            </label>
+                            <label class="checkbox-label route-sub-option" id="show-waypoint-labels-container">
+                                <input type="checkbox" id="show-waypoint-labels">
+                                Waypoint Labels
+                            </label>
+                            <label class="checkbox-label" id="snap-to-navaids-container">
+                                <input type="checkbox" id="snap-to-navaids" checked>
+                                Snap to Navaids
+                            </label>
 
                             <!-- Aircraft Display Options -->
                             <div class="aircraft-appearance-controls">
@@ -417,6 +461,13 @@
             <!-- Center map display -->
             <div class="map-container">
                 <div id="map" class="map"></div>
+
+                <!-- Airport / waypoint "go to" search -->
+                <div id="nav-search" class="nav-search">
+                    <input id="nav-search-input" type="text" class="nav-search-field"
+                        placeholder="Go to airport / waypoint…" autocomplete="off" spellcheck="false">
+                    <div id="nav-search-results" class="nav-search-results" style="display: none;"></div>
+                </div>
 
                 <!-- Drawing mode banner -->
                 <div id="drawing-banner" class="drawing-banner" style="display: none;">

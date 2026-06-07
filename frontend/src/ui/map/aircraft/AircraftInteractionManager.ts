@@ -80,6 +80,17 @@ export class AircraftInteractionManager {
     }
 
     /**
+     * Query the aircraft layer at a point, guarding against the layer not
+     * existing yet. The 'aircraft-points' layer is only created once aircraft
+     * data has been rendered (i.e. when connected), and MapLibre throws if you
+     * queryRenderedFeatures a layer that isn't in the style.
+     */
+    private queryAircraftAt(point: MapMouseEvent['point']) {
+        if (!this.map || !this.map.getLayer('aircraft-points')) return [];
+        return this.map.queryRenderedFeatures(point, { layers: ['aircraft-points'] });
+    }
+
+    /**
      * Set up map event handlers for aircraft clicks
      * Always sets up 2D layer handlers since 2D layer is always active
      */
@@ -88,14 +99,11 @@ export class AircraftInteractionManager {
 
         // Always set up 2D layer click handlers since the 2D layer is always active
         this.setup2DLayerHandlers();
-
         // Prevent default map zoom on aircraft double-click
         this.map.on('dblclick', (e: MapMouseEvent) => {
             if (!this.map) return;
-            
-            const features = this.map.queryRenderedFeatures(e.point, {
-                layers: ['aircraft-points']
-            });
+
+            const features = this.queryAircraftAt(e.point);
 
             if (features.length > 0) {
                 logger.verbose('AircraftInteractionManager', '🛑 Preventing default map zoom on aircraft double-click');
@@ -115,9 +123,7 @@ export class AircraftInteractionManager {
                     return;
                 }
 
-                const features = this.map.queryRenderedFeatures(e.point, {
-                    layers: ['aircraft-points']
-                });
+                const features = this.queryAircraftAt(e.point);
                 const clickedOnAircraft = features.length > 0;
 
                 // If click was not on an aircraft, unselect and stop following

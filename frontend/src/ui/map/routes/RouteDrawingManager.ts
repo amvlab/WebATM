@@ -6,6 +6,7 @@ import { AltitudeUnit, SpeedUnit } from '../../../data/types';
 import { logger } from '../../../utils/Logger';
 import { RouteDrawingPreview } from './RouteDrawingPreview';
 import { RouteConstraintsModal } from './RouteConstraintsModal';
+import type { NavaidSnapper } from '../navdata/NavaidSnapper';
 
 /**
  * RouteDrawingManager - Interactive waypoint route creation.
@@ -42,6 +43,7 @@ export class RouteDrawingManager {
     private mapDisplay: MapDisplay;
     private app: App;
     private stateManager: StateManager;
+    private navaidSnapper: NavaidSnapper;
     private preview: RouteDrawingPreview;
     private modal: RouteConstraintsModal;
 
@@ -64,10 +66,11 @@ export class RouteDrawingManager {
     private mapMouseMoveHandler: ((e: MapMouseEvent) => void) | null = null;
     private keyDownHandler: ((e: KeyboardEvent) => void) | null = null;
 
-    constructor(mapDisplay: MapDisplay, app: App, stateManager: StateManager) {
+    constructor(mapDisplay: MapDisplay, app: App, stateManager: StateManager, navaidSnapper: NavaidSnapper) {
         this.mapDisplay = mapDisplay;
         this.app = app;
         this.stateManager = stateManager;
+        this.navaidSnapper = navaidSnapper;
         this.preview = new RouteDrawingPreview(mapDisplay, stateManager);
         this.modal = new RouteConstraintsModal(
             app,
@@ -361,12 +364,17 @@ export class RouteDrawingManager {
 
         this.preview.clear();
         this.preview.teardown();
+        this.navaidSnapper.clearHighlight();
     }
 
     private onMapClick(e: MapMouseEvent): void {
         if (!this.drawingMode) return;
 
-        const point = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+        // Snap the waypoint to a nearby navaid when enabled, else use raw click.
+        const snapped = this.navaidSnapper.snap(e);
+        const point = snapped
+            ? { lat: snapped.lat, lng: snapped.lng }
+            : { lat: e.lngLat.lat, lng: e.lngLat.lng };
         this.routePoints.push(point);
 
         const anchorLabel = this.leaderAnchorLabel();
@@ -389,6 +397,7 @@ export class RouteDrawingManager {
 
     private onMapMouseMove(e: MapMouseEvent): void {
         if (!this.drawingMode) return;
+        this.navaidSnapper.highlight(e);
         this.preview.updateCursor(
             { lat: e.lngLat.lat, lng: e.lngLat.lng },
             this.routePoints,

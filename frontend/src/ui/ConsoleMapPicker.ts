@@ -1,6 +1,7 @@
 import { Map as MapLibreMap, MapMouseEvent, GeoJSONSource } from 'maplibre-gl';
 import type { MapDisplay } from './map/MapDisplay';
 import type { Console } from './Console';
+import type { NavaidSnapper } from './map/navdata/NavaidSnapper';
 import { logger } from '../utils/Logger';
 
 /**
@@ -30,12 +31,15 @@ export interface GeoContext {
 export class ConsoleMapPicker {
     private mapDisplay: MapDisplay;
     private consoleInstance: Console;
+    private navaidSnapper: NavaidSnapper;
 
     private active: 'lat' | 'lon' | 'hdg' | null = null;
     private currentContext: GeoContext | null = null;
 
     private clickHandler: ((e: MapMouseEvent) => void) | null = null;
     private mouseMoveHandler: ((e: MapMouseEvent) => void) | null = null;
+    // Highlights the navaid a coordinate pick would snap to (lat/lon kinds).
+    private snapHoverHandler: ((e: MapMouseEvent) => void) | null = null;
 
     // POLY-family only: right-click on the map finishes the drawing
     // (submits the current input), Escape cancels (clears the input).
@@ -60,9 +64,10 @@ export class ConsoleMapPicker {
     private readonly POLY_VERTEX_LAYER_ID = 'console-picker-poly-vertex-layer';
     private readonly POLY_FAMILY = new Set(['POLY', 'POLYALT', 'POLYLINE']);
 
-    constructor(mapDisplay: MapDisplay, consoleInstance: Console) {
+    constructor(mapDisplay: MapDisplay, consoleInstance: Console, navaidSnapper: NavaidSnapper) {
         this.mapDisplay = mapDisplay;
         this.consoleInstance = consoleInstance;
+        this.navaidSnapper = navaidSnapper;
     }
 
     /**
@@ -90,6 +95,7 @@ export class ConsoleMapPicker {
                 if (this.POLY_FAMILY.has(ctx.command)) {
                     this.bindPolyFinishHandlers(map);
                 }
+                this.bindSnapHover(map);
             }
             return;
         }
@@ -128,6 +134,8 @@ export class ConsoleMapPicker {
             if (this.POLY_FAMILY.has(ctx.command)) {
                 this.bindPolyFinishHandlers(map);
             }
+            // Highlight the navaid a click would snap to (lat/lon picks).
+            this.bindSnapHover(map);
         }
 
         logger.debug('ConsoleMapPicker', `Enabled for ${ctx.kind}`);
@@ -165,6 +173,16 @@ export class ConsoleMapPicker {
     }
 
     /**
+     * Bind a mousemove that highlights the navaid a coordinate click would
+     * snap to. Idempotent; runs alongside any POLY preview mousemove.
+     */
+    private bindSnapHover(map: MapLibreMap): void {
+        if (this.snapHoverHandler) return;
+        this.snapHoverHandler = (e: MapMouseEvent) => this.navaidSnapper.highlight(e);
+        map.on('mousemove', this.snapHoverHandler);
+    }
+
+    /**
      * Exit pick mode and clean up all map resources. Idempotent.
      */
     public disable(): void {
@@ -177,6 +195,10 @@ export class ConsoleMapPicker {
             if (this.mouseMoveHandler) {
                 map.off('mousemove', this.mouseMoveHandler);
             }
+            if (this.snapHoverHandler) {
+                map.off('mousemove', this.snapHoverHandler);
+            }
+            this.navaidSnapper.clearHighlight();
 
             // Restore default cursor only if we had set crosshair.
             if (this.active !== null) {
@@ -203,6 +225,7 @@ export class ConsoleMapPicker {
 
         this.clickHandler = null;
         this.mouseMoveHandler = null;
+        this.snapHoverHandler = null;
         this.polyContextHandler = null;
         this.polyEscapeHandler = null;
 
@@ -280,8 +303,17 @@ export class ConsoleMapPicker {
         // synchronously return focus to the console input.
         if (e.originalEvent) e.originalEvent.preventDefault();
 
-        const clickLat = e.lngLat.lat;
-        const clickLon = e.lngLat.lng;
+        // Snap coordinate picks to a nearby navaid when enabled. Heading picks
+        // set a bearing, not a place, so they are never snapped.
+        let clickLat = e.lngLat.lat;
+        let clickLon = e.lngLat.lng;
+        if (ctx.kind === 'lat' || ctx.kind === 'lon') {
+            const snapped = this.navaidSnapper.snap(e);
+            if (snapped) {
+                clickLat = snapped.lat;
+                clickLon = snapped.lng;
+            }
+        }
 
         if (ctx.kind === 'lat' || ctx.kind === 'lon') {
             // Insert the full lat,lon pair at the *current* cursor slot,

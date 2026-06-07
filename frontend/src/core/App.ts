@@ -22,6 +22,9 @@ import { MapDisplay } from '../ui/map/MapDisplay';
 import { MapOverlay } from '../ui/map/MapOverlay';
 import { ShapeDrawingManager } from '../ui/map/shapes/ShapeDrawingManager';
 import { ShapeRenderer } from '../ui/map/shapes/ShapeRenderer';
+import { NavdataRenderer } from '../ui/map/navdata/NavdataRenderer';
+import { NavaidSnapper } from '../ui/map/navdata/NavaidSnapper';
+import { NavSearchBox } from '../ui/map/navdata/NavSearchBox';
 import { AircraftCreationManager } from '../ui/map/aircraft/AircraftCreationManager';
 import { AircraftInteractionManager } from '../ui/map/aircraft/AircraftInteractionManager';
 import { RouteDrawingManager } from '../ui/map/routes/RouteDrawingManager';
@@ -52,6 +55,9 @@ export class App {
     private mapOverlay: MapOverlay | null = null;
     private shapeDrawingManager: ShapeDrawingManager | null = null;
     private shapeRenderer: ShapeRenderer | null = null;
+    private navdataRenderer: NavdataRenderer | null = null;
+    private navaidSnapper: NavaidSnapper;
+    private navSearchBox: NavSearchBox | null = null;
     private aircraftCreationManager: AircraftCreationManager | null = null;
     private aircraftInteractionManager: AircraftInteractionManager | null = null;
     private routeDrawingManager: RouteDrawingManager | null = null;
@@ -73,6 +79,14 @@ export class App {
         this.commandPaletteModal = new CommandPaletteModal();
         this.mapDisplay = new MapDisplay('map');
         this.commandHandler = new CommandHandler(this);
+        // Shared "snap to navaid" helper used by the drawing/creation tools and
+        // the console map-picker. The NavdataRenderer is created later (on
+        // style.load), so resolve its airport-rank threshold lazily.
+        this.navaidSnapper = new NavaidSnapper(
+            this.mapDisplay,
+            this.stateManager,
+            (zoom) => this.navdataRenderer?.minAirportRankForZoom(zoom) ?? 0
+        );
     }
 
     /**
@@ -285,7 +299,7 @@ export class App {
         this.console.setCommandHandler(this.commandHandler);
         // Provide map display so the console can offer map-click coordinate /
         // heading insertion when typing lat/lon/hdg arguments.
-        this.console.setMapDisplay(this.mapDisplay);
+        this.console.setMapDisplay(this.mapDisplay, this.navaidSnapper);
         logger.debug('App', 'Console component initialized');
     }
 
@@ -389,6 +403,12 @@ export class App {
             this.shapeRenderer.initialize();
             logger.debug('App', 'Shape renderer initialized after map style loaded');
 
+            // Initialize the navdata overlay (airports + waypoints vector
+            // tiles). Done before the aircraft overlay so aircraft draw on top.
+            this.navdataRenderer = new NavdataRenderer(this.mapDisplay, this.stateManager);
+            this.navdataRenderer.initialize();
+            logger.debug('App', 'Navdata renderer initialized after map style loaded');
+
             // Initialize the map overlay with display options AFTER map style is loaded
             // This prevents "Style is not done loading" errors for aircraft routes
             this.mapOverlay = new MapOverlay(this.mapDisplay, this.stateManager);
@@ -417,6 +437,9 @@ export class App {
             if (this.shapeRenderer) {
                 this.shapeRenderer.onStyleChange();
             }
+            if (this.navdataRenderer) {
+                this.navdataRenderer.onStyleChange();
+            }
 
             // Trigger a display options update to force all renderers to re-render
             // This ensures shapes, aircraft, and routes all appear after style change
@@ -428,8 +451,8 @@ export class App {
         });
 
         // Initialize map interaction managers
-        this.shapeDrawingManager = new ShapeDrawingManager(this.mapDisplay, this);
-        this.aircraftCreationManager = new AircraftCreationManager(this.mapDisplay);
+        this.shapeDrawingManager = new ShapeDrawingManager(this.mapDisplay, this, this.navaidSnapper);
+        this.aircraftCreationManager = new AircraftCreationManager(this.mapDisplay, this.navaidSnapper);
         this.aircraftInteractionManager = new AircraftInteractionManager(
             this.mapDisplay,
             this.stateManager,
@@ -438,7 +461,8 @@ export class App {
         this.routeDrawingManager = new RouteDrawingManager(
             this.mapDisplay,
             this,
-            this.stateManager
+            this.stateManager,
+            this.navaidSnapper
         );
 
         // Let AircraftInteractionManager know when route drawing is active so
@@ -454,6 +478,10 @@ export class App {
         // Now that AircraftInteractionManager is initialized, set up the route data handler
         // This needs to happen after AircraftInteractionManager creation to check for explicit POS commands
         this.setupRouteDataHandler();
+
+        // Initialize the airport/waypoint "go to" search box.
+        this.navSearchBox = new NavSearchBox(this.mapDisplay);
+        this.navSearchBox.init();
 
         // Connect managers to MapControlsPanel
         this.mapControlsPanel.setShapeDrawingManager(this.shapeDrawingManager);
@@ -853,6 +881,11 @@ export class App {
         // Clean up shape renderer
         if (this.shapeRenderer) {
             this.shapeRenderer.destroy();
+        }
+
+        // Clean up navdata renderer
+        if (this.navdataRenderer) {
+            this.navdataRenderer.destroy();
         }
 
         // Clean up interaction managers
