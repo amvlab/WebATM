@@ -3053,3 +3053,106 @@ button.disabled:hover {
 .maplibregl-ctrl-terrain-enabled .maplibregl-ctrl-icon {
     filter: invert(45%) sepia(85%) saturate(1500%) hue-rotate(175deg);
 }
+
+/* --- Airport / waypoint "go to" search box ----------------------------- */
+.nav-search {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    width: 280px;
+    max-width: calc(100% - 120px);
+    font-size: 13px;
+}
+
+.nav-search-field {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    background: rgba(11, 15, 21, 0.9);
+    color: #e6edf3;
+    outline: none;
+}
+
+.nav-search-field:focus {
+    border-color: #4da3ff;
+}
+
+.nav-search-field::placeholder {
+    color: #7d8a97;
+}
+
+.nav-search-results {
+    margin-top: 4px;
+    background: rgba(11, 15, 21, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    overflow: hidden;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.nav-search-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.nav-search-item:hover,
+.nav-search-item.active {
+    background: rgba(77, 163, 255, 0.18);
+}
+
+.nav-search-badge {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #0b0f15;
+}
+
+.nav-search-badge-airport {
+    background: #4da3ff;
+}
+
+.nav-search-badge-heliport {
+    background: #e0823c;
+}
+
+.nav-search-badge-waypoint {
+    background: #9aa7b4;
+}
+
+.nav-search-ident {
+    font-weight: 600;
+    color: #e6edf3;
+}
+
+.nav-search-iata {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #cfe6ff;
+    background: rgba(77, 163, 255, 0.18);
+}
+
+.nav-search-name {
+    color: #9aa7b4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.nav-search-message {
+    padding: 8px 10px;
+    color: #9aa7b4;
+}
