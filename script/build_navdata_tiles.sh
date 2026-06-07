@@ -33,7 +33,7 @@ set -euo pipefail
 APT=""
 FIX=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
 TILES_OUT="${REPO_ROOT}/WebATM/static/tiles"
 INDEX_OUT="${REPO_ROOT}/WebATM/static/navdata"
