@@ -272,3 +272,9 @@ WebATM/static/tiles/*.pmtiles
 
 WebATM/static/glyphs/*
 WebATM/static/navdata/*
+
+# Release tarballs built by script/build_release_tarball.sh and
+# script/build_assets_tarball.sh at the repo root. These get uploaded to
+# GitHub releases, never committed.
+webatm-prebuilt-*.tar.gz
+webatm-assets-*.tar.gz
