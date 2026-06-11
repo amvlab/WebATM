@@ -21,6 +21,10 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
     protected scene!: THREE.Scene;
     protected renderer!: THREE.WebGLRenderer;
     protected map!: MapLibreMap;
+    // Key/fill directional lights, exposed so subclasses can re-aim them
+    // when their meshes live in a different world frame (e.g. globe mode).
+    protected directionalLight1!: THREE.DirectionalLight;
+    protected directionalLight2!: THREE.DirectionalLight;
 
     constructor(id: string) {
         this.id = id;
@@ -102,14 +106,14 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
     protected setupLighting(): void {
         // Main directional light. z<0 matches the mercator group's rotateX(π/2),
         // which places the model's "up" along scene -Z.
-        const directionalLight1 = new THREE.DirectionalLight(0xffffff, 1.5);
-        directionalLight1.position.set(0, -70, -100).normalize();
-        this.scene.add(directionalLight1);
+        this.directionalLight1 = new THREE.DirectionalLight(0xffffff, 1.5);
+        this.directionalLight1.position.set(0, -70, -100).normalize();
+        this.scene.add(this.directionalLight1);
 
         // Fill light from below to reduce harsh shadows
-        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight2.position.set(0, 70, -100).normalize();
-        this.scene.add(directionalLight2);
+        this.directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.8);
+        this.directionalLight2.position.set(0, 70, -100).normalize();
+        this.scene.add(this.directionalLight2);
 
         // Ambient light for overall scene illumination
         const ambientLight = new THREE.AmbientLight(0xcccccc, 1.2);
