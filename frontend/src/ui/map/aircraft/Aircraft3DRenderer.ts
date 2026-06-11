@@ -921,11 +921,26 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
                 const l = new THREE.Matrix4().fromArray(modelMatrix)
                     .scale(new THREE.Vector3(finalScale, finalScale, finalScale));
 
-                // Apply heading rotation - in globe space
-                // Aviation convention: 0°=N, 90°=E, 180°=S, 270°=W
-                // Globe projection coordinate system is different - try simple negation
+                // Apply heading rotation - in globe space.
+                // Aviation convention: 0°=N, 90°=E, 180°=S, 270°=W.
+                // getMatrixForModel's frame is mirror-flipped (opposite
+                // handedness) relative to the corrected mercator group frame,
+                // so the heading angle is negated here to keep the nose pointing
+                // the correct compass direction (this is undone for geometry by
+                // the lateral mirror correction below).
                 const rotationY = new THREE.Matrix4().makeRotationY(-headingRad + Math.PI / 2);
                 l.multiply(rotationY);
+
+                // Un-mirror the model. Because the globe frame reflects the
+                // model's lateral axis versus the (text-corrected) mercator
+                // path, on-fuselage text and liveries would otherwise render
+                // reversed in globe view — the model appears flipped. Reflect
+                // the model's lateral (Z) axis back so geometry matches
+                // mercator. The model's nose (+X) and up (+Y) axes are
+                // untouched, so heading and attitude are unchanged; only the
+                // handedness/chirality flips, fixing the mirrored appearance.
+                const lateralMirrorFix = new THREE.Matrix4().makeScale(1, 1, -1);
+                l.multiply(lateralMirrorFix);
 
                 // Rebase onto the globe origin so the mesh matrix keeps small
                 // translations (precision; see globeOriginMatrixInverse). The
