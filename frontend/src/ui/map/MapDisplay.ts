@@ -119,7 +119,17 @@ export class MapDisplay {
             // to 0 makes label show/hide instantaneous and removes the
             // flicker. The basemap (dark-matter-nolabels) has no symbol
             // labels, so this only affects WebATM's own entity layers.
-            fadeDuration: 0
+            fadeDuration: 0,
+            // Create the WebGL context with MSAA. The 3D aircraft layers
+            // (CustomLayer3D) render Three.js content into MapLibre's
+            // shared context, and antialiasing is a context-creation
+            // attribute — the `antialias: true` passed to Three's
+            // WebGLRenderer is ignored for an existing context. Without
+            // this, 3D models render unantialiased and degrade into
+            // jagged, stringy outlines once they are small on screen
+            // (thin wings/stabilizers fall below one pixel), in both
+            // mercator and globe projections.
+            canvasContextAttributes: { antialias: true }
         };
 
         // Initialize the map

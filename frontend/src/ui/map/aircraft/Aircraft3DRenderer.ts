@@ -248,6 +248,15 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
     private maxDistanceFromOrigin: number = 10000; // Max distance in meters before repositioning origin
     private lastProjectionMode: boolean | null = null; // Track projection mode changes for debug logging
 
+    // Inverse of the globe origin matrix for the current frame. Globe mesh
+    // matrices are made origin-relative with this so their translations stay
+    // small; the origin matrix itself is folded into the camera projection in
+    // updateScene (computed on the CPU in double precision). Without this,
+    // getMatrixForModel's huge absolute translations dwarf the tiny model
+    // scale and float32 rounding on the GPU quantizes vertices to ~meter
+    // steps, crumpling small aircraft into stretched "stringy" triangles.
+    private globeOriginMatrixInverse: THREE.Matrix4 | null = null;
+
     // Separate groups for different projection modes
     // Globe mode: uses raw getMatrixForModel transforms (no scene rotation)
     // Mercator mode: uses scene-based coordinate system (with rotation)
@@ -912,11 +921,36 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
                 const l = new THREE.Matrix4().fromArray(modelMatrix)
                     .scale(new THREE.Vector3(finalScale, finalScale, finalScale));
 
-                // Apply heading rotation - in globe space
-                // Aviation convention: 0°=N, 90°=E, 180°=S, 270°=W
-                // Globe projection coordinate system is different - try simple negation
+                // Apply heading rotation - in globe space.
+                // Aviation convention: 0°=N, 90°=E, 180°=S, 270°=W.
+                // getMatrixForModel's frame is mirror-flipped (opposite
+                // handedness) relative to the corrected mercator group frame,
+                // so the heading angle is negated here to keep the nose pointing
+                // the correct compass direction (this is undone for geometry by
+                // the lateral mirror correction below).
                 const rotationY = new THREE.Matrix4().makeRotationY(-headingRad + Math.PI / 2);
                 l.multiply(rotationY);
+
+                // Un-mirror the model. Because the globe frame reflects the
+                // model's lateral axis versus the (text-corrected) mercator
+                // path, on-fuselage text and liveries would otherwise render
+                // reversed in globe view — the model appears flipped. Reflect
+                // the model's lateral (Z) axis back so geometry matches
+                // mercator. The model's nose (+X) and up (+Y) axes are
+                // untouched, so heading and attitude are unchanged; only the
+                // handedness/chirality flips, fixing the mirrored appearance.
+                const lateralMirrorFix = new THREE.Matrix4().makeScale(1, 1, -1);
+                l.multiply(lateralMirrorFix);
+
+                // Rebase onto the globe origin so the mesh matrix keeps small
+                // translations (precision; see globeOriginMatrixInverse). The
+                // origin matrix is reapplied via the camera projection, so the
+                // product is mathematically unchanged. When the inverse isn't
+                // available yet (first globe frame), the absolute matrix pairs
+                // with the mainMatrix-only camera fallback in updateScene.
+                if (this.globeOriginMatrixInverse) {
+                    l.premultiply(this.globeOriginMatrixInverse);
+                }
 
                 // Set the transform - the camera projection matrix will be set in updateScene
                 mesh.matrix = l;
@@ -1024,6 +1058,10 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
 
             // Move all aircraft to the appropriate group for the new projection mode
             this.switchAircraftGroups(isGlobe);
+
+            // Re-aim the shared directional lights for the active group's
+            // world frame so brightness matches across projections.
+            this.updateLightsForProjection(isGlobe);
         }
 
         // Toggle visibility of groups based on projection mode
@@ -1031,12 +1069,32 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
         if (this.mercatorGroup) this.mercatorGroup.visible = !isGlobe;
 
         if (isGlobe) {
-            // In globe mode: set camera projection to mainMatrix only
-            // Each aircraft mesh has its own transform from getMatrixForModel
+            // In globe mode each aircraft mesh gets an origin-relative
+            // getMatrixForModel transform, and the shared origin matrix is
+            // folded into the camera projection here. Both factors are
+            // combined on the CPU in double precision, so the GPU only ever
+            // sees small mesh translations — this is what keeps small
+            // aircraft from collapsing into stringy float32 artifacts.
             if (args) {
-                this.camera.projectionMatrix = new THREE.Matrix4().fromArray(
+                const mainMatrix = new THREE.Matrix4().fromArray(
                     args.defaultProjectionData.mainMatrix
                 );
+
+                if (this.map?.transform?.getMatrixForModel) {
+                    // Anchor at the scene origin (aircraft centroid); fall
+                    // back to the map center before any aircraft exist.
+                    const origin = this.sceneOrigin ?? this.map.getCenter();
+                    const originMatrix = new THREE.Matrix4().fromArray(
+                        this.map.transform.getMatrixForModel([origin.lng, origin.lat], 0)
+                    );
+                    this.globeOriginMatrixInverse = originMatrix.clone().invert();
+                    this.camera.projectionMatrix = mainMatrix.multiply(originMatrix);
+                } else {
+                    // No globe model API: meshes fall back to absolute
+                    // mercator-style matrices, so use mainMatrix alone.
+                    this.globeOriginMatrixInverse = null;
+                    this.camera.projectionMatrix = mainMatrix;
+                }
             }
 
             // Update all aircraft transforms for globe positioning
@@ -1078,6 +1136,29 @@ class Aircraft3DCustomLayer extends CustomLayer3D {
                     aircraftMesh.mesh.matrixAutoUpdate = true;
                 });
             }
+        }
+    }
+
+    /**
+     * Re-aim the scene's directional lights for the active projection.
+     *
+     * The lights live in world space, but the two mesh groups use different
+     * world frames: mercator meshes sit in the rotateX(π/2) group (model
+     * "up" along world −Z), while globe meshes are origin-relative
+     * getMatrixForModel frames (model "up" along world +Y). With the lights
+     * fixed in the mercator orientation, globe aircraft were lit edge-on —
+     * their visible top surfaces received almost no directional light and
+     * rendered noticeably darker than in mercator mode. Reproduce the same
+     * key/fill geometry (≈100 above, ±70 horizontal tilt) in each frame.
+     */
+    private updateLightsForProjection(isGlobe: boolean): void {
+        if (!this.directionalLight1 || !this.directionalLight2) return;
+        if (isGlobe) {
+            this.directionalLight1.position.set(0, 100, 70).normalize();
+            this.directionalLight2.position.set(0, 100, -70).normalize();
+        } else {
+            this.directionalLight1.position.set(0, -70, -100).normalize();
+            this.directionalLight2.position.set(0, 70, -100).normalize();
         }
     }
 
