@@ -8,7 +8,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
@@ -16,6 +15,23 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+    # Build two GHCR packages from the same tag:
+    #   - standalone:  ghcr.io/<owner>/webatm            (Dockerfile)
+    #   - integrated:  ghcr.io/<owner>/webatm-integrated (Dockerfile.integrated,
+    #                  bundles BlueSky from amvlab/bluesky)
+    # fail-fast is off so a transient failure on one variant doesn't cancel the
+    # other mid-publish.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: standalone
+            dockerfile: Dockerfile
+            image: ${{ github.repository }}
+          - variant: integrated
+            dockerfile: Dockerfile.integrated
+            image: ${{ github.repository }}-integrated
 
     steps:
       - name: Checkout
@@ -65,7 +81,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ matrix.image }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -77,9 +93,12 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Scope the GHA cache per variant so the standalone and integrated
+          # builds don't overwrite each other's layer cache.
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
