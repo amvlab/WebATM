@@ -752,9 +752,14 @@ def register_basic_routes(app, session_manager):
                                 }
                             )
 
-                    # Add files (filtered by extension if specified, all files otherwise)
+                    # Add files. Match the extension case-insensitively so
+                    # uppercase variants (e.g. .SCN from BlueSky's bundled demo
+                    # scenarios) are listed too -- Path.glob is case-sensitive.
                     if config["extension"]:
-                        file_iter = target_dir.glob(f"*{config['extension']}")
+                        ext = config["extension"].lower()
+                        file_iter = (
+                            p for p in target_dir.iterdir() if p.suffix.lower() == ext
+                        )
                     else:
                         file_iter = target_dir.iterdir()
                     for file_path in file_iter:
@@ -907,9 +912,14 @@ def register_basic_routes(app, session_manager):
                             }
                         )
 
-                # Add files (filtered by extension if specified, all files otherwise)
+                # Add files. Match the extension case-insensitively so uppercase
+                # variants (e.g. .SCN from BlueSky's bundled demo scenarios) are
+                # listed too -- Path.glob is case-sensitive.
                 if config["extension"]:
-                    file_iter = target_dir.glob(f"*{config['extension']}")
+                    ext = config["extension"].lower()
+                    file_iter = (
+                        p for p in target_dir.iterdir() if p.suffix.lower() == ext
+                    )
                 else:
                     file_iter = target_dir.iterdir()
                 for file_path in file_iter:
