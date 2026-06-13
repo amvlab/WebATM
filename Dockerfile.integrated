@@ -50,7 +50,7 @@ USER webatm
 WORKDIR /home/webatm
 COPY --chown=webatm:webatm WebATM/ ./WebATM/
 COPY --chown=webatm:webatm frontend/ ./frontend/
-COPY --chown=webatm:webatm webatm-integrated/ ./webatm-integrated/
+COPY --chown=webatm:webatm WebATM-integrated/ ./WebATM-integrated/
 
 # Build the frontend WITH integrated features enabled; output lands in
 # WebATM/static/dist/. The frontend/ directory is build-only.
@@ -62,7 +62,7 @@ RUN rm -rf frontend
 # Install the integrated package, which also pulls the BlueSky simulator from
 # its (public) git source. The core `webatm` package is provided on PYTHONPATH
 # below rather than installed, so it is not a declared dependency.
-RUN uv pip install ./webatm-integrated
+RUN uv pip install ./WebATM-integrated
 
 COPY --chown=webatm:webatm WebATM.py ./
 COPY --chown=webatm:webatm script/wsgi_integrated.py ./

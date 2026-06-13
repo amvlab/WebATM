@@ -176,7 +176,7 @@ Open http://localhost:8082 and use the **Start** button in the Server Log tab (o
 
 ### Build locally with your own BlueSky fork
 
-The integrated image pulls BlueSky from [`amvlab/bluesky`](https://github.com/amvlab/bluesky) on its `main` branch by default. To build against your own fork, branch, or tag, edit the `bluesky-simulator` dependency line in [`webatm-integrated/pyproject.toml`](webatm-integrated/pyproject.toml):
+The integrated image pulls BlueSky from [`amvlab/bluesky`](https://github.com/amvlab/bluesky) on its `main` branch by default. To build against your own fork, branch, or tag, edit the `bluesky-simulator` dependency line in [`WebATM-integrated/pyproject.toml`](WebATM-integrated/pyproject.toml):
 
 ```toml
 dependencies = [
