@@ -20,19 +20,25 @@ A modern web client for the [BlueSky Air Traffic Management (ATM) simulator](htt
 - **Flexible Map Projection**: Switch between Web Mercator and 3D globe view powered by [MapLibre GL](https://maplibre.org/maplibre-gl-js/docs/)
 - **Custom Map Sources**: Configure custom tile sources to personalize your base map layer
 - **Configurable Scenario Path**: Set your BlueSky scenario directory from the settings modal
+- **Multi-Node Simulation**: Spawn and manage multiple parallel simulation nodes from one interface
 - **BlueSky Integration**: Seamless connection to BlueSky ATM simulator servers
 - **Modern TypeScript Architecture**: Fully type-safe, maintainable client-side codebase
 
 <img width="1200" height="658" alt="webatm_demo" src="https://github.com/user-attachments/assets/fa43352c-c463-4f8f-bc9d-03e01f82b4ac" />
+
+## Editions
+
+WebATM ships in two flavors, both open source and published to GHCR:
+
+- **`webatm`** (standalone) — the web client only. Connects to a BlueSky server you run yourself, on the docker host or elsewhere on the network. This is the default everywhere in this README.
+- **`webatm-integrated`** — bundles BlueSky inside the same container and adds in-app **Start / Stop / Restart / Kill** server controls plus a live server-log tab. File management auto-wires to BlueSky's working directory, so there's no base-path step. Useful if you want a single-container deployment with no separate BlueSky process to manage. See [WebATM Integrated](#webatm-integrated) below for usage.
 
 ## 🚀 WebATM Pro Version Available
 
 **Looking for more advanced features?** WebATM Pro includes everything in the open source version, plus additional capabilities:
 
 - **Custom Simulation Engine**: Built on amvlab's custom simulator, controllable end-to-end from the WebATM interface
-- **Multi-Node Simulation**: Spawn and manage multiple parallel simulation nodes from one interface
 - **Server Development Environment**: Modify and develop simulation server code directly from the web interface
-- **Enhanced Server Management**: Full control over server lifecycle (start/stop/restart)
 - **Pro-Only Roadmap**: In-browser scenario editor, simulation rewind, and client-side command validation
 - **Flexible Deployment**: amvlab can provide managed hosting or deploy on your local network for full data sovereignty
 
@@ -153,6 +159,39 @@ Use this if you want to run WebATM directly from source without installing Node.
 5. **Access the web interface**
 
    Open your browser to: http://localhost:8082
+
+## WebATM Integrated
+
+The integrated image bundles BlueSky inside the same container and exposes its lifecycle (Start / Stop / Restart / Kill) plus a live server-log tab from the web UI. File management is pre-wired to BlueSky's working directory — no base-path configuration needed.
+
+### Run the prebuilt image
+
+The image is published alongside the standalone one on every release tag at `ghcr.io/amvlab/webatm-integrated`. To run it, uncomment the `webatm-integrated` service in [`docker-compose.yml`](docker-compose.yml) and bring it up:
+
+```bash
+docker compose up -d webatm-integrated
+```
+
+Open http://localhost:8082 and use the **Start** button in the Server Log tab (or in Settings → BlueSky Server Controls) to launch BlueSky inside the container.
+
+### Build locally with your own BlueSky fork
+
+The integrated image pulls BlueSky from [`amvlab/bluesky`](https://github.com/amvlab/bluesky) on its `main` branch by default. To build against your own fork, branch, or tag, edit the `bluesky-simulator` dependency line in [`webatm-integrated/pyproject.toml`](webatm-integrated/pyproject.toml):
+
+```toml
+dependencies = [
+    "bluesky-simulator[headless] @ git+https://github.com/<your-org>/bluesky.git@<branch-or-tag>",
+]
+```
+
+Then build and run the image locally:
+
+```bash
+docker build -f Dockerfile.integrated -t webatm-integrated:dev .
+docker run --rm -p 8082:8082 webatm-integrated:dev
+```
+
+Your fork must keep BlueSky's pip distribution name (`bluesky-simulator`) and the `bluesky = bluesky.__main__:main` console script entry point — the container spawns the server as `bluesky --headless`.
 
 ## Configuration
 

@@ -4,7 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WebATM is a modern **standalone** web client for the BlueSky Air Traffic Management (ATM) simulator. It provides a web interface using MapLibre GL for aircraft visualization and radar display, connecting to BlueSky simulation servers via network protocols. The project features Docker containerization, TypeScript-based frontend, and connection to a BlueSky server.
+WebATM is a modern web client for the BlueSky Air Traffic Management (ATM) simulator. It provides a web interface using MapLibre GL for aircraft visualization and radar display, connecting to BlueSky simulation servers via network protocols. The project features Docker containerization, TypeScript-based frontend, and connection to a BlueSky server.
+
+### Build Variants
+
+WebATM ships in two variants, both built from this repo:
+
+- **Standalone (`webatm`)** — the default. Web client only; connects to a BlueSky server you run yourself.
+- **Integrated (`webatm-integrated`)** — bundles BlueSky in the same container and adds in-app server lifecycle controls (Start/Stop/Restart/Kill) plus a live server-log tab. File management auto-wires to BlueSky's working directory.
+
+The integrated variant is **fully opt-in and gated end-to-end**:
+- **Backend**: `WebATM/app.py` calls `webatm_integrated.register()` only when `WEBATM_INTEGRATED=1`. Any failure is logged and non-fatal.
+- **Frontend**: `frontend/src/main.ts` dynamic-imports `./integrated/index` only when the `INTEGRATED_BUILD` compile-time constant (webpack `DefinePlugin`) is `true`. The `integrated` chunk is dead-code-eliminated from the default bundle.
+- **Dependency direction**: the core `WebATM` package never imports `webatm_integrated`. The arrow only points integrated → core.
+
+When working on integrated features, **do not** add imports from core into integrated code paths or vice versa beyond the one registration hook.
 
 ## Requirements
 
@@ -36,10 +50,12 @@ npm install
 # Production build (also runs vendor-assets prebuild)
 npm run build              # alias for build:production
 npm run build:production   # NODE_ENV=production webpack
+npm run build:integrated   # INTEGRATED_BUILD=true webpack (emits integrated chunk)
 npm run build:dev          # development build
 
 # Watch for changes during development
 npm run watch
+npm run watch:integrated   # watch with integrated chunk emitted
 
 # Type checking only
 npm run type-check
@@ -48,7 +64,7 @@ npm run type-check
 npm run vendor-assets
 ```
 
-A convenience script `script/build_frontend.sh` runs the full production build from the repo root.
+A convenience script `script/build_frontend.sh` runs the full production build from the repo root. Pass `--integrated` to build the integrated bundle instead.
 
 ### Docker Deployment
 
@@ -66,12 +82,16 @@ docker-compose down
 
 #### Building Docker Image Manually
 ```bash
-# Build the Docker image
+# Standalone image
 docker build -t webatm:latest .
-
-# Run the container
 docker run -p 8082:8082 webatm:latest
+
+# Integrated image (bundles BlueSky from amvlab/bluesky)
+docker build -f Dockerfile.integrated -t webatm-integrated:latest .
+docker run -p 8082:8082 webatm-integrated:latest
 ```
+
+The integrated image bakes in `WEBATM_INTEGRATED=1`, `BLUESKY_SERVER_HOST=localhost`, `WEB_HOST=0.0.0.0`, and `WEB_PORT=8082`, and runs under gunicorn with the `gthread` worker (not eventlet — incompatible with the blocking subprocess pipe the integrated build reads in a background thread). The standalone image is unaffected by anything in `webatm-integrated/`.
 
 #### Docker Environment Variables
 - `FLASK_ENV` - Set to 'production' for production deployment
@@ -79,6 +99,7 @@ docker run -p 8082:8082 webatm:latest
 - `WEB_PORT` - Web server port (default: 8082)
 - `WEB_HOST` - Web server bind address (default: localhost for security, use 0.0.0.0 for Docker)
 - `HEARTBEAT_INTERVAL` - Heartbeat interval in seconds (default: 30)
+- `WEBATM_INTEGRATED` - Set to `1` to enable the integrated extensions (server lifecycle + log streaming). Off by default; ignored if `webatm_integrated` isn't installed.
 
 #### BlueSky Server Configuration
 This web client connects to BlueSky servers using the default BlueSky network ports:
@@ -153,6 +174,11 @@ WebATM/
 │   │   │   ├── aircraftDimensions.ts
 │   │   │   ├── aircraftTypes.ts
 │   │   │   └── types.ts
+│   │   ├── integrated/        # Integrated build only — gated by INTEGRATED_BUILD
+│   │   │   ├── index.ts                       # registerIntegrated() entry point
+│   │   │   ├── ProcessControlManager.ts       # Start/Stop/Restart/Kill button wiring
+│   │   │   ├── ServerLogStreamManager.ts      # Live server-log tab (seq-ordered, replayable)
+│   │   │   └── settingsServerControls.ts      # Injects lifecycle controls into Settings
 │   │   ├── ui/                # User interface components
 │   │   │   ├── BlueSkyFileManager.ts
 │   │   │   ├── CommandListView.ts
@@ -214,17 +240,31 @@ WebATM/
 │   ├── package.json           # TypeScript dependencies
 │   ├── tsconfig.json          # TypeScript configuration
 │   └── webpack.config.js      # Webpack build configuration
+├── webatm-integrated/          # Optional Python package — integrated build only
+│   ├── pyproject.toml         # Pulls bluesky-simulator from amvlab/bluesky
+│   ├── conftest.py            # Test bootstrap (adds package + repo root to sys.path)
+│   ├── webatm_integrated/
+│   │   ├── __init__.py        # register(app, socketio, ...) entry point
+│   │   ├── process_manager.py # BlueSkyProcessManager: start/stop/restart/kill
+│   │   ├── log_streamer.py    # Gap-free, replayable server_log emission
+│   │   ├── bluesky_paths.py   # Pre-configures file management for ~/bluesky
+│   │   ├── routes.py          # /api/bluesky/* HTTP surface
+│   │   └── socket_handlers.py # bs:* Socket.IO surface
+│   └── tests/                  # pytest-driven unit tests
 ├── script/                     # Build and utility scripts
 │   ├── build_docker.sh        # Docker build script
-│   ├── build_frontend.sh      # Frontend (TypeScript) build script
+│   ├── build_frontend.sh      # Frontend (TypeScript) build script (--integrated for integrated bundle)
+│   ├── check_frontend.sh      # Type-check + lint + tests (--integrated for compile-check)
 │   ├── run_webatm.sh          # Application startup script
-│   └── wsgi.py                # WSGI configuration
+│   ├── wsgi.py                # WSGI configuration (eventlet, standalone)
+│   └── wsgi_integrated.py     # WSGI configuration (gthread, integrated build)
 ├── requirements.txt            # Python dependencies (core)
 ├── requirements-dev.txt        # Development dependencies
 ├── requirements-prod.txt       # Production dependencies
 ├── pyproject.toml             # Python project configuration (Python 3.13+)
-├── docker-compose.yml         # Docker Compose configuration
-├── Dockerfile                 # Docker image definition
+├── docker-compose.yml         # Docker Compose configuration (incl. commented integrated service)
+├── Dockerfile                 # Docker image definition (standalone)
+├── Dockerfile.integrated      # Docker image definition (integrated — bundles BlueSky)
 └── LICENSE                    # AGPL-3.0 license
 ```
 
@@ -329,6 +369,12 @@ npm run type-check              # Type checking only
 - **Map Features:** Add to `ui/map/` components
 - **Data Processing:** Extend `data/types.ts` and `DataProcessor.ts`
 
+**Integrated-only Extensions** (server lifecycle, log streaming, anything that assumes BlueSky lives in this container):
+- **Python:** Add to `webatm-integrated/webatm_integrated/`, wire from `register()`.
+- **TypeScript:** Add to `frontend/src/integrated/`, wire from `registerIntegrated()` in `index.ts`.
+- **Toggling core UI:** Add an `enableIntegratedMode()` method to the core component (e.g. `SettingsModal`, `BlueSkyFileManager`) that's a no-op unless called. Call it from `frontend/src/integrated/index.ts`. Never branch on `INTEGRATED_BUILD` inside core UI files.
+- **Never import `webatm_integrated` or `frontend/src/integrated/` from core code** — the dependency arrow only points one way. The default build must still work with these directories absent (or with their imports tree-shaken).
+
 **Best Practices:**
 - Follow modular composition pattern (proxy package)
 - Keep modules under 500 lines
@@ -376,10 +422,10 @@ docker run -p 8082:8082 webatm:latest
 ## Important Notes
 
 **Project Characteristics:**
-- **Standalone web client** (not integrated BlueSky plugin)
+- **Two variants**: standalone (`webatm`) and integrated (`webatm-integrated`); see [Build Variants](#build-variants)
 - **Python 3.13+** and **BlueSky 1.1.0+** required
 - **TypeScript-first** frontend architecture
-- **Auto-start** BlueSky server in headless mode
+- **Auto-start** BlueSky server in headless mode (standalone variant; integrated variant exposes lifecycle controls in the UI)
 - **Docker-ready** for production deployment
 
 **Development Reminders:**
@@ -388,3 +434,5 @@ docker run -p 8082:8082 webatm:latest
 - Run linting tools before committing
 - Production deployments require `WEB_HOST=0.0.0.0`
 - BlueSky ports (11000/11001) are not configurable
+- Integrated features go in `webatm-integrated/` (Python) and `frontend/src/integrated/` (TS); the default build must still work with these absent
+- CI publishes both images on every `v*` tag (matrix in `.github/workflows/docker-publish.yml`); no separate workflow to maintain
