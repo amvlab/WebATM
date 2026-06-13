@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build the WebATM frontend
-#
-# Compiles the TypeScript sources in frontend/ into JavaScript bundles
-# served by the web application (output goes to WebATM/static/dist/).
+# Run the frontend checks: type-check, lint, and unit tests.
+# Mirrors the GitHub Actions CI workflow (minus the production build).
 #
 
 set -e  # Exit on error
@@ -13,11 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 
-echo "Building frontend assets..."
-echo "Project root: $PROJECT_ROOT"
+echo "Checking frontend..."
 echo "Frontend directory: $FRONTEND_DIR"
 
-# Change to frontend directory
 cd "$FRONTEND_DIR"
 
 # Install dependencies if node_modules is missing or stale relative to the lockfile.
@@ -29,8 +25,13 @@ else
     echo "Dependencies up to date, skipping install."
 fi
 
-# Build the frontend bundles
-echo "Building frontend..."
-npm run build
+echo "Type-checking..."
+npm run type-check
 
-echo "✓ Frontend build complete!"
+echo "Linting..."
+npm run lint
+
+echo "Running tests..."
+npm test
+
+echo "✓ All frontend checks passed"
