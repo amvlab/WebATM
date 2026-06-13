@@ -31,6 +31,36 @@ class Logger {
     }
 
     /**
+     * Safe localStorage accessors. The logger can't use StorageManager
+     * (StorageManager logs through this class, which would be a circular
+     * import), so it guards its own access: localStorage may be missing
+     * (Node, tests) or throw (privacy mode, quota).
+     */
+    private storageGet(key: string): string | null {
+        try {
+            return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+        } catch {
+            return null;
+        }
+    }
+
+    private storageSet(key: string, value: string): void {
+        try {
+            if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
+        } catch {
+            // Persisting logger settings is best-effort
+        }
+    }
+
+    private storageRemove(key: string): void {
+        try {
+            if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
+        } catch {
+            // Best-effort
+        }
+    }
+
+    /**
      * Load configuration from environment variables and localStorage
      */
     private loadConfiguration(): void {
@@ -40,7 +70,7 @@ class Logger {
             this.config.level = envLogLevel;
         } else {
             // Fallback to localStorage
-            const savedLevel = localStorage.getItem('webatm-log-level');
+            const savedLevel = this.storageGet('webatm-log-level');
             if (savedLevel !== null) {
                 const level = parseInt(savedLevel, 10);
                 if (level >= LogLevel.ERROR && level <= LogLevel.VERBOSE) {
@@ -50,12 +80,12 @@ class Logger {
         }
 
         // Load other settings from localStorage
-        const savedTimestamps = localStorage.getItem('webatm-log-timestamps');
+        const savedTimestamps = this.storageGet('webatm-log-timestamps');
         if (savedTimestamps !== null) {
             this.config.enableTimestamps = savedTimestamps === 'true';
         }
 
-        const savedPrefixes = localStorage.getItem('webatm-log-prefixes');
+        const savedPrefixes = this.storageGet('webatm-log-prefixes');
         if (savedPrefixes !== null) {
             this.config.enableComponentPrefixes = savedPrefixes === 'true';
         }
@@ -96,12 +126,13 @@ class Logger {
             case 'INFO': return LogLevel.INFO;
             case 'DEBUG': return LogLevel.DEBUG;
             case 'VERBOSE': case 'TRACE': return LogLevel.VERBOSE;
-            default:
+            default: {
                 const numLevel = parseInt(levelStr, 10);
                 if (numLevel >= LogLevel.ERROR && numLevel <= LogLevel.VERBOSE) {
                     return numLevel;
                 }
                 return null;
+            }
         }
     }
 
@@ -141,7 +172,7 @@ class Logger {
     /**
      * Log error message (always shown)
      */
-    error(component: string, message: string, ...args: any[]): void {
+    error(component: string, message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.ERROR)) {
             console.error(this.formatMessage(component, message), ...args);
         }
@@ -150,7 +181,7 @@ class Logger {
     /**
      * Log warning message
      */
-    warn(component: string, message: string, ...args: any[]): void {
+    warn(component: string, message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.WARN)) {
             console.warn(this.formatMessage(component, message), ...args);
         }
@@ -159,7 +190,7 @@ class Logger {
     /**
      * Log info message (normal operation)
      */
-    info(component: string, message: string, ...args: any[]): void {
+    info(component: string, message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.INFO)) {
             console.log(this.formatMessage(component, message), ...args);
         }
@@ -168,7 +199,7 @@ class Logger {
     /**
      * Log debug message (detailed information)
      */
-    debug(component: string, message: string, ...args: any[]): void {
+    debug(component: string, message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.DEBUG)) {
             console.log(this.formatMessage(component, message), ...args);
         }
@@ -177,7 +208,7 @@ class Logger {
     /**
      * Log verbose message (very detailed information)
      */
-    verbose(component: string, message: string, ...args: any[]): void {
+    verbose(component: string, message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.VERBOSE)) {
             console.log(this.formatMessage(component, message), ...args);
         }
@@ -195,7 +226,7 @@ class Logger {
      */
     setLevel(level: LogLevel): void {
         this.config.level = level;
-        localStorage.setItem('webatm-log-level', level.toString());
+        this.storageSet('webatm-log-level', level.toString());
     }
 
     /**
@@ -218,7 +249,7 @@ class Logger {
      */
     setTimestamps(enabled: boolean): void {
         this.config.enableTimestamps = enabled;
-        localStorage.setItem('webatm-log-timestamps', enabled.toString());
+        this.storageSet('webatm-log-timestamps', enabled.toString());
     }
 
     /**
@@ -226,7 +257,7 @@ class Logger {
      */
     setComponentPrefixes(enabled: boolean): void {
         this.config.enableComponentPrefixes = enabled;
-        localStorage.setItem('webatm-log-prefixes', enabled.toString());
+        this.storageSet('webatm-log-prefixes', enabled.toString());
     }
 
     /**
@@ -245,9 +276,9 @@ class Logger {
             enableTimestamps: false,
             enableComponentPrefixes: true
         };
-        localStorage.removeItem('webatm-log-level');
-        localStorage.removeItem('webatm-log-timestamps');
-        localStorage.removeItem('webatm-log-prefixes');
+        this.storageRemove('webatm-log-level');
+        this.storageRemove('webatm-log-timestamps');
+        this.storageRemove('webatm-log-prefixes');
     }
 }
 
@@ -256,11 +287,11 @@ export const logger = new Logger();
 
 // Export convenience methods for common usage patterns
 export const log = {
-    error: (component: string, message: string, ...args: any[]) => logger.error(component, message, ...args),
-    warn: (component: string, message: string, ...args: any[]) => logger.warn(component, message, ...args),
-    info: (component: string, message: string, ...args: any[]) => logger.info(component, message, ...args),
-    debug: (component: string, message: string, ...args: any[]) => logger.debug(component, message, ...args),
-    verbose: (component: string, message: string, ...args: any[]) => logger.verbose(component, message, ...args)
+    error: (component: string, message: string, ...args: unknown[]) => logger.error(component, message, ...args),
+    warn: (component: string, message: string, ...args: unknown[]) => logger.warn(component, message, ...args),
+    info: (component: string, message: string, ...args: unknown[]) => logger.info(component, message, ...args),
+    debug: (component: string, message: string, ...args: unknown[]) => logger.debug(component, message, ...args),
+    verbose: (component: string, message: string, ...args: unknown[]) => logger.verbose(component, message, ...args)
 };
 
 export default logger;
