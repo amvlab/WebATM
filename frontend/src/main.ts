@@ -42,6 +42,17 @@ document.addEventListener('DOMContentLoaded', () => {
         window.resetView = () => mapControlsPanel.resetView();
 
         logger.info('main', 'Global map control functions available: zoomIn, zoomOut, resetView');
+
+        // Integrated build only: BlueSky server lifecycle controls + the live
+        // server-log tab. INTEGRATED_BUILD is a compile-time constant injected
+        // by webpack's DefinePlugin; in the default build it is `false`, so
+        // this branch and its dynamic import are dead-code-eliminated and no
+        // integrated chunk is emitted.
+        if (INTEGRATED_BUILD) {
+            import(/* webpackChunkName: "integrated" */ './integrated/index')
+                .then((m) => m.registerIntegrated(app))
+                .catch((err) => logger.error('main', 'Failed to load integrated features:', err));
+        }
     }).catch((error) => {
         logger.error('main', 'Failed to initialize WebATM:', error);
     });

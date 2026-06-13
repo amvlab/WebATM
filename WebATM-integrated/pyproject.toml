@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webatm-integrated"
+version = "0.1.0"
+description = "Integrated BlueSky server lifecycle control and live log streaming for WebATM"
+requires-python = ">=3.13"
+# Ships the BlueSky simulator so the container can run `bluesky --headless`.
+# Verified against amvlab/bluesky (public): distribution name is
+# "bluesky-simulator", and it provides the console script
+# `bluesky = bluesky.__main__:main`. The `[headless]` extra is empty (no extra
+# deps) and the base package excludes the Qt/pygame/console GUI extras, so this
+# installs only the server-only stack the container needs.
+# Tracks amvlab/bluesky's default branch (`main`).
+dependencies = [
+    "bluesky-simulator[headless] @ git+https://github.com/amvlab/bluesky.git@main",
+]
+
+# NOTE: the core `webatm` package is intentionally NOT a declared dependency.
+# It is not published to an index; the image provides it on PYTHONPATH (the
+# same pattern the default build uses) and webatm_integrated imports it at
+# runtime. The dependency arrow only ever points integrated -> core.
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["webatm_integrated*"]

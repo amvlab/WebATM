@@ -9,7 +9,7 @@ import { modalManager } from './ModalManager';
 import { serverManager } from './ServerManager';
 import { logger, LogLevel } from '../utils/Logger';
 import { storage } from '../utils/StorageManager';
-import { onDOMReady, setDisabled } from '../utils/dom';
+import { onDOMReady, setDisabled, setVisible } from '../utils/dom';
 
 /**
  * Settings Modal Component
@@ -21,6 +21,12 @@ export class SettingsModal {
     private currentServerIP: string = 'localhost'; // Will be updated from backend config
     private blueSkyConnected = false;
     private blueSkyServerRunning = false;
+    // Integrated build only: when true the connectivity section is auto-managed
+    // — the server host is fixed to wherever the backend lives (BlueSky runs in
+    // the same container) and the manual Connect/Disconnect buttons are hidden,
+    // because connecting follows the server lifecycle automatically. Activated
+    // via enableIntegratedMode(); stays false in the default build.
+    private integratedMode = false;
 
     // Elements
     private elements: {
@@ -285,8 +291,10 @@ export class SettingsModal {
      */
     private async loadCurrentSettings(): Promise<void> {
         try {
-            // Check saved server IP first, then fetch from backend
-            let serverIp = this.getSavedServerIP();
+            // Check saved server IP first, then fetch from backend. In the
+            // integrated build ignore any saved IP and always take the backend's
+            // configured host — BlueSky lives alongside the backend.
+            let serverIp = this.integratedMode ? null : this.getSavedServerIP();
             if (!serverIp) {
                 const response = await fetch('/api/server/config');
                 if (response.ok) {
@@ -309,6 +317,11 @@ export class SettingsModal {
             if (this.elements.serverIpInput) {
                 this.elements.serverIpInput.value = this.currentServerIP;
             }
+        }
+
+        // Re-assert the integrated-mode appearance after (re)populating the value.
+        if (this.integratedMode) {
+            this.applyIntegratedMode();
         }
 
         // Load current map style settings
@@ -378,8 +391,8 @@ export class SettingsModal {
     /**
      * Connect to server
      */
-    private async connectToServer(): Promise<void> {
-        const serverIp = this.elements.serverIpInput?.value.trim() || 'localhost';
+    private async connectToServer(hostOverride?: string): Promise<boolean> {
+        const serverIp = hostOverride ?? (this.elements.serverIpInput?.value.trim() || 'localhost');
 
         try {
             // Store the server IP for status display
@@ -420,18 +433,31 @@ export class SettingsModal {
                 if (consoleInput) {
                     consoleInput.focus();
                 }
-            } else {
-                this.addConsoleMessage(`Connection failed: ${result.error}`, 'console-error');
-                this.updateConnectionStatus(false);
+                return true;
             }
+
+            this.addConsoleMessage(`Connection failed: ${result.error}`, 'console-error');
+            this.updateConnectionStatus(false);
+            return false;
         } catch (error) {
             logger.error('SettingsModal', 'Error updating server settings:', error);
             this.addConsoleMessage(`Connection error: ${(error as Error).message}`, 'console-error');
             this.updateConnectionStatus(false);
+            return false;
         } finally {
             // Reset button state
             this.setConnectButtonState('Connect', false);
         }
+    }
+
+    /**
+     * Connect to the currently-configured BlueSky host programmatically, without
+     * any modal interaction. Used by the integrated build to auto-connect after
+     * the server is started/restarted. Resolves true once the connection is
+     * confirmed.
+     */
+    public connectToConfiguredServer(): Promise<boolean> {
+        return this.connectToServer(this.currentServerIP);
     }
 
     /**
@@ -471,6 +497,15 @@ export class SettingsModal {
     }
 
     /**
+     * Disconnect from the BlueSky server programmatically, without any modal
+     * interaction. Used by the integrated build to auto-disconnect after the
+     * server is stopped/killed.
+     */
+    public disconnectFromConfiguredServer(): Promise<void> {
+        return this.disconnectFromServer();
+    }
+
+    /**
      * Handle server status update event
      */
     private handleServerStatusUpdate(detail: { status: string; message: string }): void {
@@ -506,6 +541,14 @@ export class SettingsModal {
     private updateConnectionButtons(isConnected: boolean): void {
         logger.debug('SettingsModal', `updateConnectionButtons called - isConnected: ${isConnected}`);
 
+        // Integrated build: connecting/disconnecting is auto-managed from the
+        // server lifecycle controls, so the manual buttons stay hidden and the
+        // host stays locked regardless of connection state.
+        if (this.integratedMode) {
+            this.applyIntegratedMode();
+            return;
+        }
+
         if (this.elements.connectButton) {
             const newDisplay = isConnected ? 'none' : 'inline-block';
             logger.debug('SettingsModal', `Setting Connect button display to: ${newDisplay}`);
@@ -535,6 +578,55 @@ export class SettingsModal {
 
         // Also update button state when connection status changes
         this.updateConnectButtonState();
+    }
+
+    /**
+     * Switch the connectivity section into integrated mode (integrated build
+     * only).
+     *
+     * In the integrated build BlueSky runs inside the same container as the
+     * WebATM backend, so the connection host is always "wherever the backend
+     * lives" and connecting/disconnecting follows the server lifecycle
+     * automatically. Lock the host to the backend-reported value and hide the
+     * manual Connect/Disconnect buttons, and keep it that way regardless of
+     * connection state. Never called in the default build, so it stays a no-op
+     * there.
+     */
+    public enableIntegratedMode(): void {
+        if (this.integratedMode) return;
+        this.integratedMode = true;
+        onDOMReady(() => {
+            this.applyIntegratedMode();
+            // Pull the host from the backend so the field shows where BlueSky
+            // actually lives (its configured host, e.g. localhost), ignoring any
+            // IP a previous non-integrated session may have saved.
+            void this.loadCurrentSettings();
+        });
+    }
+
+    /**
+     * Apply the integrated-mode appearance: lock the host input to the
+     * backend's value and hide the manual Connect/Disconnect buttons (the
+     * connection is managed automatically). Safe to call repeatedly.
+     */
+    private applyIntegratedMode(): void {
+        const input = this.elements.serverIpInput;
+        if (input) {
+            input.disabled = true;
+            input.style.opacity = '0.6';
+            input.style.cursor = 'not-allowed';
+            input.title = 'Server host is Fixed in WebATM Integrated.';
+        }
+
+        const help = input?.closest('.setting-group')?.querySelector('small.setting-help');
+        if (help) {
+            help.textContent = 'Server host is Fixed in WebATM Integrated.';
+        }
+
+        // Connecting/disconnecting is auto-managed from the server controls, so
+        // the manual buttons aren't a user concern here.
+        if (this.elements.connectButton) setVisible(this.elements.connectButton, false);
+        if (this.elements.disconnectButton) setVisible(this.elements.disconnectButton, false);
     }
 
     /**

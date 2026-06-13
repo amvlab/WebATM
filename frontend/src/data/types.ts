@@ -397,6 +397,26 @@ export interface LogUpdateData {
   message?: string;
 }
 
+/**
+ * One line of live server-process log output (integrated build only).
+ * `seq` is a monotonic, gap-free sequence number assigned server-side at
+ * ingest; the client renders in `seq` order and de-duplicates replays by it.
+ */
+export interface ServerLogLine {
+  seq: number;
+  t: number;
+  line: string;
+}
+
+/**
+ * Batch of server log lines pushed over the `server_log` Socket.IO event.
+ * `replay` marks a history replay sent to a late-joining client.
+ */
+export interface ServerLogBatch {
+  lines: ServerLogLine[];
+  replay?: boolean;
+}
+
 // Settings Modal Types
 
 export interface ServerConfigResponse {

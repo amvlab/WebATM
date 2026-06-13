@@ -1,0 +1,86 @@
+# Integrated WebATM image: bundles the BlueSky simulator so the container can
+# run `bluesky --headless` itself, and ships the server lifecycle controls +
+# live log-streaming UI. Build with:
+#
+#   docker build -f Dockerfile.integrated -t webatm-integrated .
+#
+# The default `Dockerfile` is intentionally left untouched so the standard
+# image is unaffected by this variant.
+FROM debian:bookworm-slim
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    curl \
+    ca-certificates \
+    procps \
+    fonts-dejavu-core \
+    fonts-liberation \
+    fontconfig \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast Python package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Create application user and set working directory
+RUN useradd -m -s /bin/bash webatm
+USER webatm
+WORKDIR /home/webatm
+
+# Set up virtual environment
+ENV VIRTUAL_ENV="/home/webatm/.local/webatm-venv"
+RUN uv venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Install Python dependencies (production)
+COPY --chown=webatm:webatm requirements.txt requirements-prod.txt ./
+RUN uv pip install -r requirements-prod.txt
+
+# Install Node.js for TypeScript build
+USER root
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy sources (core package, frontend, and the integrated package)
+USER webatm
+WORKDIR /home/webatm
+COPY --chown=webatm:webatm WebATM/ ./WebATM/
+COPY --chown=webatm:webatm frontend/ ./frontend/
+COPY --chown=webatm:webatm WebATM-integrated/ ./WebATM-integrated/
+
+# Build the frontend WITH integrated features enabled; output lands in
+# WebATM/static/dist/. The frontend/ directory is build-only.
+WORKDIR /home/webatm/frontend
+RUN npm ci && npm run build:integrated
+WORKDIR /home/webatm
+RUN rm -rf frontend
+
+# Install the integrated package, which also pulls the BlueSky simulator from
+# its (public) git source. The core `webatm` package is provided on PYTHONPATH
+# below rather than installed, so it is not a declared dependency.
+RUN uv pip install ./WebATM-integrated
+
+COPY --chown=webatm:webatm WebATM.py ./
+COPY --chown=webatm:webatm script/wsgi_integrated.py ./
+
+# Expose web server port
+EXPOSE 8082
+
+# Integrated build defaults: enable the extensions, run BlueSky locally.
+ENV WEB_HOST=0.0.0.0 \
+    WEB_PORT=8082 \
+    WEBATM_INTEGRATED=1 \
+    BLUESKY_SERVER_HOST=localhost
+
+# Add current directory to Python path so the WebATM package can be found
+ENV PYTHONPATH="/home/webatm"
+
+# Start WebATM with gunicorn using a THREADED worker (not eventlet): the
+# integrated build reads a blocking subprocess pipe in a background thread.
+# Shell form so WEB_HOST / WEB_PORT env vars are honored; exec keeps gunicorn
+# as PID 1 so it receives signals directly and can reap the bluesky group.
+CMD ["sh", "-c", "exec gunicorn --worker-class gthread --threads 4 -w 1 --bind ${WEB_HOST:-0.0.0.0}:${WEB_PORT:-8082} wsgi_integrated:app"]

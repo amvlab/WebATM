@@ -14,3 +14,18 @@ services:
     # volumes:
       # - /path/to/your/bluesky:/bluesky
 
+  # Integrated variant: bundles BlueSky inside the container
+  # Uncomment to use instead of (or alongside, on a different host port) the
+  # standalone webatm service above.
+  # webatm-integrated:
+  #   image: ghcr.io/amvlab/webatm-integrated:latest
+  #   container_name: webatm-integrated-local
+  #   restart: unless-stopped
+  #   ports:
+  #     - 8082:8082
+  #   # Optional: persist BlueSky's config directory (settings.cfg, scenario/,
+  #   # plugins/, output/) across container restarts. The WebATM file manager is 
+  #   # pre-wired to that path, no UI configuration needed.
+  #   # volumes:
+  #     # - /path/to/your/bluesky-config:/home/webatm/bluesky
+

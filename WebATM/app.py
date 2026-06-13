@@ -12,6 +12,7 @@ This module is separated into different focused modules in the server/ package:
 """
 
 import logging
+import os
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -115,5 +116,28 @@ def create_app():
 
     # Register all Socket.IO event handlers
     register_socket_handlers(socketio, session_manager)
+
+    # Expose the session manager so optional extensions can reach it.
+    # Harmless and unused in the default build.
+    app.session_manager = session_manager
+
+    # Optional integrated extensions: BlueSky server lifecycle control and
+    # live log streaming. This is a no-op in the default build -- the
+    # WEBATM_INTEGRATED env var is unset and the webatm_integrated package is
+    # not installed, so the import is skipped or caught. The core package
+    # never imports webatm_integrated; the dependency points the other way.
+    if os.environ.get("WEBATM_INTEGRATED") == "1":
+        try:
+            import webatm_integrated
+
+            webatm_integrated.register(
+                app,
+                socketio,
+                session_manager=session_manager,
+                bluesky_proxy=bluesky_proxy,
+            )
+            logger.info("Integrated extensions registered (webatm_integrated)")
+        except Exception as e:  # best-effort: never break the core app
+            logger.warning(f"Integrated extensions not loaded: {e}")
 
     return app, socketio

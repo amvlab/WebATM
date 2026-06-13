@@ -1,6 +1,6 @@
 import { logger } from '../utils/Logger';
 import { storage } from '../utils/StorageManager';
-import { onDOMReady } from '../utils/dom';
+import { onDOMReady, setVisible } from '../utils/dom';
 
 interface FileTypeConfig {
     extension: string;
@@ -57,6 +57,11 @@ export class BlueSkyFileManager {
     };
 
     private isConfigured: boolean = false;
+    // Integrated build only: when true the manual "BlueSky Base Directory"
+    // controls are hidden because the backend wires file management straight to
+    // BlueSky's working directory. Activated via enableIntegratedMode(); stays
+    // false (and a no-op) in the default build.
+    private integratedMode: boolean = false;
     private currentPaths: Record<string, string> = {
         scenario: '',
         plugins: '',
@@ -258,6 +263,48 @@ export class BlueSkyFileManager {
         } finally {
             configureBtn.disabled = false;
             configureBtn.textContent = 'Configure';
+        }
+    }
+
+    /**
+     * Switch file management into integrated mode (integrated build only).
+     *
+     * In the integrated build BlueSky runs inside the same container as the
+     * WebATM backend, so its scenario/plugins/output directories live at a
+     * fixed path that the backend wires up automatically (see
+     * webatm_integrated.bluesky_paths). There is nothing for the user to
+     * configure, so hide the "BlueSky Base Directory" input + Configure button;
+     * the auto-configured paths are still shown via the normal configured-state
+     * UI. Never called in the default build, so it stays a no-op there.
+     */
+    public enableIntegratedMode(): void {
+        if (this.integratedMode) return;
+        this.integratedMode = true;
+        onDOMReady(() => this.applyIntegratedMode());
+    }
+
+    /**
+     * Hide the manual base-path configuration controls. Safe to call repeatedly.
+     */
+    private applyIntegratedMode(): void {
+        // The input, Configure button, help text and "file system access"
+        // warning all live in one .setting-group; hiding it removes the whole
+        // manual-configuration affordance while leaving the configured-paths
+        // status display (a sibling element) intact.
+        const input = document.getElementById('bluesky-base-path-input-settings');
+        const configGroup = input?.closest('.setting-group');
+        if (configGroup instanceof HTMLElement) {
+            setVisible(configGroup, false);
+        }
+
+        // The section now just reports the fixed paths, so drop the "Configure
+        // …" wording that no longer applies.
+        const description = input
+            ?.closest('.settings-section')
+            ?.querySelector('.section-description');
+        if (description) {
+            description.textContent =
+                "BlueSky's scenario, plugins, and output directories — configured automatically in WebATM Integrated.";
         }
     }
 
