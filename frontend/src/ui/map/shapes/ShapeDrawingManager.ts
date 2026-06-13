@@ -1,9 +1,12 @@
 import { MapDisplay } from '../MapDisplay';
 import { modalManager } from '../../ModalManager';
-import { Map as MapLibreMap, MapMouseEvent, MapLayerMouseEvent, GeoJSONSource } from 'maplibre-gl';
+import { GeoJSONSource } from 'maplibre-gl';
 import type { App } from '../../../core/App';
 import type { NavaidSnapper } from '../navdata/NavaidSnapper';
+import { BaseDrawingManager, DrawingPoint } from '../BaseDrawingManager';
+import { featureCollection, lineStringFeature, pointFeature, polygonFeature, toLngLatCoords } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
+import { safeRemoveLayer, safeRemoveSource } from '../../../utils/maplibre';
 
 /**
  * ShapeDrawingManager - Manages shape (polygon/polyline) drawing on the map
@@ -14,27 +17,17 @@ import { logger } from '../../../utils/Logger';
  * - Interactive map clicking for shape definition
  * - Drawing state management
  */
-export class ShapeDrawingManager {
-    private mapDisplay: MapDisplay;
+export class ShapeDrawingManager extends BaseDrawingManager {
     private app: App;
-    private navaidSnapper: NavaidSnapper;
-    private drawingMode: boolean = false;
     private currentShapeName: string | null = null;
     private currentShapeType: 'area' | 'line' = 'area';
-    private drawingPoints: Array<{lat: number, lng: number}> = [];
+    private drawingPoints: DrawingPoint[] = [];
     private topAltitude: number | null = null;
     private bottomAltitude: number | null = null;
 
-    // Event handler references for cleanup
-    private mapClickHandler: ((e: MapMouseEvent) => void) | null = null;
-    private mapRightClickHandler: ((e: MapMouseEvent) => void) | null = null;
-    private mapMouseMoveHandler: ((e: MapMouseEvent) => void) | null = null;
-    private keyDownHandler: ((e: KeyboardEvent) => void) | null = null;
-
     constructor(mapDisplay: MapDisplay, app: App, navaidSnapper: NavaidSnapper) {
-        this.mapDisplay = mapDisplay;
+        super(mapDisplay, navaidSnapper);
         this.app = app;
-        this.navaidSnapper = navaidSnapper;
         this.setupModalHandlers();
     }
 
@@ -224,166 +217,38 @@ export class ShapeDrawingManager {
     }
 
     /**
-     * Show drawing banner
+     * Set up temporary drawing layers when drawing starts.
      */
-    private showDrawingBanner(message: string): void {
-        const banner = document.getElementById('drawing-banner');
-        const bannerText = document.getElementById('drawing-banner-text');
-
-        if (banner && bannerText) {
-            bannerText.textContent = message;
-            banner.style.display = 'flex';
-        }
-    }
-
-    /**
-     * Hide drawing banner
-     */
-    private hideDrawingBanner(): void {
-        const banner = document.getElementById('drawing-banner');
-        if (banner) {
-            banner.style.display = 'none';
-        }
-    }
-
-    /**
-     * Get drawing mode status
-     */
-    public isDrawing(): boolean {
-        return this.drawingMode;
-    }
-
-    /**
-     * Enable map drawing handlers
-     */
-    private enableMapDrawing(): void {
-        const map = this.mapDisplay.getMap();
-        if (!map) return;
-
-        // Change cursor to crosshair for drawing
-        map.getCanvas().style.cursor = 'crosshair';
-
-        // Setup temporary drawing layers
+    protected onDrawingEnabled(): void {
         this.setupTemporaryDrawingLayers();
-
-        // Create and bind event handlers
-        this.mapClickHandler = this.onMapClick.bind(this);
-        this.mapRightClickHandler = this.onMapRightClick.bind(this);
-        this.mapMouseMoveHandler = this.onMapMouseMove.bind(this);
-        this.keyDownHandler = this.onKeyDown.bind(this);
-
-        // Add event listeners
-        map.on('click', this.mapClickHandler);
-        map.on('contextmenu', this.mapRightClickHandler);
-        map.on('mousemove', this.mapMouseMoveHandler);
-        document.addEventListener('keydown', this.keyDownHandler);
-
-        logger.debug('ShapeDrawingManager', 'Map drawing handlers enabled');
     }
 
     /**
-     * Disable map drawing handlers
+     * Clear and remove temporary drawing layers when drawing stops.
      */
-    private disableMapDrawing(): void {
-        const map = this.mapDisplay.getMap();
-        if (!map) return;
-
-        // Restore default cursor
-        map.getCanvas().style.cursor = '';
-
-        // Remove event listeners if handlers exist
-        if (this.mapClickHandler) {
-            map.off('click', this.mapClickHandler);
-            this.mapClickHandler = null;
-        }
-        if (this.mapRightClickHandler) {
-            map.off('contextmenu', this.mapRightClickHandler);
-            this.mapRightClickHandler = null;
-        }
-        if (this.mapMouseMoveHandler) {
-            map.off('mousemove', this.mapMouseMoveHandler);
-            this.mapMouseMoveHandler = null;
-        }
-        if (this.keyDownHandler) {
-            document.removeEventListener('keydown', this.keyDownHandler);
-            this.keyDownHandler = null;
-        }
-
-        // Clear and remove temporary drawing layers
+    protected onDrawingDisabled(): void {
         this.clearTemporaryDrawing();
         this.removeTemporaryDrawingLayers();
-        this.navaidSnapper.clearHighlight();
-
-        logger.debug('ShapeDrawingManager', 'Map drawing handlers disabled');
     }
 
     /**
-     * Handle map click - add point to drawing
+     * Handle a placed point - update banner and preview.
      */
-    private onMapClick(e: MapMouseEvent): void {
-        if (!this.drawingMode) return;
-
-        // Snap the vertex to a nearby navaid when enabled, else use the raw click.
-        const snapped = this.navaidSnapper.snap(e);
-        const point = snapped
-            ? { lat: snapped.lat, lng: snapped.lng }
-            : { lat: e.lngLat.lat, lng: e.lngLat.lng };
-
+    protected onPointAdded(point: DrawingPoint): void {
         this.drawingPoints.push(point);
 
-        // Update banner with point count
-        const bannerMessage = this.getBannerMessage();
-        this.showDrawingBanner(bannerMessage);
-
-        // Update temporary visualization
+        this.showDrawingBanner(this.getBannerMessage());
         this.updateTemporaryDrawing();
 
         logger.debug('ShapeDrawingManager', `Added point ${this.drawingPoints.length}: ${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`);
     }
 
     /**
-     * Handle map right click - finish drawing
-     */
-    private onMapRightClick(e: MapMouseEvent): void {
-        e.preventDefault(); // Prevent context menu
-
-        if (!this.drawingMode) return;
-
-        // Finish drawing - generate command
-        this.finishDrawing();
-    }
-
-    /**
-     * Handle keyboard events during drawing
-     */
-    private onKeyDown(e: KeyboardEvent): void {
-        if (!this.drawingMode) return;
-
-        // Handle Escape key to cancel drawing
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            logger.debug('ShapeDrawingManager', 'Drawing cancelled with Escape key');
-            this.cancelDrawing();
-        }
-    }
-
-    /**
      * Handle mouse move - update cursor preview
      */
-    private onMapMouseMove(e: MapMouseEvent): void {
-        if (!this.drawingMode) return;
-
-        // Highlight the navaid the next click would snap to (from the first move).
-        this.navaidSnapper.highlight(e);
-
+    protected onCursorMove(point: DrawingPoint): void {
         if (this.drawingPoints.length === 0) return;
-
-        const currentPoint = {
-            lat: e.lngLat.lat,
-            lng: e.lngLat.lng
-        };
-
-        this.updateCursorPreview(currentPoint);
+        this.updateCursorPreview(point);
     }
 
     /**
@@ -403,7 +268,7 @@ export class ShapeDrawingManager {
     /**
      * Finish drawing and generate command
      */
-    private async finishDrawing(): Promise<void> {
+    protected async finishDrawing(): Promise<void> {
         const minPoints = this.currentShapeType === 'line' ? 2 : 3;
         const shapeType = this.currentShapeType === 'line' ? 'line' : 'polygon';
 
@@ -454,7 +319,7 @@ export class ShapeDrawingManager {
     /**
      * Cancel drawing without generating command
      */
-    private cancelDrawing(): void {
+    protected cancelDrawing(): void {
         logger.info('ShapeDrawingManager', `Drawing cancelled for "${this.currentShapeName}"`);
         this.stopDrawing();
     }
@@ -486,34 +351,11 @@ export class ShapeDrawingManager {
         if (!map) return;
 
         // Add sources if they don't exist
-        if (!map.getSource('temp-drawing-points')) {
-            map.addSource('temp-drawing-points', {
-                type: 'geojson',
-                data: {
-                    type: 'FeatureCollection',
-                    features: []
-                }
-            });
-        }
-
-        if (!map.getSource('temp-drawing-polygon')) {
-            map.addSource('temp-drawing-polygon', {
-                type: 'geojson',
-                data: {
-                    type: 'FeatureCollection',
-                    features: []
-                }
-            });
-        }
-
-        if (!map.getSource('temp-drawing-preview')) {
-            map.addSource('temp-drawing-preview', {
-                type: 'geojson',
-                data: {
-                    type: 'FeatureCollection',
-                    features: []
-                }
-            });
+        const sourceIds = ['temp-drawing-points', 'temp-drawing-polygon', 'temp-drawing-preview'];
+        for (const sourceId of sourceIds) {
+            if (!map.getSource(sourceId)) {
+                map.addSource(sourceId, { type: 'geojson', data: featureCollection() });
+            }
         }
 
         // Add layers for points
@@ -592,47 +434,28 @@ export class ShapeDrawingManager {
         if (!map) return;
 
         // Update point markers
-        const pointFeatures = this.drawingPoints.map((point, index) => ({
-            type: 'Feature' as const,
-            geometry: {
-                type: 'Point' as const,
-                coordinates: [point.lng, point.lat]
-            },
-            properties: {
-                index: index
-            }
-        }));
+        const pointFeatures = this.drawingPoints.map((point, index) =>
+            pointFeature([point.lng, point.lat], { index }));
 
         const pointSource = map.getSource('temp-drawing-points') as GeoJSONSource;
         if (pointSource) {
-            pointSource.setData({
-                type: 'FeatureCollection',
-                features: pointFeatures
-            });
+            pointSource.setData(featureCollection(pointFeatures));
         }
+
+        const coordinates = toLngLatCoords(this.drawingPoints);
+        const polygonSource = map.getSource('temp-drawing-polygon') as GeoJSONSource;
 
         // Update polygon/line visualization
         if (this.currentShapeType === 'line') {
             // For lines, show simple line connections between points
             if (this.drawingPoints.length >= 2) {
-                const coordinates = this.drawingPoints.map(p => [p.lng, p.lat]);
-
-                const polygonSource = map.getSource('temp-drawing-polygon') as GeoJSONSource;
                 if (polygonSource) {
-                    polygonSource.setData({
-                        type: 'FeatureCollection',
-                        features: [{
-                            type: 'Feature',
-                            geometry: {
-                                type: 'LineString',
-                                coordinates: coordinates
-                            },
-                            properties: {
-                                name: this.currentShapeName,
-                                'drawing-type': 'line'
-                            }
-                        }]
-                    });
+                    polygonSource.setData(featureCollection([
+                        lineStringFeature(coordinates, {
+                            name: this.currentShapeName,
+                            'drawing-type': 'line'
+                        })
+                    ]));
                 }
 
                 // Hide fill layer for lines
@@ -641,49 +464,26 @@ export class ShapeDrawingManager {
         } else {
             // For areas/polygons
             if (this.drawingPoints.length >= 3) {
-                const coordinates = this.drawingPoints.map(p => [p.lng, p.lat]);
-                coordinates.push(coordinates[0]); // Close the polygon
-
-                const polygonSource = map.getSource('temp-drawing-polygon') as GeoJSONSource;
                 if (polygonSource) {
-                    polygonSource.setData({
-                        type: 'FeatureCollection',
-                        features: [{
-                            type: 'Feature',
-                            geometry: {
-                                type: 'Polygon',
-                                coordinates: [coordinates]
-                            },
-                            properties: {
-                                name: this.currentShapeName,
-                                'drawing-type': 'polygon'
-                            }
-                        }]
-                    });
+                    polygonSource.setData(featureCollection([
+                        polygonFeature(coordinates, {
+                            name: this.currentShapeName,
+                            'drawing-type': 'polygon'
+                        })
+                    ]));
                 }
 
                 // Show fill layer for polygons
                 map.setLayoutProperty('temp-drawing-polygon-fill', 'visibility', 'visible');
             } else if (this.drawingPoints.length === 2) {
                 // Show line preview
-                const coordinates = this.drawingPoints.map(p => [p.lng, p.lat]);
-
-                const polygonSource = map.getSource('temp-drawing-polygon') as GeoJSONSource;
                 if (polygonSource) {
-                    polygonSource.setData({
-                        type: 'FeatureCollection',
-                        features: [{
-                            type: 'Feature',
-                            geometry: {
-                                type: 'LineString',
-                                coordinates: coordinates
-                            },
-                            properties: {
-                                name: this.currentShapeName,
-                                'drawing-type': 'polygon-preview'
-                            }
-                        }]
-                    });
+                    polygonSource.setData(featureCollection([
+                        lineStringFeature(coordinates, {
+                            name: this.currentShapeName,
+                            'drawing-type': 'polygon-preview'
+                        })
+                    ]));
                 }
             }
         }
@@ -698,61 +498,31 @@ export class ShapeDrawingManager {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        const features: any[] = [];
+        const features: GeoJSON.Feature[] = [];
 
         if (this.drawingPoints.length >= 1) {
             // Line from last point to cursor
             const lastPoint = this.drawingPoints[this.drawingPoints.length - 1];
-            features.push({
-                type: 'Feature',
-                geometry: {
-                    type: 'LineString',
-                    coordinates: [
-                        [lastPoint.lng, lastPoint.lat],
-                        [cursorPoint.lng, cursorPoint.lat]
-                    ]
-                },
-                properties: {
-                    preview: 'next-line'
-                }
-            });
+            features.push(lineStringFeature(
+                toLngLatCoords([lastPoint, cursorPoint]),
+                { preview: 'next-line' }
+            ));
 
             // For polygons with 2+ points, show closing line and fill preview
             if (this.drawingPoints.length >= 2 && this.currentShapeType !== 'line') {
                 const firstPoint = this.drawingPoints[0];
 
                 // Closing line from cursor to first point
-                features.push({
-                    type: 'Feature',
-                    geometry: {
-                        type: 'LineString',
-                        coordinates: [
-                            [cursorPoint.lng, cursorPoint.lat],
-                            [firstPoint.lng, firstPoint.lat]
-                        ]
-                    },
-                    properties: {
-                        preview: 'closing-line'
-                    }
-                });
+                features.push(lineStringFeature(
+                    toLngLatCoords([cursorPoint, firstPoint]),
+                    { preview: 'closing-line' }
+                ));
 
-                // Polygon preview with fill
-                const previewCoords = [
-                    ...this.drawingPoints.map(p => [p.lng, p.lat]),
-                    [cursorPoint.lng, cursorPoint.lat],
-                    [this.drawingPoints[0].lng, this.drawingPoints[0].lat]
-                ];
-
-                features.push({
-                    type: 'Feature',
-                    geometry: {
-                        type: 'Polygon',
-                        coordinates: [previewCoords]
-                    },
-                    properties: {
-                        preview: 'polygon-fill'
-                    }
-                });
+                // Polygon preview with fill (ring closed by polygonFeature)
+                features.push(polygonFeature(
+                    toLngLatCoords([...this.drawingPoints, cursorPoint]),
+                    { preview: 'polygon-fill' }
+                ));
             }
         }
 
@@ -766,10 +536,7 @@ export class ShapeDrawingManager {
         // Update preview source
         const previewSource = map.getSource('temp-drawing-preview') as GeoJSONSource;
         if (previewSource) {
-            previewSource.setData({
-                type: 'FeatureCollection',
-                features: features
-            });
+            previewSource.setData(featureCollection(features));
         }
     }
 
@@ -785,10 +552,7 @@ export class ShapeDrawingManager {
         sources.forEach(sourceId => {
             const source = map.getSource(sourceId) as GeoJSONSource;
             if (source) {
-                source.setData({
-                    type: 'FeatureCollection',
-                    features: []
-                });
+                source.setData(featureCollection());
             }
         });
 
@@ -811,19 +575,11 @@ export class ShapeDrawingManager {
             'temp-drawing-preview-fill'
         ];
 
-        layers.forEach(layerId => {
-            if (map.getLayer(layerId)) {
-                map.removeLayer(layerId);
-            }
-        });
+        layers.forEach(layerId => safeRemoveLayer(map, layerId));
 
         // Remove sources
         const sources = ['temp-drawing-points', 'temp-drawing-polygon', 'temp-drawing-preview'];
-        sources.forEach(sourceId => {
-            if (map.getSource(sourceId)) {
-                map.removeSource(sourceId);
-            }
-        });
+        sources.forEach(sourceId => safeRemoveSource(map, sourceId));
 
         logger.debug('ShapeDrawingManager', 'Removed temporary drawing layers');
     }

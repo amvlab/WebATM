@@ -1,9 +1,15 @@
-import { Map as MapLibreMap, GeoJSONSource } from 'maplibre-gl';
+import { GeoJSONSource } from 'maplibre-gl';
 import { Shape, PolygonShape, PolylineShape, DisplayOptions } from '../../../data/types';
 import type { MapDisplay } from '../MapDisplay';
 import type { StateManager } from '../../../core/StateManager';
 import { Shape3DRenderer } from './Shape3DRenderer';
+import { featureCollection, lineStringFeature, pointFeature, polygonFeature, toLngLatCoords } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
+import {
+    ensureGeoJSONSource,
+    ensureLayer,
+    setLayerVisibility
+} from '../../../utils/maplibre';
 
 /**
  * ShapeRenderer - Handles rendering of geographic shapes (polygons, polylines, etc.)
@@ -91,107 +97,67 @@ export class ShapeRenderer {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        // Add sources
-        if (!map.getSource(this.POLYGON_SOURCE_ID)) {
-            map.addSource(this.POLYGON_SOURCE_ID, {
-                type: 'geojson',
-                data: {
-                    type: 'FeatureCollection',
-                    features: []
-                }
-            });
-        }
+        ensureGeoJSONSource(map, this.POLYGON_SOURCE_ID);
+        ensureGeoJSONSource(map, this.POLYLINE_SOURCE_ID);
+        ensureGeoJSONSource(map, this.LABELS_SOURCE_ID);
 
-        if (!map.getSource(this.POLYLINE_SOURCE_ID)) {
-            map.addSource(this.POLYLINE_SOURCE_ID, {
-                type: 'geojson',
-                data: {
-                    type: 'FeatureCollection',
-                    features: []
-                }
-            });
-        }
-
-        if (!map.getSource(this.LABELS_SOURCE_ID)) {
-            map.addSource(this.LABELS_SOURCE_ID, {
-                type: 'geojson',
-                data: {
-                    type: 'FeatureCollection',
-                    features: []
-                }
-            });
-        }
-
-        // Get current display options
         const displayOptions = this.stateManager.getDisplayOptions();
 
-        // Add polygon fill layer
-        if (!map.getLayer(this.POLYGON_FILL_LAYER_ID)) {
-            map.addLayer({
-                id: this.POLYGON_FILL_LAYER_ID,
-                source: this.POLYGON_SOURCE_ID,
-                type: 'fill',
-                paint: {
-                    'fill-color': ['get', 'fillColor'],
-                    'fill-opacity': ['get', 'fillOpacity']
-                },
-                layout: {
-                    visibility: (displayOptions.showShapes && displayOptions.showShapeFill) ? 'visible' : 'none'
-                }
-            });
-        }
+        ensureLayer(map, {
+            id: this.POLYGON_FILL_LAYER_ID,
+            source: this.POLYGON_SOURCE_ID,
+            type: 'fill',
+            paint: {
+                'fill-color': ['get', 'fillColor'],
+                'fill-opacity': ['get', 'fillOpacity']
+            },
+            layout: {
+                visibility: (displayOptions.showShapes && displayOptions.showShapeFill) ? 'visible' : 'none'
+            }
+        });
 
-        // Add polygon outline layer
-        if (!map.getLayer(this.POLYGON_LINE_LAYER_ID)) {
-            map.addLayer({
-                id: this.POLYGON_LINE_LAYER_ID,
-                source: this.POLYGON_SOURCE_ID,
-                type: 'line',
-                paint: {
-                    'line-color': ['get', 'strokeColor'],
-                    'line-width': ['get', 'strokeWidth']
-                },
-                layout: {
-                    visibility: (displayOptions.showShapes && displayOptions.showShapeLines) ? 'visible' : 'none'
-                }
-            });
-        }
+        ensureLayer(map, {
+            id: this.POLYGON_LINE_LAYER_ID,
+            source: this.POLYGON_SOURCE_ID,
+            type: 'line',
+            paint: {
+                'line-color': ['get', 'strokeColor'],
+                'line-width': ['get', 'strokeWidth']
+            },
+            layout: {
+                visibility: (displayOptions.showShapes && displayOptions.showShapeLines) ? 'visible' : 'none'
+            }
+        });
 
-        // Add polyline layer
-        if (!map.getLayer(this.POLYLINE_LAYER_ID)) {
-            map.addLayer({
-                id: this.POLYLINE_LAYER_ID,
-                source: this.POLYLINE_SOURCE_ID,
-                type: 'line',
-                paint: {
-                    'line-color': ['get', 'color'],
-                    'line-width': ['get', 'width']
-                },
-                layout: {
-                    visibility: (displayOptions.showShapes && displayOptions.showShapeLines) ? 'visible' : 'none'
-                }
-            });
-        }
+        ensureLayer(map, {
+            id: this.POLYLINE_LAYER_ID,
+            source: this.POLYLINE_SOURCE_ID,
+            type: 'line',
+            paint: {
+                'line-color': ['get', 'color'],
+                'line-width': ['get', 'width']
+            },
+            layout: {
+                visibility: (displayOptions.showShapes && displayOptions.showShapeLines) ? 'visible' : 'none'
+            }
+        });
 
-        // Add labels layer
-        if (!map.getLayer(this.LABELS_LAYER_ID)) {
-            map.addLayer({
-                id: this.LABELS_LAYER_ID,
-                source: this.LABELS_SOURCE_ID,
-                type: 'symbol',
-                layout: {
-                    'text-field': ['get', 'name'],
-                    'text-size': 12,
-                    'text-anchor': 'center',
-                    visibility: (displayOptions.showShapes && displayOptions.showShapeLabels) ? 'visible' : 'none'
-                },
-                paint: {
-                    'text-color': displayOptions.shapeLabelsColor || '#ff00ff',
-                    'text-halo-color': '#ffffff',
-                    'text-halo-width': 2
-                }
-            });
-        }
+        ensureLayer(map, {
+            id: this.LABELS_LAYER_ID,
+            source: this.LABELS_SOURCE_ID,
+            type: 'symbol',
+            layout: {
+                'text-field': ['get', 'name'],
+                'text-size': 12,
+                'text-anchor': 'center',
+                visibility: (displayOptions.showShapes && displayOptions.showShapeLabels) ? 'visible' : 'none'
+            },
+            paint: {
+                'text-color': displayOptions.shapeLabelsColor || '#ff00ff',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 2
+            }
+        });
 
         logger.debug('ShapeRenderer', 'Map layers created');
     }
@@ -239,37 +205,22 @@ export class ShapeRenderer {
 
         const displayOptions = this.stateManager.getDisplayOptions();
 
-        // Convert polygons to GeoJSON features
-        const features = polygons.map(poly => {
-            // Close the polygon ring
-            const coordinates = poly.coordinates.map(c => [c.lng, c.lat]);
-            coordinates.push(coordinates[0]);
-
-            return {
-                type: 'Feature' as const,
-                geometry: {
-                    type: 'Polygon' as const,
-                    coordinates: [coordinates]
-                },
-                properties: {
-                    name: poly.name,
-                    fillColor: poly.fillColor || displayOptions.shapeFillColor || '#ff00ff',
-                    fillOpacity: poly.fillOpacity !== undefined ? poly.fillOpacity : 0.2,
-                    strokeColor: poly.strokeColor || displayOptions.shapeLinesColor || '#ff00ff',
-                    strokeWidth: poly.strokeWidth || 2,
-                    topAltitude: poly.topAltitude,
-                    bottomAltitude: poly.bottomAltitude
-                }
-            };
-        });
+        // Convert polygons to GeoJSON features (ring closed by polygonFeature)
+        const features = polygons.map(poly =>
+            polygonFeature(toLngLatCoords(poly.coordinates), {
+                name: poly.name,
+                fillColor: poly.fillColor || displayOptions.shapeFillColor || '#ff00ff',
+                fillOpacity: poly.fillOpacity !== undefined ? poly.fillOpacity : 0.2,
+                strokeColor: poly.strokeColor || displayOptions.shapeLinesColor || '#ff00ff',
+                strokeWidth: poly.strokeWidth || 2,
+                topAltitude: poly.topAltitude,
+                bottomAltitude: poly.bottomAltitude
+            }));
 
         // Update polygon source
         const source = map.getSource(this.POLYGON_SOURCE_ID) as GeoJSONSource;
         if (source) {
-            source.setData({
-                type: 'FeatureCollection',
-                features
-            });
+            source.setData(featureCollection(features));
         } else {
             // Source not ready yet, which can happen:
             // 1. During initial map load
@@ -282,10 +233,7 @@ export class ShapeRenderer {
             // After initialization, try updating again
             const sourceAfterInit = map.getSource(this.POLYGON_SOURCE_ID) as GeoJSONSource;
             if (sourceAfterInit) {
-                sourceAfterInit.setData({
-                    type: 'FeatureCollection',
-                    features
-                });
+                sourceAfterInit.setData(featureCollection(features));
             } else {
                 logger.warn('ShapeRenderer', `Failed to initialize polygon source - cannot render ${polygons.length} polygons`);
             }
@@ -302,30 +250,17 @@ export class ShapeRenderer {
         const displayOptions = this.stateManager.getDisplayOptions();
 
         // Convert polylines to GeoJSON features
-        const features = polylines.map(line => {
-            const coordinates = line.coordinates.map(c => [c.lng, c.lat]);
-
-            return {
-                type: 'Feature' as const,
-                geometry: {
-                    type: 'LineString' as const,
-                    coordinates
-                },
-                properties: {
-                    name: line.name,
-                    color: line.color || displayOptions.shapeLinesColor || '#ff00ff',
-                    width: line.width || 2
-                }
-            };
-        });
+        const features = polylines.map(line =>
+            lineStringFeature(toLngLatCoords(line.coordinates), {
+                name: line.name,
+                color: line.color || displayOptions.shapeLinesColor || '#ff00ff',
+                width: line.width || 2
+            }));
 
         // Update polyline source
         const source = map.getSource(this.POLYLINE_SOURCE_ID) as GeoJSONSource;
         if (source) {
-            source.setData({
-                type: 'FeatureCollection',
-                features
-            });
+            source.setData(featureCollection(features));
         } else {
             // Source not ready yet, which can happen:
             // 1. During initial map load
@@ -338,10 +273,7 @@ export class ShapeRenderer {
             // After initialization, try updating again
             const sourceAfterInit = map.getSource(this.POLYLINE_SOURCE_ID) as GeoJSONSource;
             if (sourceAfterInit) {
-                sourceAfterInit.setData({
-                    type: 'FeatureCollection',
-                    features
-                });
+                sourceAfterInit.setData(featureCollection(features));
             } else {
                 logger.warn('ShapeRenderer', `Failed to initialize polyline source - cannot render ${polylines.length} polylines`);
             }
@@ -356,7 +288,7 @@ export class ShapeRenderer {
         if (!map) return;
 
         // Create label features at shape centroids
-        const features: any[] = [];
+        const features: GeoJSON.Feature[] = [];
 
         shapes.forEach((shape) => {
             if (!shape.visible) return;
@@ -372,25 +304,13 @@ export class ShapeRenderer {
                 return;
             }
 
-            features.push({
-                type: 'Feature',
-                geometry: {
-                    type: 'Point',
-                    coordinates: centroid
-                },
-                properties: {
-                    name: shape.name
-                }
-            });
+            features.push(pointFeature(centroid, { name: shape.name }));
         });
 
         // Update labels source
         const source = map.getSource(this.LABELS_SOURCE_ID) as GeoJSONSource;
         if (source) {
-            source.setData({
-                type: 'FeatureCollection',
-                features
-            });
+            source.setData(featureCollection(features));
         } else {
             // Source not ready yet, which can happen:
             // 1. During initial map load
@@ -403,10 +323,7 @@ export class ShapeRenderer {
             // After initialization, try updating again
             const sourceAfterInit = map.getSource(this.LABELS_SOURCE_ID) as GeoJSONSource;
             if (sourceAfterInit) {
-                sourceAfterInit.setData({
-                    type: 'FeatureCollection',
-                    features
-                });
+                sourceAfterInit.setData(featureCollection(features));
             } else {
                 logger.warn('ShapeRenderer', `Failed to initialize labels source - cannot render labels`);
             }
@@ -449,38 +366,13 @@ export class ShapeRenderer {
         if (!map) return;
 
         // Update layer visibility - respect master showShapes toggle
-        if (map.getLayer(this.POLYGON_FILL_LAYER_ID)) {
-            map.setLayoutProperty(
-                this.POLYGON_FILL_LAYER_ID,
-                'visibility',
-                (displayOptions.showShapes && displayOptions.showShapeFill) ? 'visible' : 'none'
-            );
-        }
-
-        if (map.getLayer(this.POLYGON_LINE_LAYER_ID)) {
-            map.setLayoutProperty(
-                this.POLYGON_LINE_LAYER_ID,
-                'visibility',
-                (displayOptions.showShapes && displayOptions.showShapeLines) ? 'visible' : 'none'
-            );
-        }
-
-        if (map.getLayer(this.POLYLINE_LAYER_ID)) {
-            map.setLayoutProperty(
-                this.POLYLINE_LAYER_ID,
-                'visibility',
-                (displayOptions.showShapes && displayOptions.showShapeLines) ? 'visible' : 'none'
-            );
-        }
+        const showShapes = displayOptions.showShapes;
+        setLayerVisibility(map, this.POLYGON_FILL_LAYER_ID, showShapes && displayOptions.showShapeFill);
+        setLayerVisibility(map, this.POLYGON_LINE_LAYER_ID, showShapes && displayOptions.showShapeLines);
+        setLayerVisibility(map, this.POLYLINE_LAYER_ID, showShapes && displayOptions.showShapeLines);
+        setLayerVisibility(map, this.LABELS_LAYER_ID, showShapes && displayOptions.showShapeLabels);
 
         if (map.getLayer(this.LABELS_LAYER_ID)) {
-            map.setLayoutProperty(
-                this.LABELS_LAYER_ID,
-                'visibility',
-                (displayOptions.showShapes && displayOptions.showShapeLabels) ? 'visible' : 'none'
-            );
-
-            // Update label color
             map.setPaintProperty(
                 this.LABELS_LAYER_ID,
                 'text-color',
