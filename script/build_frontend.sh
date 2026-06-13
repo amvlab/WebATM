@@ -5,8 +5,32 @@
 # Compiles the TypeScript sources in frontend/ into JavaScript bundles
 # served by the web application (output goes to WebATM/static/dist/).
 #
+# Pass --integrated to produce the integrated bundle (BlueSky server controls +
+# live "Server Log" tab) via `npm run build:integrated`; otherwise the default
+# bundle is built and the integrated code is excluded.
+#
 
 set -e  # Exit on error
+
+INTEGRATED=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --integrated|-i)
+            INTEGRATED=1
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [--integrated]"
+            echo "  --integrated, -i  Build the integrated bundle (server controls + live log tab)"
+            echo "  --help, -h        Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
 
 # Get the project root directory (parent of script/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,7 +54,12 @@ else
 fi
 
 # Build the frontend bundles
-echo "Building frontend..."
-npm run build
+if [ "$INTEGRATED" -eq 1 ]; then
+    echo "Building frontend (integrated variant)..."
+    npm run build:integrated
+else
+    echo "Building frontend..."
+    npm run build
+fi
 
 echo "✓ Frontend build complete!"
