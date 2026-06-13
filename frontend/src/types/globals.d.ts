@@ -24,6 +24,10 @@ import type {
 } from '../data/types';
 
 declare global {
+    // Compile-time build flag injected by webpack's DefinePlugin. `true` only
+    // in the `webatm-integrated` build; `false` (and tree-shaken) by default.
+    const INTEGRATED_BUILD: boolean;
+
     interface Window {
         // Application singletons (set in main.ts once the app boots)
         app?: App;

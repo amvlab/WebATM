@@ -1,10 +1,19 @@
 const path = require('path');
+const webpack = require('webpack');
 const { WebpackManifestPlugin } = require('webpack-manifest-plugin');
 
 module.exports = (env, argv) => {
   const isProduction = argv.mode === 'production' || process.env.NODE_ENV === 'production';
+  const integratedBuild = process.env.INTEGRATED_BUILD === 'true';
 
-  console.log(`Building in ${isProduction ? 'production' : 'development'} mode`);
+  console.log(`Building in ${isProduction ? 'production' : 'development'} mode${integratedBuild ? ' (integrated)' : ''}`);
+
+  // Compile-time feature flag. In the default build this is `false`, so the
+  // `if (INTEGRATED_BUILD)` branch in main.ts (and its dynamic import of
+  // src/integrated/*) is dead-code-eliminated -- no integrated chunk is emitted.
+  const definePlugin = new webpack.DefinePlugin({
+    INTEGRATED_BUILD: JSON.stringify(integratedBuild),
+  });
 
   const baseConfig = {
     entry: './src/main.ts',
@@ -62,6 +71,7 @@ module.exports = (env, argv) => {
         },
       },
       plugins: [
+        definePlugin,
         new WebpackManifestPlugin({
           fileName: 'manifest.json',
           publicPath: '',
@@ -84,6 +94,7 @@ module.exports = (env, argv) => {
       runtimeChunk: false,
     },
     plugins: [
+      definePlugin,
       new WebpackManifestPlugin({
         fileName: 'manifest.json',
         publicPath: '',
