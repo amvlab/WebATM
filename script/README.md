@@ -1,8 +1,63 @@
-# Navdata pipeline (airports + waypoints)
+# script/
 
-Builds the airport/waypoint overlay that WebATM renders on the map, from
-X-Plane navigation data. This is an **offline** build step — its outputs are
-served at runtime but the pipeline itself is never run by the app.
+Utility scripts for building, checking, running and releasing WebATM.
+
+## Inventory
+
+| Script | What it does |
+| --- | --- |
+| `run_webatm.sh` | Start the dev server (`python WebATM.py`) from the repo root. |
+| `wsgi.py` | Gunicorn entry point; used by the Docker image and any production deploy. |
+| `build_frontend.sh` | Production webpack build of `frontend/` → `WebATM/static/dist/` + vendored assets. Re-runs `npm ci` only when `package-lock.json` is newer than `node_modules/`. |
+| `check_frontend.sh` | Mirror of the GitHub Actions frontend job: type-check, lint, unit tests. Shares the conditional-install guard. |
+| `build_docker.sh` | Build the WebATM image locally (`webatm:latest`). |
+| `build_release_tarball.sh` | Bundle `WebATM/static/{vendor,dist}` into `webatm-prebuilt-<version>.tar.gz` for a per-version GitHub release. Version comes from `pyproject.toml`. |
+| `build_assets_tarball.sh` | Bundle `WebATM/static/{tiles,glyphs,navdata}` into `webatm-assets-<tag>.tar.gz` for the long-lived **assets** release. Tag comes from `.assets-version` at the repo root. |
+| `build_navdata_tiles.sh` | End-to-end navdata pipeline (see [below](#navdata-pipeline)). |
+| `parse_xplane.py` | The X-Plane → GeoJSON parser invoked by the navdata pipeline; runnable on its own. |
+| `build/` | Output dir for the navdata pipeline (gitignored intermediates + `.pmtiles`). Created on demand. |
+
+## Common tasks
+
+```bash
+# Start the dev server
+./run_webatm.sh
+
+# Build the frontend bundle (skips install when up to date)
+./build_frontend.sh
+
+# Run the frontend checks (type-check + lint + tests)
+./check_frontend.sh
+
+# Build the Docker image locally
+./build_docker.sh
+```
+
+## Release tarballs
+
+WebATM ships two GitHub releases that the runtime depends on, kept on **separate
+cadences**:
+
+- **Per-version code release** (rebuilt each version bump). Contains the webpack
+  bundle and vendored CSS/fonts.
+  ```bash
+  ./build_release_tarball.sh           # → webatm-prebuilt-<version>.tar.gz
+  ```
+- **Assets release** (rebuilt rarely — when tiles, glyphs or navdata change).
+  Pinned via `.assets-version` at the repo root; the Docker publish workflow
+  reads that file to hydrate static assets before building the image.
+  ```bash
+  ./build_assets_tarball.sh            # → webatm-assets-<tag>.tar.gz
+  # bump .assets-version, then:
+  # gh release create <tag> webatm-assets-<tag>.tar.gz
+  ```
+
+## Navdata pipeline
+
+Builds the airport / heliport / waypoint / runway overlay that WebATM renders
+on the map, from X-Plane navigation data. This is an **offline** build step —
+its outputs are served at runtime but the pipeline itself is never run by the
+app.
 
 ```
 apt.dat / earth_fix.dat
@@ -16,7 +71,7 @@ WebATM/static/tiles/navdata.pmtiles    WebATM/static/navdata/navdata.sqlite
     the pmtiles:// protocol)               /api/navdata/search)
 ```
 
-## What you need
+### What you need
 
 1. **The X-Plane data files** — `apt.dat` and `earth_fix.dat`. Get them from
    an X-Plane install (incl. the free demo):
@@ -32,7 +87,7 @@ WebATM/static/tiles/navdata.pmtiles    WebATM/static/navdata/navdata.sqlite
    <https://github.com/felt/tippecanoe>. `python3` (3.9+, stdlib only) is the
    only other requirement.
 
-## Build
+### Build
 
 ```bash
 cd script/
@@ -55,7 +110,7 @@ tiling):
 python3 parse_xplane.py --apt /path/to/apt.dat --fix /path/to/earth_fix.dat --out-dir ./build
 ```
 
-## Tuning
+### Tuning
 
 `build_navdata_tiles.sh` flags:
 - `--apt-minzoom N`  (default 2)  — lowest zoom airports are tiled at.
@@ -70,9 +125,9 @@ python3 parse_xplane.py --apt /path/to/apt.dat --fix /path/to/earth_fix.dat --ou
 
 The vector-tile **source-layers** are named `airports`, `heliports`,
 `waypoints`, `runways`, and `pavement`; these names are referenced in
-`frontend/src/ui/map/NavdataRenderer.ts`. If you rename them here, update the
-renderer too. Runways, taxiways and aprons all come from the same `apt.dat`
-parse:
+`frontend/src/ui/map/navdata/NavdataRenderer.ts`. If you rename them here,
+update the renderer too. Runways, taxiways and aprons all come from the same
+`apt.dat` parse:
 - a runway becomes a paved-rectangle polygon from its two thresholds + width,
   plus a `textrot` property so the designator label reads along the strip;
 - each airport carries an importance `rank` (0-5). The **map style** (not the
@@ -82,7 +137,7 @@ parse:
   `NavdataRenderer.ts`). Rank also orders search results and decides which
   airport label wins when they collide.
 
-## Airport importance (OurAirports data)
+### Airport importance (OurAirports data)
 
 Airport rank comes **solely** from the [OurAirports](https://ourairports.com/data/)
 class (public domain): `large_airport` 5, `medium_airport` 4, `small_airport`
@@ -125,7 +180,7 @@ Note: apt.dat contains thousands of minor fields and heliports with synthetic
   straight segments approximate each curved edge (default 8; lower it to shrink
   the archive, raise it for smoother fillets).
 
-## How it surfaces in the app
+### How it surfaces in the app
 
 - **Rendering**: `NavdataRenderer` is the single source of truth for the
   overlay. It adds the `pmtiles://` vector source + layers for airports
