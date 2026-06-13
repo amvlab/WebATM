@@ -92,7 +92,7 @@ export class LogStreamManager {
         }
         if (this.refreshBtn) {
             this.refreshBtn.addEventListener('click', () => {
-                (window as any).outputFileBrowser?.refreshFileList();
+                window.outputFileBrowser?.refreshFileList();
             });
         }
         if (this.clearStreamBtn) {
@@ -265,7 +265,10 @@ export class LogStreamManager {
             el.classList.remove('log-search-highlight', 'active');
             // Restore original text (remove <mark> wrappers)
             if (el.querySelector('mark')) {
-                el.textContent = el.textContent;
+                // Reading textContent flattens the <mark> children; writing it
+                // back replaces them with a single plain-text node.
+                const plainText = el.textContent;
+                el.textContent = plainText;
             }
         });
         this.searchMatches = [];
@@ -282,7 +285,10 @@ export class LogStreamManager {
         highlighted.forEach(el => {
             el.classList.remove('log-search-highlight', 'active');
             if (el.querySelector('mark')) {
-                el.textContent = el.textContent;
+                // Reading textContent flattens the <mark> children; writing it
+                // back replaces them with a single plain-text node.
+                const plainText = el.textContent;
+                el.textContent = plainText;
             }
         });
 
@@ -374,7 +380,7 @@ export class LogStreamManager {
 
         if (!this.isStreaming) {
             this.showBrowserView();
-            await (window as any).outputFileBrowser?.show();
+            await window.outputFileBrowser?.show();
         } else {
             this.showStreamView();
         }
@@ -429,9 +435,5 @@ export class LogStreamManager {
 
 export const logStreamManager = new LogStreamManager();
 
-declare global {
-    interface Window {
-        logStreamManager: LogStreamManager;
-    }
-}
+// Make it globally available for onclick handlers (typed in types/globals.d.ts)
 window.logStreamManager = logStreamManager;

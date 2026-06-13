@@ -4,6 +4,7 @@ import type { AircraftData, DisplayOptions } from '../../../data/types';
 import type { StateManager } from '../../../core/StateManager';
 import { AircraftRenderer } from './AircraftRenderer';
 import type { AircraftShapeDrawer } from './AircraftRenderer';
+import { logger } from '../../../utils/Logger';
 
 /**
  * Wrapper for existing AircraftRenderer to implement IEntityRenderer interface
@@ -12,7 +13,6 @@ import type { AircraftShapeDrawer } from './AircraftRenderer';
  */
 export class Aircraft2DRenderer implements IEntityRenderer<AircraftData> {
     private renderer: AircraftRenderer | null = null;
-    private map: MapLibreMap | null = null;
     private displayOptions: DisplayOptions;
     private shapeDrawer: AircraftShapeDrawer;
     private stateManager: StateManager;
@@ -36,8 +36,6 @@ export class Aircraft2DRenderer implements IEntityRenderer<AircraftData> {
      * the 3D layer.
      */
     initialize(map: MapLibreMap): void {
-        this.map = map;
-
         this.renderer = new AircraftRenderer(
             map,
             this.displayOptions,
@@ -54,9 +52,9 @@ export class Aircraft2DRenderer implements IEntityRenderer<AircraftData> {
      * Note: The Map is expected to contain a single 'batch' entry with the full AircraftData,
      * as the underlying 2D renderer processes all aircraft in a batch format.
      */
-    updateEntities(entities: Map<string, AircraftData>, simTime: number): void {
+    updateEntities(entities: Map<string, AircraftData>, _simTime: number): void {
         if (!this.renderer) {
-            console.warn('Aircraft2DRenderer: Cannot update entities - renderer not initialized');
+            logger.warn('Aircraft2DRenderer', 'Cannot update entities - renderer not initialized');
             return;
         }
 
@@ -97,7 +95,6 @@ export class Aircraft2DRenderer implements IEntityRenderer<AircraftData> {
     destroy(): void {
         // Future: Could add explicit cleanup method to AircraftRenderer if needed
         this.renderer = null;
-        this.map = null;
     }
 
     /**

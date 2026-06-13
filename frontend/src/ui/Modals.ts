@@ -1,8 +1,10 @@
+import type { Socket } from 'socket.io-client';
 import { modalManager } from './ModalManager';
 import { settingsModal } from './SettingsModal';
 import { serverManager } from './ServerManager';
 import { blueSkyFileManager } from './BlueSkyFileManager';
 import { logger } from '../utils/Logger';
+import { onDOMReady } from '../utils/dom';
 
 /**
  * Central Modals System
@@ -18,12 +20,7 @@ export class Modals {
 
     private init(): void {
         if (this.initialized) return;
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initializeModals());
-        } else {
-            this.initializeModals();
-        }
+        onDOMReady(() => this.initializeModals());
     }
 
     private initializeModals(): void {
@@ -163,7 +160,7 @@ export class Modals {
     /**
      * Set socket for server manager integration
      */
-    public setSocket(socket: any): void {
+    public setSocket(socket: Socket | null): void {
         serverManager.setSocket(socket);
     }
 

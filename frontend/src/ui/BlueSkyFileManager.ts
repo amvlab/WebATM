@@ -1,11 +1,6 @@
 import { logger } from '../utils/Logger';
-
-interface AppWindow extends Window {
-    app?: {
-        sendCommand: (command: string) => void;
-    };
-}
-declare const window: AppWindow;
+import { storage } from '../utils/StorageManager';
+import { onDOMReady } from '../utils/dom';
 
 interface FileTypeConfig {
     extension: string;
@@ -34,13 +29,6 @@ interface UploadedFile {
     type: 'file' | 'folder';
 }
 
-interface ListFilesResponse {
-    success: boolean;
-    file_type: string;
-    files: UploadedFile[];
-    base_path: string;
-}
-
 interface BrowseDirectoryResponse {
     success: boolean;
     file_type: string;
@@ -60,6 +48,8 @@ interface Breadcrumb {
  * Handles file uploads for scenarios, plugins, and settings files
  */
 export class BlueSkyFileManager {
+    private static readonly BASE_PATH_KEY = 'bluesky-base-path';
+
     private fileTypeConfigs: Record<string, FileTypeConfig> = {
         scenario: { extension: '.scn', directory: 'scenario', allowMultiple: true },
         plugins: { extension: '.py', directory: 'plugins', allowMultiple: true },
@@ -78,11 +68,7 @@ export class BlueSkyFileManager {
     }
 
     private init(): void {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initializeFileManager());
-        } else {
-            this.initializeFileManager();
-        }
+        onDOMReady(() => this.initializeFileManager());
     }
 
     private initializeFileManager(): void {
@@ -163,7 +149,10 @@ export class BlueSkyFileManager {
         if (basePathInput && status.base_path) {
             basePathInput.value = status.base_path;
             // Save the path to localStorage if it's different from what's saved
-            const savedPath = localStorage.getItem('bluesky-base-path');
+            const savedPath = storage.getStringWithLegacyMigration(
+                BlueSkyFileManager.BASE_PATH_KEY,
+                BlueSkyFileManager.BASE_PATH_KEY
+            );
             if (savedPath !== status.base_path) {
                 this.saveBasePath(status.base_path);
             }
@@ -708,11 +697,8 @@ export class BlueSkyFileManager {
      * Save the BlueSky base path to localStorage
      */
     private saveBasePath(basePath: string): void {
-        try {
-            localStorage.setItem('bluesky-base-path', basePath);
+        if (storage.set(BlueSkyFileManager.BASE_PATH_KEY, basePath)) {
             logger.debug('BlueSkyFileManager', `Saved base path to localStorage: ${basePath}`);
-        } catch (error) {
-            logger.warn('BlueSkyFileManager', 'Failed to save base path to localStorage:', error);
         }
     }
 
@@ -720,40 +706,23 @@ export class BlueSkyFileManager {
      * Load the BlueSky base path from localStorage
      */
     private loadSavedBasePath(): void {
-        try {
-            const savedPath = localStorage.getItem('bluesky-base-path');
-            if (savedPath) {
-                const basePathInput = document.getElementById('bluesky-base-path-input-settings') as HTMLInputElement;
-                if (basePathInput) {
-                    basePathInput.value = savedPath;
-                    logger.debug('BlueSkyFileManager', `Loaded saved base path: ${savedPath}`);
-                }
+        const savedPath = storage.getStringWithLegacyMigration(
+            BlueSkyFileManager.BASE_PATH_KEY,
+            BlueSkyFileManager.BASE_PATH_KEY
+        );
+        if (savedPath) {
+            const basePathInput = document.getElementById('bluesky-base-path-input-settings') as HTMLInputElement;
+            if (basePathInput) {
+                basePathInput.value = savedPath;
+                logger.debug('BlueSkyFileManager', `Loaded saved base path: ${savedPath}`);
             }
-        } catch (error) {
-            logger.warn('BlueSkyFileManager', 'Failed to load base path from localStorage:', error);
         }
     }
 
-    /**
-     * Clear the saved BlueSky base path from localStorage
-     */
-    private clearSavedBasePath(): void {
-        try {
-            localStorage.removeItem('bluesky-base-path');
-            logger.debug('BlueSkyFileManager', 'Cleared saved base path from localStorage');
-        } catch (error) {
-            logger.warn('BlueSkyFileManager', 'Failed to clear base path from localStorage:', error);
-        }
-    }
 }
 
 // Export singleton instance
 export const blueSkyFileManager = new BlueSkyFileManager();
 
-// Make it globally available for onclick handlers
-declare global {
-    interface Window {
-        blueSkyFileManager: BlueSkyFileManager;
-    }
-}
+// Make it globally available for onclick handlers (typed in types/globals.d.ts)
 window.blueSkyFileManager = blueSkyFileManager;

@@ -122,6 +122,53 @@ export class DataProcessor {
     }
 
     /**
+     * Unit suffix used in compact map labels (e.g. "250kt").
+     */
+    static speedUnitLabel(unit: SpeedUnit): string {
+        switch (unit) {
+            case 'm/s':
+                return 'm/s';
+            case 'km/h':
+                return 'km/h';
+            case 'mph':
+                return 'mph';
+            case 'knots':
+            default:
+                return 'kt';
+        }
+    }
+
+    /**
+     * Compact speed label for map display (no space before the unit).
+     */
+    static formatSpeedLabel(speedKnots: number, unit: SpeedUnit): string {
+        const rounded = Math.round(this.convertSpeed(speedKnots, unit));
+        return `${rounded}${this.speedUnitLabel(unit)}`;
+    }
+
+    /**
+     * Compact altitude label for map display: FL is zero-padded, km keeps
+     * one decimal, other units round to integers with no space before the
+     * unit suffix.
+     */
+    static formatAltitudeLabel(altMeters: number, unit: AltitudeUnit): string {
+        const converted = this.convertAltitude(altMeters, unit);
+
+        switch (unit) {
+            case 'fl':
+                return 'FL' + Math.round(converted).toString().padStart(3, '0');
+            case 'km':
+                return converted.toFixed(1) + 'km';
+            case 'ft':
+                return Math.round(converted).toString() + 'ft';
+            case 'm':
+                return Math.round(converted).toString() + 'm';
+            default:
+                return Math.round(converted).toString();
+        }
+    }
+
+    /**
      * Get speed value for aircraft based on speed type (CAS/TAS/GS)
      * Handles missing data gracefully with fallback to TAS
      */

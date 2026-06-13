@@ -1,7 +1,27 @@
-import { Map, GeoJSONSource } from 'maplibre-gl';
+import { Map } from 'maplibre-gl';
 import { RouteData, DisplayOptions } from '../../../data/types';
 import { DataProcessor } from '../../../data/DataProcessor';
+import { lineStringFeature, pointFeature } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
+import {
+    ensureGeoJSONSource,
+    ensureLayer,
+    updateSourceFeatures,
+    setLayerVisibility,
+    isValidCoordinate
+} from '../../../utils/maplibre';
+
+/**
+ * GeoJSON feature collections produced by buildRouteFeatures and consumed
+ * by updateMapSources, one array per route map source.
+ */
+export interface RouteFeatureSets {
+    completeRouteFeatures: GeoJSON.Feature[];
+    aircraftToActiveFeatures: GeoJSON.Feature[];
+    remainingRouteFeatures: GeoJSON.Feature[];
+    waypointFeatures: GeoJSON.Feature[];
+    labelFeatures: GeoJSON.Feature[];
+}
 
 /**
  * AircraftRouteRenderer - Handles MapLibre GL rendering for aircraft routes
@@ -62,50 +82,11 @@ export class AircraftRouteRenderer {
      * Set up GeoJSON sources for route visualization
      */
     private setupSources(): void {
-        const emptyFeatureCollection = {
-            type: 'FeatureCollection' as const,
-            features: []
-        };
-
-        // Complete route source
-        if (!this.map.getSource(this.SOURCE_ROUTE_COMPLETE)) {
-            this.map.addSource(this.SOURCE_ROUTE_COMPLETE, {
-                type: 'geojson',
-                data: emptyFeatureCollection
-            });
-        }
-
-        // Aircraft-to-active waypoint source
-        if (!this.map.getSource(this.SOURCE_AIRCRAFT_TO_ACTIVE)) {
-            this.map.addSource(this.SOURCE_AIRCRAFT_TO_ACTIVE, {
-                type: 'geojson',
-                data: emptyFeatureCollection
-            });
-        }
-
-        // Remaining route source
-        if (!this.map.getSource(this.SOURCE_ROUTE_REMAINING)) {
-            this.map.addSource(this.SOURCE_ROUTE_REMAINING, {
-                type: 'geojson',
-                data: emptyFeatureCollection
-            });
-        }
-
-        // Waypoints source
-        if (!this.map.getSource(this.SOURCE_ROUTE_WAYPOINTS)) {
-            this.map.addSource(this.SOURCE_ROUTE_WAYPOINTS, {
-                type: 'geojson',
-                data: emptyFeatureCollection
-            });
-        }
-
-        // Labels source
-        if (!this.map.getSource(this.SOURCE_ROUTE_LABELS)) {
-            this.map.addSource(this.SOURCE_ROUTE_LABELS, {
-                type: 'geojson',
-                data: emptyFeatureCollection
-            });
-        }
+        ensureGeoJSONSource(this.map, this.SOURCE_ROUTE_COMPLETE);
+        ensureGeoJSONSource(this.map, this.SOURCE_AIRCRAFT_TO_ACTIVE);
+        ensureGeoJSONSource(this.map, this.SOURCE_ROUTE_REMAINING);
+        ensureGeoJSONSource(this.map, this.SOURCE_ROUTE_WAYPOINTS);
+        ensureGeoJSONSource(this.map, this.SOURCE_ROUTE_LABELS);
     }
 
     /**
@@ -113,116 +94,106 @@ export class AircraftRouteRenderer {
      */
     private setupRouteLayers(): void {
         // Complete route layer (grey dashed line for entire route)
-        if (!this.map.getLayer(this.LAYER_ROUTE_COMPLETE)) {
-            this.map.addLayer({
-                id: this.LAYER_ROUTE_COMPLETE,
-                source: this.SOURCE_ROUTE_COMPLETE,
-                type: 'line',
-                layout: {
-                    'line-join': 'round',
-                    'line-cap': 'round'
-                },
-                paint: {
-                    'line-color': '#888888',
-                    'line-width': 2,
-                    'line-opacity': 0.6,
-                    'line-dasharray': [3, 3]
-                }
-            });
-        }
+        ensureLayer(this.map, {
+            id: this.LAYER_ROUTE_COMPLETE,
+            source: this.SOURCE_ROUTE_COMPLETE,
+            type: 'line',
+            layout: {
+                'line-join': 'round',
+                'line-cap': 'round'
+            },
+            paint: {
+                'line-color': '#888888',
+                'line-width': 2,
+                'line-opacity': 0.6,
+                'line-dasharray': [3, 3]
+            }
+        });
 
         // Aircraft-to-active waypoint layer (solid line)
-        if (!this.map.getLayer(this.LAYER_AIRCRAFT_TO_ACTIVE)) {
-            this.map.addLayer({
-                id: this.LAYER_AIRCRAFT_TO_ACTIVE,
-                source: this.SOURCE_AIRCRAFT_TO_ACTIVE,
-                type: 'line',
-                layout: {
-                    'line-join': 'round',
-                    'line-cap': 'round'
-                },
-                paint: {
-                    'line-color': this.displayOptions.routeLinesColor,
-                    'line-width': 3,
-                    'line-opacity': 0.8
-                }
-            });
-        }
+        ensureLayer(this.map, {
+            id: this.LAYER_AIRCRAFT_TO_ACTIVE,
+            source: this.SOURCE_AIRCRAFT_TO_ACTIVE,
+            type: 'line',
+            layout: {
+                'line-join': 'round',
+                'line-cap': 'round'
+            },
+            paint: {
+                'line-color': this.displayOptions.routeLinesColor,
+                'line-width': 3,
+                'line-opacity': 0.8
+            }
+        });
 
         // Remaining route layer (dashed line from active waypoint to end)
-        if (!this.map.getLayer(this.LAYER_ROUTE_REMAINING)) {
-            this.map.addLayer({
-                id: this.LAYER_ROUTE_REMAINING,
-                source: this.SOURCE_ROUTE_REMAINING,
-                type: 'line',
-                layout: {
-                    'line-join': 'round',
-                    'line-cap': 'round'
-                },
-                paint: {
-                    'line-color': this.displayOptions.routeLinesColor,
-                    'line-width': 3,
-                    'line-opacity': 0.8,
-                    'line-dasharray': [2, 2]
-                }
-            });
-        }
+        ensureLayer(this.map, {
+            id: this.LAYER_ROUTE_REMAINING,
+            source: this.SOURCE_ROUTE_REMAINING,
+            type: 'line',
+            layout: {
+                'line-join': 'round',
+                'line-cap': 'round'
+            },
+            paint: {
+                'line-color': this.displayOptions.routeLinesColor,
+                'line-width': 3,
+                'line-opacity': 0.8,
+                'line-dasharray': [2, 2]
+            }
+        });
 
         // Waypoints layer (circles)
-        if (!this.map.getLayer(this.LAYER_ROUTE_WAYPOINTS)) {
-            this.map.addLayer({
-                id: this.LAYER_ROUTE_WAYPOINTS,
-                source: this.SOURCE_ROUTE_WAYPOINTS,
-                type: 'circle',
-                paint: {
-                    'circle-radius': [
-                        'case',
-                        ['get', 'isActive'],
-                        8, // Larger for active waypoint
-                        6  // Normal size
-                    ],
-                    'circle-color': [
-                        'case',
-                        ['get', 'isPassed'],
-                        '#888888', // Gray for passed waypoints
-                        ['get', 'isActive'],
-                        '#00ff00', // Green for active waypoint
-                        this.displayOptions.routePointsColor  // Custom color for future waypoints
-                    ],
-                    'circle-stroke-color': '#ffffff',
-                    'circle-stroke-width': 2,
-                    'circle-opacity': [
-                        'case',
-                        ['get', 'isPassed'],
-                        0.5, // Semi-transparent for passed waypoints
-                        0.9  // Full opacity for future waypoints
-                    ]
-                }
-            });
-        }
+        ensureLayer(this.map, {
+            id: this.LAYER_ROUTE_WAYPOINTS,
+            source: this.SOURCE_ROUTE_WAYPOINTS,
+            type: 'circle',
+            paint: {
+                'circle-radius': [
+                    'case',
+                    ['get', 'isActive'],
+                    8, // Larger for active waypoint
+                    6  // Normal size
+                ],
+                'circle-color': [
+                    'case',
+                    ['get', 'isPassed'],
+                    '#888888', // Gray for passed waypoints
+                    ['get', 'isActive'],
+                    '#00ff00', // Green for active waypoint
+                    this.displayOptions.routePointsColor  // Custom color for future waypoints
+                ],
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+                'circle-opacity': [
+                    'case',
+                    ['get', 'isPassed'],
+                    0.5, // Semi-transparent for passed waypoints
+                    0.9  // Full opacity for future waypoints
+                ]
+            }
+        });
 
         // Labels layer (text)
-        if (!this.map.getLayer(this.LAYER_ROUTE_LABELS)) {
-            this.map.addLayer({
-                id: this.LAYER_ROUTE_LABELS,
-                source: this.SOURCE_ROUTE_LABELS,
-                type: 'symbol',
-                layout: {
-                    'text-field': ['get', 'name'],
-                    'text-font': ['Open Sans Regular'],
-                    'text-offset': ['get', 'offset'],
-                    'text-anchor': ['get', 'anchor'],
-                    'text-size': this.displayOptions.mapLabelsTextSize,
-                    'text-allow-overlap': false,
-                    'text-ignore-placement': false
-                },
-                paint: {
-                    'text-color': this.displayOptions.routeLabelsColor,
-                    'text-halo-color': '#ffffff',
-                    'text-halo-width': 1
-                }
-            });
-        }
+        ensureLayer(this.map, {
+            id: this.LAYER_ROUTE_LABELS,
+            source: this.SOURCE_ROUTE_LABELS,
+            type: 'symbol',
+            layout: {
+                'text-field': ['get', 'name'],
+                'text-font': ['Open Sans Regular'],
+                'text-offset': ['get', 'offset'],
+                'text-anchor': ['get', 'anchor'],
+                'text-size': this.displayOptions.mapLabelsTextSize,
+                'text-allow-overlap': false,
+                'text-ignore-placement': false
+            },
+            paint: {
+                'text-color': this.displayOptions.routeLabelsColor,
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1
+            }
+        });
     }
 
     /**
@@ -231,12 +202,12 @@ export class AircraftRouteRenderer {
      * @param activeWaypointIndex - Index of active waypoint
      * @returns Object containing all feature collections
      */
-    public buildRouteFeatures(data: RouteData, activeWaypointIndex: number) {
-        const completeRouteFeatures: any[] = [];
-        const aircraftToActiveFeatures: any[] = [];
-        const remainingRouteFeatures: any[] = [];
-        const waypointFeatures: any[] = [];
-        const labelFeatures: any[] = [];
+    public buildRouteFeatures(data: RouteData, activeWaypointIndex: number): RouteFeatureSets {
+        const completeRouteFeatures: GeoJSON.Feature[] = [];
+        const aircraftToActiveFeatures: GeoJSON.Feature[] = [];
+        const remainingRouteFeatures: GeoJSON.Feature[] = [];
+        const waypointFeatures: GeoJSON.Feature[] = [];
+        const labelFeatures: GeoJSON.Feature[] = [];
 
         // Create aircraft-to-active waypoint line
         if (data.aclat !== undefined && data.aclon !== undefined &&
@@ -245,17 +216,11 @@ export class AircraftRouteRenderer {
             const activeLat = data.wplat[activeWaypointIndex];
             const activeLon = data.wplon[activeWaypointIndex];
 
-            if (this.isValidCoordinate(activeLat, activeLon)) {
-                aircraftToActiveFeatures.push({
-                    type: 'Feature',
-                    geometry: {
-                        type: 'LineString',
-                        coordinates: [[data.aclon, data.aclat], [activeLon, activeLat]]
-                    },
-                    properties: {
-                        aircraftId: data.acid
-                    }
-                });
+            if (isValidCoordinate(activeLat, activeLon)) {
+                aircraftToActiveFeatures.push(lineStringFeature(
+                    [[data.aclon, data.aclat], [activeLon, activeLat]],
+                    { aircraftId: data.acid }
+                ));
             }
         }
 
@@ -266,17 +231,11 @@ export class AircraftRouteRenderer {
             const lat2 = data.wplat[i + 1];
             const lon2 = data.wplon[i + 1];
 
-            if (this.isValidCoordinate(lat1, lon1) && this.isValidCoordinate(lat2, lon2)) {
-                completeRouteFeatures.push({
-                    type: 'Feature',
-                    geometry: {
-                        type: 'LineString',
-                        coordinates: [[lon1, lat1], [lon2, lat2]]
-                    },
-                    properties: {
-                        aircraftId: data.acid
-                    }
-                });
+            if (isValidCoordinate(lat1, lon1) && isValidCoordinate(lat2, lon2)) {
+                completeRouteFeatures.push(lineStringFeature(
+                    [[lon1, lat1], [lon2, lat2]],
+                    { aircraftId: data.acid }
+                ));
             }
         }
 
@@ -288,22 +247,16 @@ export class AircraftRouteRenderer {
             const lat = data.wplat[i];
             const lon = data.wplon[i];
 
-            if (this.isValidCoordinate(lat, lon)) {
+            if (isValidCoordinate(lat, lon)) {
                 remainingCoordinates.push([lon, lat]);
             }
         }
 
         if (remainingCoordinates.length >= 2) {
-            remainingRouteFeatures.push({
-                type: 'Feature',
-                geometry: {
-                    type: 'LineString',
-                    coordinates: remainingCoordinates
-                },
-                properties: {
-                    aircraftId: data.acid
-                }
-            });
+            remainingRouteFeatures.push(lineStringFeature(
+                remainingCoordinates,
+                { aircraftId: data.acid }
+            ));
         }
 
         // Create array of all waypoint coordinates for label positioning
@@ -312,7 +265,7 @@ export class AircraftRouteRenderer {
             const lat = data.wplat[i];
             const lon = data.wplon[i];
 
-            if (this.isValidCoordinate(lat, lon)) {
+            if (isValidCoordinate(lat, lon)) {
                 allWaypoints.push([lon, lat]);
             } else {
                 allWaypoints.push(null);
@@ -325,24 +278,17 @@ export class AircraftRouteRenderer {
             const lon = data.wplon[i];
             const name = data.wpname[i] || `WP${i + 1}`;
 
-            if (!this.isValidCoordinate(lat, lon)) continue;
+            if (!isValidCoordinate(lat, lon)) continue;
 
             const isPassed = i < activeWaypointIndex;
             const isActive = i === activeWaypointIndex;
 
             // Create waypoint marker
-            waypointFeatures.push({
-                type: 'Feature',
-                geometry: {
-                    type: 'Point',
-                    coordinates: [lon, lat]
-                },
-                properties: {
-                    name: name,
-                    isActive: isActive,
-                    isPassed: isPassed
-                }
-            });
+            waypointFeatures.push(pointFeature([lon, lat], {
+                name: name,
+                isActive: isActive,
+                isPassed: isPassed
+            }));
 
             // Create waypoint label with constraints
             let labelText = name;
@@ -367,19 +313,12 @@ export class AircraftRouteRenderer {
             // the label stays visually close to the circle at any zoom level)
             const labelPosition = this.calculateOptimalLabelPosition(i, allWaypoints);
 
-            labelFeatures.push({
-                type: 'Feature',
-                geometry: {
-                    type: 'Point',
-                    coordinates: [lon, lat]
-                },
-                properties: {
-                    name: labelText,
-                    anchor: labelPosition.anchor,
-                    offset: labelPosition.offset,
-                    isPassed: isPassed
-                }
-            });
+            labelFeatures.push(pointFeature([lon, lat], {
+                name: labelText,
+                anchor: labelPosition.anchor,
+                offset: labelPosition.offset,
+                isPassed: isPassed
+            }));
         }
 
         return {
@@ -455,7 +394,7 @@ export class AircraftRouteRenderer {
     /**
      * Update map sources with route features
      */
-    public updateMapSources(features: any, showLabels: boolean): void {
+    public updateMapSources(features: RouteFeatureSets, showLabels: boolean): void {
         const {
             completeRouteFeatures,
             aircraftToActiveFeatures,
@@ -464,86 +403,22 @@ export class AircraftRouteRenderer {
             labelFeatures
         } = features;
 
-        // Update complete route
-        const completeSource = this.map.getSource(this.SOURCE_ROUTE_COMPLETE) as GeoJSONSource;
-        if (completeSource) {
-            completeSource.setData({
-                type: 'FeatureCollection',
-                features: completeRouteFeatures
-            });
-        }
-
-        // Update aircraft-to-active
-        const aircraftToActiveSource = this.map.getSource(this.SOURCE_AIRCRAFT_TO_ACTIVE) as GeoJSONSource;
-        if (aircraftToActiveSource) {
-            aircraftToActiveSource.setData({
-                type: 'FeatureCollection',
-                features: aircraftToActiveFeatures
-            });
-        }
-
-        // Update remaining route
-        const remainingSource = this.map.getSource(this.SOURCE_ROUTE_REMAINING) as GeoJSONSource;
-        if (remainingSource) {
-            remainingSource.setData({
-                type: 'FeatureCollection',
-                features: remainingRouteFeatures
-            });
-        }
-
-        // Update waypoints
-        const waypointsSource = this.map.getSource(this.SOURCE_ROUTE_WAYPOINTS) as GeoJSONSource;
-        if (waypointsSource) {
-            waypointsSource.setData({
-                type: 'FeatureCollection',
-                features: waypointFeatures
-            });
-        }
-
-        // Update labels (only if labels are enabled)
-        const labelsSource = this.map.getSource(this.SOURCE_ROUTE_LABELS) as GeoJSONSource;
-        if (labelsSource) {
-            const labelsToShow = showLabels ? labelFeatures : [];
-            labelsSource.setData({
-                type: 'FeatureCollection',
-                features: labelsToShow
-            });
-        }
+        updateSourceFeatures(this.map, this.SOURCE_ROUTE_COMPLETE, completeRouteFeatures);
+        updateSourceFeatures(this.map, this.SOURCE_AIRCRAFT_TO_ACTIVE, aircraftToActiveFeatures);
+        updateSourceFeatures(this.map, this.SOURCE_ROUTE_REMAINING, remainingRouteFeatures);
+        updateSourceFeatures(this.map, this.SOURCE_ROUTE_WAYPOINTS, waypointFeatures);
+        updateSourceFeatures(this.map, this.SOURCE_ROUTE_LABELS, showLabels ? labelFeatures : []);
     }
 
     /**
      * Clear all route display from map
      */
     public clearRouteDisplay(): void {
-        const emptyFeatureCollection = {
-            type: 'FeatureCollection' as const,
-            features: []
-        };
-
-        const completeSource = this.map.getSource(this.SOURCE_ROUTE_COMPLETE) as GeoJSONSource;
-        if (completeSource) {
-            completeSource.setData(emptyFeatureCollection);
-        }
-
-        const aircraftToActiveSource = this.map.getSource(this.SOURCE_AIRCRAFT_TO_ACTIVE) as GeoJSONSource;
-        if (aircraftToActiveSource) {
-            aircraftToActiveSource.setData(emptyFeatureCollection);
-        }
-
-        const remainingSource = this.map.getSource(this.SOURCE_ROUTE_REMAINING) as GeoJSONSource;
-        if (remainingSource) {
-            remainingSource.setData(emptyFeatureCollection);
-        }
-
-        const waypointsSource = this.map.getSource(this.SOURCE_ROUTE_WAYPOINTS) as GeoJSONSource;
-        if (waypointsSource) {
-            waypointsSource.setData(emptyFeatureCollection);
-        }
-
-        const labelsSource = this.map.getSource(this.SOURCE_ROUTE_LABELS) as GeoJSONSource;
-        if (labelsSource) {
-            labelsSource.setData(emptyFeatureCollection);
-        }
+        updateSourceFeatures(this.map, this.SOURCE_ROUTE_COMPLETE, []);
+        updateSourceFeatures(this.map, this.SOURCE_AIRCRAFT_TO_ACTIVE, []);
+        updateSourceFeatures(this.map, this.SOURCE_ROUTE_REMAINING, []);
+        updateSourceFeatures(this.map, this.SOURCE_ROUTE_WAYPOINTS, []);
+        updateSourceFeatures(this.map, this.SOURCE_ROUTE_LABELS, []);
     }
 
     /**
@@ -551,39 +426,23 @@ export class AircraftRouteRenderer {
      */
     public updateRouteLinesVisibility(showRoutes: boolean, showRouteLines: boolean): void {
         const shouldShow = showRoutes && showRouteLines;
-        const visibility = shouldShow ? 'visible' : 'none';
-
-        if (this.map.getLayer(this.LAYER_ROUTE_COMPLETE)) {
-            this.map.setLayoutProperty(this.LAYER_ROUTE_COMPLETE, 'visibility', visibility);
-        }
-        if (this.map.getLayer(this.LAYER_AIRCRAFT_TO_ACTIVE)) {
-            this.map.setLayoutProperty(this.LAYER_AIRCRAFT_TO_ACTIVE, 'visibility', visibility);
-        }
-        if (this.map.getLayer(this.LAYER_ROUTE_REMAINING)) {
-            this.map.setLayoutProperty(this.LAYER_ROUTE_REMAINING, 'visibility', visibility);
-        }
+        setLayerVisibility(this.map, this.LAYER_ROUTE_COMPLETE, shouldShow);
+        setLayerVisibility(this.map, this.LAYER_AIRCRAFT_TO_ACTIVE, shouldShow);
+        setLayerVisibility(this.map, this.LAYER_ROUTE_REMAINING, shouldShow);
     }
 
     /**
      * Update route labels visibility
      */
     public updateRouteLabelsVisibility(showRoutes: boolean, showRouteLabels: boolean): void {
-        const shouldShow = showRoutes && showRouteLabels;
-        if (this.map.getLayer(this.LAYER_ROUTE_LABELS)) {
-            this.map.setLayoutProperty(this.LAYER_ROUTE_LABELS, 'visibility',
-                shouldShow ? 'visible' : 'none');
-        }
+        setLayerVisibility(this.map, this.LAYER_ROUTE_LABELS, showRoutes && showRouteLabels);
     }
 
     /**
      * Update route points visibility
      */
     public updateRoutePointsVisibility(showRoutes: boolean, showRoutePoints: boolean): void {
-        const shouldShow = showRoutes && showRoutePoints;
-        if (this.map.getLayer(this.LAYER_ROUTE_WAYPOINTS)) {
-            this.map.setLayoutProperty(this.LAYER_ROUTE_WAYPOINTS, 'visibility',
-                shouldShow ? 'visible' : 'none');
-        }
+        setLayerVisibility(this.map, this.LAYER_ROUTE_WAYPOINTS, showRoutes && showRoutePoints);
     }
 
     /**
@@ -654,13 +513,4 @@ export class AircraftRouteRenderer {
         return DataProcessor.formatSpeed(speedKnots, this.displayOptions.speedUnit);
     }
 
-    /**
-     * Validate coordinate values
-     */
-    private isValidCoordinate(lat: number, lon: number): boolean {
-        return typeof lat === 'number' && typeof lon === 'number' &&
-               !isNaN(lat) && !isNaN(lon) &&
-               lat >= -90 && lat <= 90 &&
-               lon >= -180 && lon <= 180;
-    }
 }

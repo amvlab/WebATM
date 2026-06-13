@@ -1,4 +1,5 @@
-import { ConnectionStatus, ServerStatus } from '../data/types';
+import { ConnectionStatus, NodeInfo, ServerStatus } from '../data/types';
+import { escapeHtml, onDOMReady } from '../utils/dom';
 
 /**
  * Connection Status Management System
@@ -9,8 +10,9 @@ export class ConnectionManager {
     private blueSkyConnected = false;
     private serverStatus: ServerStatus = 'unknown';
     private currentServerIP = 'localhost';
-    private nodeInfo: any = null;
+    private nodeInfo: NodeInfo | null = null;
     private isInitialized = false;
+    private listenerAbort = new AbortController();
 
     // UI Elements
     private elements: {
@@ -31,12 +33,7 @@ export class ConnectionManager {
 
     private init(): void {
         if (this.isInitialized) return;
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initializeElements());
-        } else {
-            this.initializeElements();
-        }
+        onDOMReady(() => this.initializeElements());
     }
 
     private initializeElements(): void {
@@ -53,22 +50,31 @@ export class ConnectionManager {
     }
 
     private setupEventListeners(): void {
+        const { signal } = this.listenerAbort;
+
         // Listen for custom events from other components
-        document.addEventListener('webConnectionUpdate', (e: any) => {
+        document.addEventListener('webConnectionUpdate', (e) => {
             this.updateWebConnection(e.detail.connected);
-        });
+        }, { signal });
 
-        document.addEventListener('blueSkyConnectionUpdate', (e: any) => {
+        document.addEventListener('blueSkyConnectionUpdate', (e) => {
             this.updateBlueSkyConnection(e.detail.connected);
-        });
+        }, { signal });
 
-        document.addEventListener('serverStatusUpdate', (e: any) => {
+        document.addEventListener('serverStatusUpdate', (e) => {
             this.updateServerStatus(e.detail.status, e.detail.message);
-        });
+        }, { signal });
 
-        document.addEventListener('nodeInfoUpdate', (e: any) => {
+        document.addEventListener('nodeInfoUpdate', (e) => {
             this.updateNodeInfo(e.detail.nodeInfo);
-        });
+        }, { signal });
+    }
+
+    /**
+     * Remove the document-level listeners. Called from App.cleanup().
+     */
+    public destroy(): void {
+        this.listenerAbort.abort();
     }
 
     /**
@@ -129,7 +135,7 @@ export class ConnectionManager {
     /**
      * Update node information
      */
-    public updateNodeInfo(nodeInfo: any): void {
+    public updateNodeInfo(nodeInfo: NodeInfo): void {
         this.nodeInfo = nodeInfo;
         this.updateUI();
 
@@ -218,11 +224,13 @@ export class ConnectionManager {
             connected: this.blueSkyConnected
         };
 
+        const safeIp = escapeHtml(serverInfo.ip);
+        const safeStatus = escapeHtml(serverInfo.status);
         this.elements.serverDetails.innerHTML = `
             <div class="server-info">
                 <span class="server-label">Server:</span>
-                <span class="server-ip">${serverInfo.ip}</span>
-                <span class="server-status status-${serverInfo.status}">${serverInfo.status}</span>
+                <span class="server-ip">${safeIp}</span>
+                <span class="server-status status-${safeStatus}">${safeStatus}</span>
             </div>
         `;
 
@@ -247,7 +255,7 @@ export class ConnectionManager {
             <div class="node-info">
                 <span class="node-label">Nodes:</span>
                 <span class="node-count">${nodeCount}</span>
-                <span class="active-node">Active: ${activeNode}</span>
+                <span class="active-node">Active: ${escapeHtml(String(activeNode))}</span>
             </div>
         `;
     }

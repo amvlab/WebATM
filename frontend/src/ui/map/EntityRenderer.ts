@@ -1,7 +1,18 @@
 import { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
 import { EntityData, DisplayOptions } from '../../data/types';
 import circle from '@turf/circle';
+import { featureCollection, pointFeature } from '../../utils/geojson';
 import { logger } from '../../utils/Logger';
+import {
+    ensureGeoJSONSource,
+    ensureLayer,
+    buildConditionalColorExpr,
+    buildConditionalImageExpr,
+    setLayerVisibility,
+    isValidCoordinate,
+    safeRemoveLayer,
+    safeRemoveSource
+} from '../../utils/maplibre';
 
 /**
  * Entity shape drawing function type
@@ -181,122 +192,71 @@ export abstract class EntityRenderer<T extends EntityData> {
 
         // Add trail source and layer FIRST (if trails are enabled) so they appear behind points
         if (this.config.enableTrails) {
-            if (!this.map.getSource(trailsSourceId)) {
-                this.map.addSource(trailsSourceId, {
-                    type: 'geojson',
-                    data: {
-                        type: 'FeatureCollection',
-                        features: []
-                    }
-                });
-            }
-
-            if (!this.map.getLayer(trailsLayerId)) {
-                // Build color expression for trails
-                const lineColorExpr: any[] = [
-                    'case',
-                    ['==', ['get', 'selected'], true],
-                    this.config.colors.selected
-                ];
-
-                if (this.config.colors.conflict) {
-                    lineColorExpr.push(
-                        ['==', ['get', 'in_conflict'], true],
-                        this.displayOptions.trailConflictColor
-                    );
+            ensureGeoJSONSource(this.map, trailsSourceId);
+            ensureLayer(this.map, {
+                id: trailsLayerId,
+                source: trailsSourceId,
+                type: 'line',
+                layout: {
+                    'line-join': 'round',
+                    'line-cap': 'round',
+                    'visibility': this.displayOptions.showAircraftTrails ? 'visible' : 'none'
+                },
+                paint: {
+                    'line-color': buildConditionalColorExpr(
+                        this.displayOptions.aircraftTrailColor,
+                        this.config.colors.selected,
+                        this.config.colors.conflict ? this.displayOptions.trailConflictColor : undefined
+                    ),
+                    'line-width': 2,
+                    'line-opacity': 0.8
                 }
-
-                lineColorExpr.push(this.displayOptions.aircraftTrailColor);
-
-                this.map.addLayer({
-                    id: trailsLayerId,
-                    source: trailsSourceId,
-                    type: 'line',
-                    layout: {
-                        'line-join': 'round',
-                        'line-cap': 'round',
-                        'visibility': this.displayOptions.showAircraftTrails ? 'visible' : 'none'
-                    },
-                    paint: {
-                        'line-color': lineColorExpr as any,
-                        'line-width': 2,
-                        'line-opacity': 0.8
-                    }
-                });
-            }
+            });
         }
 
         // Add entity points source if it doesn't exist
-        if (!this.map.getSource(pointsSourceId)) {
-            this.map.addSource(pointsSourceId, {
-                type: 'geojson',
-                data: {
-                    type: 'FeatureCollection',
-                    features: []
-                }
-            });
-        }
+        ensureGeoJSONSource(this.map, pointsSourceId);
 
         // Add protected zones source if it doesn't exist
-        if (!this.map.getSource(protectedZonesSourceId)) {
-            this.map.addSource(protectedZonesSourceId, {
-                type: 'geojson',
-                data: {
-                    type: 'FeatureCollection',
-                    features: []
-                }
-            });
-        }
+        ensureGeoJSONSource(this.map, protectedZonesSourceId);
 
         // Add protected zones fill layer (render first, so it appears below aircraft)
-        if (!this.map.getLayer(protectedZonesLayerId)) {
-            // Use protectedZonesColor from display options for protected zones
-            // Override with selected/conflict colors when applicable
-            const fillColorExpr: any[] = ['case', ['==', ['get', 'selected'], true], this.config.colors.selected];
-            if (this.config.colors.conflict) {
-                fillColorExpr.push(['==', ['get', 'in_conflict'], true], this.config.colors.conflict);
+        ensureLayer(this.map, {
+            id: protectedZonesLayerId,
+            source: protectedZonesSourceId,
+            type: 'fill',
+            paint: {
+                'fill-color': buildConditionalColorExpr(
+                    this.displayOptions.protectedZonesColor,
+                    this.config.colors.selected,
+                    this.config.colors.conflict
+                ),
+                'fill-opacity': 0.15
+            },
+            layout: {
+                'visibility': this.shouldShowProtectedZones() ? 'visible' : 'none'
             }
-            fillColorExpr.push(this.displayOptions.protectedZonesColor);
-
-            this.map.addLayer({
-                id: protectedZonesLayerId,
-                source: protectedZonesSourceId,
-                type: 'fill',
-                paint: {
-                    'fill-color': fillColorExpr as any,
-                    'fill-opacity': 0.15
-                },
-                layout: {
-                    'visibility': this.shouldShowProtectedZones() ? 'visible' : 'none'
-                }
-            });
-        }
+        });
 
         // Add protected zones line layer (outline)
         const protectedZonesLineLayerId = `${this.config.layerPrefix}-protected-zones-line`;
-        if (!this.map.getLayer(protectedZonesLineLayerId)) {
-            // Use protectedZonesColor from display options for protected zones
-            // Override with selected/conflict colors when applicable
-            const lineColorExpr: any[] = ['case', ['==', ['get', 'selected'], true], this.config.colors.selected];
-            if (this.config.colors.conflict) {
-                lineColorExpr.push(['==', ['get', 'in_conflict'], true], this.config.colors.conflict);
+        ensureLayer(this.map, {
+            id: protectedZonesLineLayerId,
+            source: protectedZonesSourceId,
+            type: 'line',
+            paint: {
+                'line-color': buildConditionalColorExpr(
+                    this.displayOptions.protectedZonesColor,
+                    this.config.colors.selected,
+                    this.config.colors.conflict
+                ),
+                'line-width': 1.5,
+                'line-opacity': 0.6
+            },
+            layout: {
+                'visibility': this.shouldShowProtectedZones() ? 'visible' : 'none'
             }
-            lineColorExpr.push(this.displayOptions.protectedZonesColor);
-
-            this.map.addLayer({
-                id: protectedZonesLineLayerId,
-                source: protectedZonesSourceId,
-                type: 'line',
-                paint: {
-                    'line-color': lineColorExpr as any,
-                    'line-width': 1.5,
-                    'line-opacity': 0.6
-                },
-                layout: {
-                    'visibility': this.shouldShowProtectedZones() ? 'visible' : 'none'
-                }
-            });
-        }
+        });
 
         // Entity points and labels layers will be added at the END in addEntityLayersOnTop()
         // to ensure they render above all other layers (routes, protected zones, etc.)
@@ -315,22 +275,17 @@ export abstract class EntityRenderer<T extends EntityData> {
             const useSprite = this.map.hasImage(`${this.config.spritePrefix}-normal`);
 
             if (useSprite) {
-                // Build icon-image expression based on available colors
-                const iconImageExpr: any[] = ['case', ['==', ['get', 'selected'], true], `${this.config.spritePrefix}-selected`];
-
-                if (this.config.colors.conflict) {
-                    iconImageExpr.push(['==', ['get', 'in_conflict'], true], `${this.config.spritePrefix}-conflict`);
-                }
-
-                iconImageExpr.push(`${this.config.spritePrefix}-normal`);
-
                 // Use symbol layer with entity icons
                 this.map.addLayer({
                     id: pointsLayerId,
                     source: pointsSourceId,
                     type: 'symbol',
                     layout: {
-                        'icon-image': iconImageExpr as any,
+                        'icon-image': buildConditionalImageExpr(
+                            `${this.config.spritePrefix}-normal`,
+                            `${this.config.spritePrefix}-selected`,
+                            this.config.colors.conflict ? `${this.config.spritePrefix}-conflict` : undefined
+                        ),
                         'icon-size': this.config.iconSize,
                         'icon-rotate': ['get', 'heading'],
                         'icon-rotation-alignment': 'map',
@@ -343,15 +298,6 @@ export abstract class EntityRenderer<T extends EntityData> {
                     }
                 });
             } else {
-                // Build circle color expression
-                const circleColorExpr: any[] = ['case', ['==', ['get', 'selected'], true], this.config.colors.selected];
-
-                if (this.config.colors.conflict) {
-                    circleColorExpr.push(['==', ['get', 'in_conflict'], true], this.config.colors.conflict);
-                }
-
-                circleColorExpr.push(this.config.colors.normal);
-
                 // Fallback to circle layer if sprites aren't available
                 this.map.addLayer({
                     id: pointsLayerId,
@@ -364,7 +310,11 @@ export abstract class EntityRenderer<T extends EntityData> {
                             12,
                             10
                         ],
-                        'circle-color': circleColorExpr as any,
+                        'circle-color': buildConditionalColorExpr(
+                            this.config.colors.normal,
+                            this.config.colors.selected,
+                            this.config.colors.conflict
+                        ),
                         'circle-stroke-color': '#ffffff',
                         'circle-stroke-width': 2,
                         'circle-opacity': 1.0
@@ -375,15 +325,6 @@ export abstract class EntityRenderer<T extends EntityData> {
 
         // Add entity labels layer - AFTER points so labels appear on top of everything
         if (!this.map.getLayer(labelsLayerId)) {
-            // Build text color expression
-            const textColorExpr: any[] = ['case', ['==', ['get', 'selected'], true], this.config.colors.selected];
-
-            if (this.config.colors.conflict) {
-                textColorExpr.push(['==', ['get', 'in_conflict'], true], this.config.colors.conflict);
-            }
-
-            textColorExpr.push(this.config.colors.label);
-
             this.map.addLayer({
                 id: labelsLayerId,
                 source: pointsSourceId,
@@ -410,11 +351,15 @@ export abstract class EntityRenderer<T extends EntityData> {
                         ['==', ['get', 'selected'], true], 0,
                         ['==', ['get', 'in_conflict'], true], 1,
                         2
-                    ] as any,
+                    ],
                     'visibility': this.shouldShowLabels() ? 'visible' : 'none'
                 },
                 paint: {
-                    'text-color': textColorExpr as any,
+                    'text-color': buildConditionalColorExpr(
+                        this.config.colors.label,
+                        this.config.colors.selected,
+                        this.config.colors.conflict
+                    ),
                     'text-halo-color': '#ffffff',
                     'text-halo-width': 2
                 }
@@ -450,18 +395,12 @@ export abstract class EntityRenderer<T extends EntityData> {
         if (!entityData.id || entityData.id.length === 0) {
             logger.verbose(`${this.config.entityType}Renderer`, 'Empty entity data, clearing features');
             this.featureCache.clear();
-            source.setData({
-                type: 'FeatureCollection',
-                features: []
-            });
+            source.setData(featureCollection());
 
             // Also clear protected zones
             const protectedZonesSource = this.map.getSource(`${this.config.layerPrefix}-protected-zones`) as GeoJSONSource;
             if (protectedZonesSource) {
-                protectedZonesSource.setData({
-                    type: 'FeatureCollection',
-                    features: []
-                });
+                protectedZonesSource.setData(featureCollection());
             }
             return;
         }
@@ -534,23 +473,15 @@ export abstract class EntityRenderer<T extends EntityData> {
                 updatedCount++;
             } else {
                 // Create new feature and add to cache
-                const newFeature: GeoJSON.Feature<GeoJSON.Point> = {
-                    type: 'Feature',
-                    id: id,
-                    geometry: {
-                        type: 'Point',
-                        coordinates: [lon, lat]
-                    },
-                    properties: {
-                        entity_id: id,
-                        label_text: labelText,
-                        altitude: altitude,
-                        heading: heading,
-                        vertical_speed: verticalSpeed,
-                        selected: id === this.selectedEntity,
-                        in_conflict: inConflict
-                    }
-                };
+                const newFeature = pointFeature([lon, lat], {
+                    entity_id: id,
+                    label_text: labelText,
+                    altitude: altitude,
+                    heading: heading,
+                    vertical_speed: verticalSpeed,
+                    selected: id === this.selectedEntity,
+                    in_conflict: inConflict
+                }, id);
                 this.featureCache.set(id, newFeature);
                 createdCount++;
             }
@@ -559,12 +490,7 @@ export abstract class EntityRenderer<T extends EntityData> {
         logger.debug(`${this.config.entityType}Renderer`, `Feature updates - created: ${createdCount}, updated: ${updatedCount}, skipped: ${skippedCount}`);
 
         // Update the entity source with cached features (single setData call)
-        const featureCollection = {
-            type: 'FeatureCollection' as const,
-            features: Array.from(this.featureCache.values())
-        };
-
-        source.setData(featureCollection);
+        source.setData(featureCollection(Array.from(this.featureCache.values())));
 
         // Update protected zones
         this.updateProtectedZones(entityData);
@@ -595,11 +521,7 @@ export abstract class EntityRenderer<T extends EntityData> {
             const lon = lons[i];
 
             // Skip invalid coordinates
-            if (
-                typeof lat !== 'number' || typeof lon !== 'number' ||
-                isNaN(lat) || isNaN(lon) ||
-                lat < -90 || lat > 90 || lon < -180 || lon > 180
-            ) {
+            if (!isValidCoordinate(lat, lon)) {
                 continue;
             }
 
@@ -637,10 +559,7 @@ export abstract class EntityRenderer<T extends EntityData> {
         }
 
         // Update the protected zones source
-        protectedZonesSource.setData({
-            type: 'FeatureCollection',
-            features: protectedZoneFeatures
-        });
+        protectedZonesSource.setData(featureCollection(protectedZoneFeatures));
     }
 
     /**
@@ -655,7 +574,7 @@ export abstract class EntityRenderer<T extends EntityData> {
      * @param entityData - Entity data
      * @param index - Index of the entity in the data arrays
      */
-    protected getConflictStatus(entityData: T, index: number): boolean {
+    protected getConflictStatus(_entityData: T, _index: number): boolean {
         // Default: no conflict detection
         // Subclasses can override to provide specific conflict detection
         return false;
@@ -686,39 +605,15 @@ export abstract class EntityRenderer<T extends EntityData> {
         const protectedZonesLineLayerId = `${this.config.layerPrefix}-protected-zones-line`;
         const trailsLayerId = `${this.config.layerPrefix}-trails`;
 
-        // Update entity points layer
-        if (this.map.getLayer(pointsLayerId)) {
-            const visibility = this.shouldShowEntities() ? 'visible' : 'none';
-            this.map.setLayoutProperty(pointsLayerId, 'visibility', visibility);
+        const showEntities = this.shouldShowEntities();
+        setLayerVisibility(this.map, pointsLayerId, showEntities);
+        setLayerVisibility(this.map, labelsLayerId, showEntities && this.shouldShowLabels());
+        if (this.config.enableTrails) {
+            setLayerVisibility(this.map, trailsLayerId, showEntities && this.displayOptions.showAircraftTrails);
         }
-
-        // Update entity labels layer
-        if (this.map.getLayer(labelsLayerId)) {
-            const visibility = (this.shouldShowEntities() && this.shouldShowLabels())
-                ? 'visible' : 'none';
-            this.map.setLayoutProperty(labelsLayerId, 'visibility', visibility);
-        }
-
-        // Update trails layer (if enabled)
-        if (this.config.enableTrails && this.map.getLayer(trailsLayerId)) {
-            const visibility = (this.shouldShowEntities() && this.displayOptions.showAircraftTrails)
-                ? 'visible' : 'none';
-            this.map.setLayoutProperty(trailsLayerId, 'visibility', visibility);
-        }
-
-        // Update protected zones fill layer
-        if (this.map.getLayer(protectedZonesLayerId)) {
-            const visibility = (this.shouldShowEntities() && this.shouldShowProtectedZones())
-                ? 'visible' : 'none';
-            this.map.setLayoutProperty(protectedZonesLayerId, 'visibility', visibility);
-        }
-
-        // Update protected zones line layer
-        if (this.map.getLayer(protectedZonesLineLayerId)) {
-            const visibility = (this.shouldShowEntities() && this.shouldShowProtectedZones())
-                ? 'visible' : 'none';
-            this.map.setLayoutProperty(protectedZonesLineLayerId, 'visibility', visibility);
-        }
+        const showZones = showEntities && this.shouldShowProtectedZones();
+        setLayerVisibility(this.map, protectedZonesLayerId, showZones);
+        setLayerVisibility(this.map, protectedZonesLineLayerId, showZones);
     }
 
     /**
@@ -786,42 +681,41 @@ export abstract class EntityRenderer<T extends EntityData> {
 
         // Update label text colors in the layer
         if (this.map.getLayer(`${this.config.layerPrefix}-labels`)) {
-            // Build text color expression
-            const textColorExpr: any[] = ['case', ['==', ['get', 'selected'], true], this.config.colors.selected];
-
-            if (this.config.colors.conflict) {
-                textColorExpr.push(['==', ['get', 'in_conflict'], true], this.config.colors.conflict);
-            }
-
-            textColorExpr.push(this.config.colors.label);
-
-            this.map.setPaintProperty(`${this.config.layerPrefix}-labels`, 'text-color', textColorExpr as any);
+            this.map.setPaintProperty(
+                `${this.config.layerPrefix}-labels`,
+                'text-color',
+                buildConditionalColorExpr(
+                    this.config.colors.label,
+                    this.config.colors.selected,
+                    this.config.colors.conflict
+                )
+            );
         }
 
         // Update protected zones fill colors in the layer
         if (this.map.getLayer(`${this.config.layerPrefix}-protected-zones`)) {
-            // Use protectedZonesColor from display options for protected zones
-            // Override with selected/conflict colors when applicable
-            const fillColorExpr: any[] = ['case', ['==', ['get', 'selected'], true], this.config.colors.selected];
-            if (this.config.colors.conflict) {
-                fillColorExpr.push(['==', ['get', 'in_conflict'], true], this.config.colors.conflict);
-            }
-            fillColorExpr.push(this.displayOptions.protectedZonesColor);
-
-            this.map.setPaintProperty(`${this.config.layerPrefix}-protected-zones`, 'fill-color', fillColorExpr as any);
+            this.map.setPaintProperty(
+                `${this.config.layerPrefix}-protected-zones`,
+                'fill-color',
+                buildConditionalColorExpr(
+                    this.displayOptions.protectedZonesColor,
+                    this.config.colors.selected,
+                    this.config.colors.conflict
+                )
+            );
         }
 
         // Update protected zones line colors in the layer
         if (this.map.getLayer(`${this.config.layerPrefix}-protected-zones-line`)) {
-            // Use protectedZonesColor from display options for protected zones
-            // Override with selected/conflict colors when applicable
-            const lineColorExpr: any[] = ['case', ['==', ['get', 'selected'], true], this.config.colors.selected];
-            if (this.config.colors.conflict) {
-                lineColorExpr.push(['==', ['get', 'in_conflict'], true], this.config.colors.conflict);
-            }
-            lineColorExpr.push(this.displayOptions.protectedZonesColor);
-
-            this.map.setPaintProperty(`${this.config.layerPrefix}-protected-zones-line`, 'line-color', lineColorExpr as any);
+            this.map.setPaintProperty(
+                `${this.config.layerPrefix}-protected-zones-line`,
+                'line-color',
+                buildConditionalColorExpr(
+                    this.displayOptions.protectedZonesColor,
+                    this.config.colors.selected,
+                    this.config.colors.conflict
+                )
+            );
         }
 
         // Refresh display with new colors
@@ -898,31 +792,19 @@ export abstract class EntityRenderer<T extends EntityData> {
         const trailsSourceId = `${this.config.layerPrefix}-trails`;
 
         // Remove layers (in reverse order of creation)
-        if (this.map.getLayer(labelsLayerId)) {
-            this.map.removeLayer(labelsLayerId);
-        }
-        if (this.map.getLayer(pointsLayerId)) {
-            this.map.removeLayer(pointsLayerId);
-        }
-        if (this.map.getLayer(protectedZonesLineLayerId)) {
-            this.map.removeLayer(protectedZonesLineLayerId);
-        }
-        if (this.map.getLayer(protectedZonesLayerId)) {
-            this.map.removeLayer(protectedZonesLayerId);
-        }
-        if (this.config.enableTrails && this.map.getLayer(trailsLayerId)) {
-            this.map.removeLayer(trailsLayerId);
+        safeRemoveLayer(this.map, labelsLayerId);
+        safeRemoveLayer(this.map, pointsLayerId);
+        safeRemoveLayer(this.map, protectedZonesLineLayerId);
+        safeRemoveLayer(this.map, protectedZonesLayerId);
+        if (this.config.enableTrails) {
+            safeRemoveLayer(this.map, trailsLayerId);
         }
 
         // Remove sources
-        if (this.map.getSource(pointsSourceId)) {
-            this.map.removeSource(pointsSourceId);
-        }
-        if (this.map.getSource(protectedZonesSourceId)) {
-            this.map.removeSource(protectedZonesSourceId);
-        }
-        if (this.config.enableTrails && this.map.getSource(trailsSourceId)) {
-            this.map.removeSource(trailsSourceId);
+        safeRemoveSource(this.map, pointsSourceId);
+        safeRemoveSource(this.map, protectedZonesSourceId);
+        if (this.config.enableTrails) {
+            safeRemoveSource(this.map, trailsSourceId);
         }
 
         // Remove sprites

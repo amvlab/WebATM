@@ -79,7 +79,7 @@ export class TerrainToggleControl implements IControl {
         }
 
         // Style may already have terrain set (e.g. declared in style JSON).
-        const styleTerrain = (this.map.getStyle() as any).terrain;
+        const styleTerrain = this.map.getStyle().terrain;
         this.terrainOn = !!styleTerrain;
         this.setHillshadeVisibility(this.terrainOn);
         this.updateActiveLook();
@@ -97,7 +97,7 @@ export class TerrainToggleControl implements IControl {
         for (const layer of layers) {
             if (
                 layer.type === 'hillshade' &&
-                (layer as any).source === this.demSourceId
+                layer.source === this.demSourceId
             ) {
                 try {
                     this.map.setLayoutProperty(layer.id, 'visibility', value);
@@ -112,7 +112,7 @@ export class TerrainToggleControl implements IControl {
         if (!this.map) return null;
         const sources = this.map.getStyle()?.sources ?? {};
         for (const [id, source] of Object.entries(sources)) {
-            if ((source as any)?.type === 'raster-dem') {
+            if (source?.type === 'raster-dem') {
                 return id;
             }
         }

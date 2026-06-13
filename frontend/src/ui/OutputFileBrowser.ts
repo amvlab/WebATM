@@ -231,19 +231,15 @@ export class OutputFileBrowser {
     }
 
     public streamFile(filepath: string): void {
-        (window as any).logStreamManager?.startStreaming(filepath);
+        window.logStreamManager?.startStreaming(filepath);
     }
 
     public downloadFile(filepath: string): void {
-        (window as any).logStreamManager?.downloadFile(filepath);
+        window.logStreamManager?.downloadFile(filepath);
     }
 }
 
 export const outputFileBrowser = new OutputFileBrowser();
 
-declare global {
-    interface Window {
-        outputFileBrowser: OutputFileBrowser;
-    }
-}
+// Make it globally available for onclick handlers (typed in types/globals.d.ts)
 window.outputFileBrowser = outputFileBrowser;

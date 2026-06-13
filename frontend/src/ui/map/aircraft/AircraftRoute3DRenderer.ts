@@ -2,8 +2,11 @@ import * as THREE from 'three';
 import { MercatorCoordinate } from 'maplibre-gl';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import { CustomLayer3D } from '../rendering/CustomLayer3D';
+import type { Render3DArgs } from '../rendering/CustomLayer3D';
+import { altitudeScaledForOrigin, relativePositionMeters } from '../rendering/mercatorUtils';
 import type { RouteData, DisplayOptions } from '../../../data/types';
 import { logger } from '../../../utils/Logger';
+import { safeRemoveLayer } from '../../../utils/maplibre';
 
 /**
  * 3D aircraft route renderer using Three.js.
@@ -34,7 +37,7 @@ export class AircraftRoute3DRenderer {
 
         if (map.getLayer(this.customLayer.id)) {
             logger.warn('AircraftRoute3DRenderer', `Layer ${this.customLayer.id} already exists, removing first`);
-            map.removeLayer(this.customLayer.id);
+            safeRemoveLayer(map, this.customLayer.id);
         }
 
         if (map.isStyleLoaded()) {
@@ -53,10 +56,8 @@ export class AircraftRoute3DRenderer {
 
     private addLayerToMap(map: MapLibreMap): void {
         try {
-            if (map.getLayer(this.customLayer.id)) {
-                map.removeLayer(this.customLayer.id);
-            }
-            map.addLayer(this.customLayer as any);
+            safeRemoveLayer(map, this.customLayer.id);
+            map.addLayer(this.customLayer);
             logger.debug('AircraftRoute3DRenderer', '3D route layer added to map');
         } catch (error) {
             logger.error('AircraftRoute3DRenderer', `Failed to add 3D route layer: ${error}`);
@@ -86,9 +87,7 @@ export class AircraftRoute3DRenderer {
         const reinitializeLayer = () => {
             if (!this.map) return;
             try {
-                if (this.map.getLayer(this.customLayer.id)) {
-                    this.map.removeLayer(this.customLayer.id);
-                }
+                safeRemoveLayer(this.map, this.customLayer.id);
                 const previousState = this.customLayer.exportState();
                 this.customLayer.cleanup();
                 this.customLayer = new AircraftRoute3DCustomLayer(this.displayOptions);
@@ -115,8 +114,8 @@ export class AircraftRoute3DRenderer {
 
     destroy(): void {
         try {
-            if (this.map && this.map.getLayer(this.customLayer.id)) {
-                this.map.removeLayer(this.customLayer.id);
+            if (this.map) {
+                safeRemoveLayer(this.map, this.customLayer.id);
             }
         } catch (error) {
             logger.error('AircraftRoute3DRenderer', `Error removing 3D route layer: ${error}`);
@@ -384,9 +383,7 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
         if (!this.sceneOrigin) {
             return new THREE.Vector3(rel.east, altitudeMeters, rel.north);
         }
-        const pointMpm = MercatorCoordinate.fromLngLat([lon, lat]).meterInMercatorCoordinateUnits();
-        const originMpm = MercatorCoordinate.fromLngLat([this.sceneOrigin.lng, this.sceneOrigin.lat]).meterInMercatorCoordinateUnits();
-        const altScaled = altitudeMeters * (pointMpm / originMpm);
+        const altScaled = altitudeScaledForOrigin(altitudeMeters, { lng: lon, lat }, this.sceneOrigin);
         return new THREE.Vector3(rel.east, altScaled, rel.north);
     }
 
@@ -394,15 +391,7 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
         if (!this.sceneOrigin) {
             return { east: 0, north: 0 };
         }
-
-        const originMercator = MercatorCoordinate.fromLngLat([this.sceneOrigin.lng, this.sceneOrigin.lat]);
-        const targetMercator = MercatorCoordinate.fromLngLat([lng, lat]);
-
-        const mercatorPerMeter = originMercator.meterInMercatorCoordinateUnits();
-        const dEast = (targetMercator.x - originMercator.x) / mercatorPerMeter;
-        const dNorth = (originMercator.y - targetMercator.y) / mercatorPerMeter;
-
-        return { east: dEast, north: dNorth };
+        return relativePositionMeters(this.sceneOrigin, { lng, lat });
     }
 
     /**
@@ -422,7 +411,7 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
         }
     }
 
-    protected updateScene(args?: any): void {
+    protected updateScene(args?: Render3DArgs): void {
         if (!this.sceneOrigin || !args || !this.mercatorGroup) return;
 
         const sceneOriginMercator = MercatorCoordinate.fromLngLat(

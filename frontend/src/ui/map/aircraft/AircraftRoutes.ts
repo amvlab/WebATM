@@ -26,9 +26,6 @@ export class AircraftRoutes {
     private showRouteLabels: boolean = true;
     private showRoutePoints: boolean = true;
 
-    // Display options (colors, units, etc.)
-    private displayOptions: DisplayOptions;
-
     /**
      * Constructor
      * @param map - MapLibre GL map instance
@@ -36,7 +33,6 @@ export class AircraftRoutes {
      */
     constructor(map: Map, displayOptions: DisplayOptions) {
         this.map = map;
-        this.displayOptions = displayOptions;
 
         // Create renderer for MapLibre-specific operations
         this.renderer = new AircraftRouteRenderer(map, displayOptions);
@@ -166,8 +162,6 @@ export class AircraftRoutes {
      * Update display options (called when user changes settings)
      */
     public updateDisplayOptions(options: DisplayOptions): void {
-        this.displayOptions = options;
-
         // Update visibility states
         const oldShowRoutes = this.showRoutes;
         this.showRoutes = options.showRoutes;

@@ -1,4 +1,4 @@
-import { SimInfo, AircraftData, RouteData, NodeInfo, AppState, InitialData } from '../data/types';
+import { SimInfo, AircraftData, RouteData, AppState } from '../data/types';
 import { SocketManager } from './SocketManager';
 import { StateManager } from './StateManager';
 import { connectionStatus } from './ConnectionStatusService';
@@ -8,6 +8,8 @@ import { Header } from '../ui/Header';
 import { settingsModal } from '../ui/SettingsModal';
 import { serverManager } from '../ui/ServerManager';
 import { modals } from '../ui/Modals';
+import { modalManager } from '../ui/ModalManager';
+import { connectionManager } from '../ui/ConnectionManager';
 import { panelResizer } from '../ui/panels/PanelResizer';
 import { SimulationNodesPanel } from '../ui/panels/left/SimulationNodesPanel';
 import { MapControlsPanel } from '../ui/panels/left/MapControlsPanel';
@@ -16,7 +18,6 @@ import { TrafficListPanel } from '../ui/panels/right/TrafficListPanel';
 import { AircraftInfoPanel } from '../ui/panels/right/AircraftInfoPanel';
 import { ConflictsPanel } from '../ui/panels/right/ConflictsPanel';
 import { CommandPaletteModal } from '../ui/CommandPaletteModal';
-import { storage } from '../utils/StorageManager';
 import { echoManager } from '../ui/EchoManager';
 import { MapDisplay } from '../ui/map/MapDisplay';
 import { MapOverlay } from '../ui/map/MapOverlay';
@@ -63,6 +64,9 @@ export class App {
     private routeDrawingManager: RouteDrawingManager | null = null;
     private commandHandler: CommandHandler;
     private initialized: boolean = false;
+    // Aborting removes the global document/window listeners registered in
+    // setupGlobalEventListeners.
+    private globalListenerAbort = new AbortController();
 
     constructor() {
         this.stateManager = new StateManager();
@@ -154,7 +158,7 @@ export class App {
     private setupConnectionStatusHandlers(): void {
         // Subscribe to ConnectionStatusService for centralized status updates
         // This is the single source of truth for all connection state
-        connectionStatus.subscribe((status) => {
+        connectionStatus.subscribe(() => {
             // Update UI based on centralized connection status
             this.updateConnectionStatusDisplay();
         });
@@ -174,7 +178,7 @@ export class App {
      */
     private setupSimulationDataHandlers(): void {
         // Subscribe to simInfo updates from StateManager
-        this.stateManager.subscribe('simInfo', (newSimInfo, oldSimInfo) => {
+        this.stateManager.subscribe('simInfo', (newSimInfo) => {
             if (newSimInfo) {
                 // Update header with new simulation info (time, rate, etc.)
                 this.header.updateSimInfo(newSimInfo);
@@ -182,7 +186,7 @@ export class App {
         });
 
         // Subscribe to aircraft data updates
-        this.stateManager.subscribe('aircraftData', (newAircraftData, oldAircraftData) => {
+        this.stateManager.subscribe('aircraftData', (newAircraftData) => {
             if (newAircraftData) {
                 // Update aircraft display
                 this.updateAircraftDisplay(newAircraftData);
@@ -195,7 +199,7 @@ export class App {
         });
 
         // Subscribe to display options changes
-        this.stateManager.subscribe('displayOptions', (newOptions, oldOptions) => {
+        this.stateManager.subscribe('displayOptions', (newOptions) => {
             if (newOptions && this.mapOverlay) {
                 // Update map overlay with new display options
                 this.mapOverlay.updateDisplayOptions(newOptions);
@@ -203,7 +207,7 @@ export class App {
         });
 
         // Subscribe to selected aircraft changes
-        this.stateManager.subscribe('selectedAircraft', (newSelected, oldSelected) => {
+        this.stateManager.subscribe('selectedAircraft', (newSelected) => {
             if (this.mapOverlay) {
                 this.mapOverlay.setSelectedAircraft(newSelected);
             }
@@ -356,22 +360,20 @@ export class App {
         logger.debug('App', 'ConflictsPanel initialized');
 
         // Verify controls are working by checking if key elements exist
-        const playBtn = document.getElementById('play-btn');
-        const settingsBtn = document.getElementById('settings-btn');
-
-        if (playBtn) {
-            logger.verbose('App', 'Play button found');
-        } else {
-            logger.warn('App', '✗ Play button not found');
-        }
-
-        if (settingsBtn) {
-            logger.verbose('App', 'Settings button found');
-        } else {
-            logger.warn('App', '✗ Settings button not found');
-        }
+        this.verifyElementExists('play-btn', 'Play button');
+        this.verifyElementExists('settings-btn', 'Settings button');
 
         logger.debug('App', 'Controls event handlers should be active');
+    }
+
+    private verifyElementExists(id: string, label: string): HTMLElement | null {
+        const el = document.getElementById(id);
+        if (el) {
+            logger.verbose('App', `${label} found`);
+        } else {
+            logger.warn('App', `✗ ${label} not found`);
+        }
+        return el;
     }
 
     /**
@@ -508,6 +510,8 @@ export class App {
      * Set up global event listeners
      */
     private setupGlobalEventListeners(): void {
+        const { signal } = this.globalListenerAbort;
+
         // Handle page visibility changes
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
@@ -515,17 +519,17 @@ export class App {
             } else {
                 this.handlePageVisible();
             }
-        });
+        }, { signal });
 
         // Handle before page unload
         window.addEventListener('beforeunload', () => {
             this.cleanup();
-        });
+        }, { signal });
 
         // Handle resize events
         window.addEventListener('resize', () => {
             this.handleResize();
-        });
+        }, { signal });
 
         // Command palette shortcut. Bind Ctrl/Cmd+K and Ctrl/Cmd+Shift+P
         // (VS Code muscle memory). We avoid plain Ctrl+P because that's the
@@ -542,7 +546,7 @@ export class App {
             if (!isPaletteShortcut) return;
             e.preventDefault();
             this.commandPaletteModal.open();
-        });
+        }, { signal });
     }
 
     /**
@@ -813,12 +817,7 @@ export class App {
         }
 
         // Clear all routes
-        if (this.mapOverlay) {
-            const aircraftRoutes = (this.mapOverlay as any).aircraftRoutes;
-            if (aircraftRoutes && typeof aircraftRoutes.clearRouteDisplay === 'function') {
-                aircraftRoutes.clearRouteDisplay();
-            }
-        }
+        this.mapOverlay?.clearRouteDisplay();
 
         // Now use existing reset logic to clear simulation state
         // This clears: simInfo, aircraftData, selectedAircraft, activeNode, shapes
@@ -873,6 +872,11 @@ export class App {
         // Clean up panel resizer
         panelResizer.destroy();
 
+        // Clean up modals and their document-level listeners
+        this.commandPaletteModal.destroy();
+        modalManager.destroy();
+        connectionManager.destroy();
+
         // Clean up map overlay
         if (this.mapOverlay) {
             this.mapOverlay.destroy();
@@ -888,9 +892,21 @@ export class App {
             this.navdataRenderer.destroy();
         }
 
-        // Clean up interaction managers
+        // Clean up interaction and drawing managers
         if (this.aircraftInteractionManager) {
             this.aircraftInteractionManager.destroy();
+        }
+
+        if (this.aircraftCreationManager) {
+            this.aircraftCreationManager.destroy();
+        }
+
+        if (this.shapeDrawingManager) {
+            this.shapeDrawingManager.destroy();
+        }
+
+        if (this.routeDrawingManager) {
+            this.routeDrawingManager.destroy();
         }
 
         // Clean up map display
@@ -898,7 +914,8 @@ export class App {
             this.mapDisplay.destroy();
         }
 
-        // Clean up other resources as needed
+        // Remove the global listeners registered in setupGlobalEventListeners
+        this.globalListenerAbort.abort();
     }
 
     /**
