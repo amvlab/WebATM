@@ -10,7 +10,72 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
     <link rel="shortcut icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
 
+    <!-- Apply persisted layout settings (font sizes, panel sizes) before first
+         paint so restoring them later in the JS bundle causes no layout shift. -->
+    <script>
+        (function () {
+            function read(key) {
+                try {
+                    var raw = localStorage.getItem('webatm-' + key);
+                    return raw === null ? null : JSON.parse(raw);
+                } catch (e) {
+                    return null;
+                }
+            }
+            var root = document.documentElement.style;
+            function applyFontSize(key, vars) {
+                var size = read(key);
+                if (typeof size === 'number' && isFinite(size) && size >= 6 && size <= 64) {
+                    for (var i = 0; i < vars.length; i++) {
+                        root.setProperty(vars[i], size + 'px');
+                    }
+                }
+            }
+            applyFontSize('header-font-size', ['--header-font-size']);
+            applyFontSize('console-font-size', ['--console-font-size', '--echo-font-size', '--console-input-font-size']);
+            applyFontSize('panel-font-size', ['--panel-font-size']);
+
+            // Open persisted collapsible sections at first paint; the bundle
+            // swaps these html-level classes for element-level 'open' classes
+            var sections = {
+                'sizes-visible': 'sizes-controls',
+                'colors-visible': 'colors-controls',
+                'units-visible': 'units-controls',
+                'threeD-visible': 'threeD-controls'
+            };
+            for (var storageKey in sections) {
+                if (read(storageKey) === true) {
+                    document.documentElement.classList.add('wa-open-' + sections[storageKey]);
+                }
+            }
+
+            var layout = read('panel-layout');
+            if (!layout || layout.version !== '1.0') return;
+            var basisVars = {
+                leftPanel: '--left-panel-basis',
+                rightPanel: '--right-panel-basis',
+                consoleContainer: '--console-container-basis',
+                consoleSection: '--console-section-basis',
+                echoSection: '--echo-section-basis',
+                trafficPanel: '--traffic-panel-basis',
+                aircraftPanel: '--aircraft-panel-basis',
+                conflictsPanel: '--conflicts-panel-basis',
+                nodePanel: '--node-panel-basis',
+                navPanel: '--nav-panel-basis',
+                displayPanel: '--display-panel-basis'
+            };
+            for (var key in basisVars) {
+                var size = layout[key];
+                if (typeof size === 'string' && /^[0-9.]+(px|%)$/.test(size)) {
+                    root.setProperty(basisVars[key], size);
+                }
+            }
+        })();
+    </script>
+
     <!-- Font awesome (vendored for offline support) -->
+    <link rel="preload" href="{{ url_for('static', filename='vendor/fontawesome/webfonts/fa-solid-900.woff2') }}"
+        as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
 
     <!-- MapLibre GL CSS (vendored for offline support) -->
@@ -108,27 +173,13 @@
                             <button class="nav-btn" onclick="zoomOut()">Zoom Out</button>
                             <button class="nav-btn" onclick="resetView()">Reset View</button>
                         </div>
-                        <div class="map-info-toggle-control" style="margin-top: 8px;">
-                            <button id="map-info-toggle" class="nav-btn">Map Info ▼</button>
-                        </div>
-                        <div class="map-info-controls" id="map-info-controls" style="display: none;">
-                            <div class="zoom-info" style="margin-bottom: 12px;">
-                                <div style="margin-bottom: 4px; font-weight: bold;">Zoom Level:</div>
-                                <div>Current: <span id="current-zoom">1.0</span></div>
-                            </div>
-                            <div class="bbox-info">
-                                <div style="margin-bottom: 8px; font-weight: bold;">Bounding Box:</div>
-                                <div class="bbox-coordinates">
-                                    <div class="bbox-row">
-                                        <span>N: <span id="bbox-north">--</span>°</span>
-                                        <span>S: <span id="bbox-south">--</span>°</span>
-                                    </div>
-                                    <div class="bbox-row">
-                                        <span>E: <span id="bbox-east">--</span>°</span>
-                                        <span>W: <span id="bbox-west">--</span>°</span>
-                                    </div>
-                                </div>
-                            </div>
+                        <button id="map-info-toggle" class="section-toggle">Map Info</button>
+                        <div class="map-info-controls collapsible-section" id="map-info-controls">
+                            <div class="map-info-row"><span>Zoom</span><span id="current-zoom">1.0</span></div>
+                            <div class="map-info-row"><span>North</span><span><span id="bbox-north">--</span>°</span></div>
+                            <div class="map-info-row"><span>South</span><span><span id="bbox-south">--</span>°</span></div>
+                            <div class="map-info-row"><span>East</span><span><span id="bbox-east">--</span>°</span></div>
+                            <div class="map-info-row"><span>West</span><span><span id="bbox-west">--</span>°</span></div>
                         </div>
                     </div>
                 </div>
@@ -284,10 +335,8 @@
                                 </div>
                             </div>
                             <!-- 3D Display Options Section (Pro Only) -->
-                            <div class="threeD-toggle-control">
-                                <button id="threeD-toggle" class="nav-btn">3D ▼</button>
-                            </div>
-                            <div class="threeD-controls" id="threeD-controls" style="display: none;">
+                            <button id="threeD-toggle" class="section-toggle">3D</button>
+                            <div class="collapsible-section" id="threeD-controls">
                                 <div class="threeD-display-controls">
                                     <div id="show-3d-overlay-container" class="checkbox-control" style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
                                         <input type="checkbox" id="show-3d-overlay">
@@ -307,10 +356,8 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="sizes-toggle-control">
-                                <button id="sizes-toggle" class="nav-btn">Text Sizes ▼</button>
-                            </div>
-                            <div class="sizes-controls" id="sizes-controls" style="display: none;">
+                            <button id="sizes-toggle" class="section-toggle">Text Sizes</button>
+                            <div class="collapsible-section" id="sizes-controls">
                                 <div class="font-size-controls">
                                     <label for="header-font-size">Header Size:</label>
                                     <input type="range" id="header-font-size" min="14" max="32" value="20" step="1">
@@ -327,10 +374,8 @@
                                     <span id="panel-font-size-value">11</span>px
                                 </div>
                             </div>
-                            <div class="colors-toggle-control">
-                                <button id="colors-toggle" class="nav-btn">Colors ▼</button>
-                            </div>
-                            <div class="colors-controls" id="colors-controls" style="display: none;">
+                            <button id="colors-toggle" class="section-toggle">Colors</button>
+                            <div class="collapsible-section" id="colors-controls">
                                 <div class="color-controls">
                                     <label for="aircraft-icon-color">Aircraft Icon:</label>
                                     <input type="color" id="aircraft-icon-color" value="#00ff00">
@@ -388,10 +433,8 @@
                                         Defaults</button>
                                 </div>
                             </div>
-                            <div class="units-toggle-control">
-                                <button id="units-toggle" class="nav-btn">Units ▼</button>
-                            </div>
-                            <div class="units-controls" id="units-controls" style="display: none;">
+                            <button id="units-toggle" class="section-toggle">Units</button>
+                            <div class="collapsible-section" id="units-controls">
                                 <div class="unit-controls">
                                     <label for="speed-unit-select">Speed:</label>
                                     <select id="speed-unit-select">
@@ -419,10 +462,8 @@
                                     </select>
                                 </div>
                             </div>
-                            <div class="developer-toggle-control">
-                                <button id="developer-toggle" class="nav-btn">Developer ▼</button>
-                            </div>
-                            <div class="developer-controls" id="developer-controls" style="display: none;">
+                            <button id="developer-toggle" class="section-toggle">Developer</button>
+                            <div class="collapsible-section" id="developer-controls">
                                 <div class="developer-section">
                                     <label for="log-level-select">Log Level:</label>
                                     <select id="log-level-select">
@@ -830,7 +871,6 @@
                     <label for="aircraft-type-input">Aircraft Type:</label>
                     <div class="actype-input-wrapper">
                         <input type="text" id="aircraft-type-input" placeholder="e.g. A320" maxlength="10" autocomplete="off" required>
-                        <div id="aircraft-type-dropdown" class="modal-actype-dropdown" style="display: none;"></div>
                     </div>
                     <small id="aircraft-type-warning" class="modal-actype-warning" style="display: none;">openap library does not include this type</small>
                     <small class="setting-help">Aircraft type (e.g. A320, B737, etc.)</small>

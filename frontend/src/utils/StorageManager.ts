@@ -28,7 +28,7 @@ export class StorageManager {
             localStorage.setItem(test, test);
             localStorage.removeItem(test);
             return true;
-        } catch (e) {
+        } catch {
             return false;
         }
     }
@@ -129,6 +129,36 @@ export class StorageManager {
         } catch (error) {
             logger.error('StorageManager', `Error checking localStorage (key: ${key}):`, error);
             return false;
+        }
+    }
+
+    /**
+     * Read a value, migrating a legacy raw localStorage entry on first
+     * access. Legacy entries predate StorageManager: unprefixed keys whose
+     * values are plain strings rather than JSON. When one is found it is
+     * moved under the namespaced key and the legacy entry is removed.
+     */
+    public getStringWithLegacyMigration(key: string, legacyKey: string): string | null {
+        const existing = this.get<string>(key);
+        if (existing !== null) {
+            return existing;
+        }
+
+        if (!this.isAvailable()) {
+            return null;
+        }
+
+        try {
+            const legacy = localStorage.getItem(legacyKey);
+            if (legacy === null) {
+                return null;
+            }
+            this.set(key, legacy);
+            localStorage.removeItem(legacyKey);
+            return legacy;
+        } catch (error) {
+            logger.error('StorageManager', `Error migrating legacy key ${legacyKey}:`, error);
+            return null;
         }
     }
 

@@ -1,6 +1,16 @@
 import * as THREE from 'three';
 import { MercatorCoordinate } from 'maplibre-gl';
-import type { Map as MapLibreMap, CustomLayerInterface } from 'maplibre-gl';
+import type { Map as MapLibreMap, CustomLayerInterface, CustomRenderMethodInput } from 'maplibre-gl';
+
+/**
+ * The slice of MapLibre's custom-layer render arguments our 3D layers
+ * consume. Wide enough to cover both the modern args object and the
+ * legacy matrix-array render call, narrow enough that subclasses don't
+ * depend on MapLibre's full ProjectionData internals.
+ */
+export interface Render3DArgs {
+    defaultProjectionData: { mainMatrix: ArrayLike<number> };
+}
 
 /**
  * Base class for Three.js custom layers in MapLibre GL
@@ -14,8 +24,8 @@ import type { Map as MapLibreMap, CustomLayerInterface } from 'maplibre-gl';
  */
 export abstract class CustomLayer3D implements CustomLayerInterface {
     id: string;
-    type: 'custom' = 'custom';
-    renderingMode: '3d' = '3d';
+    type = 'custom' as const;
+    renderingMode = '3d' as const;
 
     protected camera!: THREE.Camera;
     protected scene!: THREE.Scene;
@@ -132,10 +142,13 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
      * @param matrix - Transformation matrix (deprecated, use args)
      */
     render(gl: WebGLRenderingContext | WebGL2RenderingContext, matrix: number[]): void;
-    render(gl: WebGLRenderingContext | WebGL2RenderingContext, args: any): void;
-    render(gl: WebGLRenderingContext | WebGL2RenderingContext, matrixOrArgs: any): void {
+    render(gl: WebGLRenderingContext | WebGL2RenderingContext, args: CustomRenderMethodInput): void;
+    render(
+        gl: WebGLRenderingContext | WebGL2RenderingContext,
+        matrixOrArgs: number[] | CustomRenderMethodInput
+    ): void {
         // Handle both old and new MapLibre API signatures
-        const args = Array.isArray(matrixOrArgs)
+        const args: Render3DArgs = Array.isArray(matrixOrArgs)
             ? { defaultProjectionData: { mainMatrix: matrixOrArgs } }
             : matrixOrArgs;
 
@@ -173,7 +186,7 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
      * Override this to update your 3D objects each frame
      * @param args - Rendering arguments from MapLibre
      */
-    protected abstract updateScene(args?: any): void;
+    protected abstract updateScene(args?: Render3DArgs): void;
 
     /**
      * Convert longitude/latitude to Mercator coordinates
@@ -305,7 +318,7 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
                 .multiply(rotationX);
 
             return transform;
-        } catch (error) {
+        } catch {
             // Fallback to traditional transform if there's any error
             return this.createTransformMatrix(lng, lat, altitude, heading, pitch, roll, scale);
         }
@@ -319,7 +332,7 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
         try {
             const projection = this.map?.getProjection?.();
             return projection?.type === 'globe';
-        } catch (error) {
+        } catch {
             // Fallback to mercator if projection detection fails
             return false;
         }

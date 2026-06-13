@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { onDOMReady, escapeHtml } from '../utils/dom';
 
 /**
  * Echo Management System
@@ -15,12 +16,7 @@ export class EchoManager {
 
     private init(): void {
         if (this.isInitialized) return;
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initializeElements());
-        } else {
-            this.initializeElements();
-        }
+        onDOMReady(() => this.initializeElements());
     }
 
     private initializeElements(): void {
@@ -42,7 +38,7 @@ export class EchoManager {
         }
 
         // Listen for global echo events
-        document.addEventListener('echoMessage', (e: any) => {
+        document.addEventListener('echoMessage', (e) => {
             const { message, type } = e.detail;
             this.addMessage(message, type);
         });
@@ -80,12 +76,12 @@ export class EchoManager {
                 const timestamp = new Date().toLocaleTimeString();
                 prefix = `<span class="echo-timestamp">${timestamp}</span>`;
             } else if (nodeId) {
-                prefix = `<span class="echo-node-id">${this.escapeHtml(nodeId)}</span>`;
+                prefix = `<span class="echo-node-id">${escapeHtml(nodeId)}</span>`;
             }
 
             messageElement.innerHTML = `
                 ${prefix}
-                <span class="echo-text">${this.escapeHtml(message)}</span>
+                <span class="echo-text">${escapeHtml(message)}</span>
             `;
 
             this.echoOutput.appendChild(messageElement);
@@ -154,15 +150,6 @@ export class EchoManager {
         while (messages.length > this.maxMessages) {
             this.echoOutput.removeChild(messages[0]);
         }
-    }
-
-    /**
-     * Escape HTML to prevent XSS
-     */
-    private escapeHtml(text: string): string {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
     }
 
     /**

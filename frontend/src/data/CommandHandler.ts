@@ -1,4 +1,5 @@
 import type { App } from '../core/App';
+import type { MapDisplay } from '../ui/map/MapDisplay';
 import { echoManager } from '../ui/EchoManager';
 import { isOpenapAircraftType } from './aircraftTypes';
 
@@ -164,13 +165,9 @@ export class CommandHandler {
             };
         }
 
-        const mapDisplay = this.app.getMapDisplay();
-        if (!mapDisplay || !mapDisplay.isInitialized()) {
-            this.sendEcho('Map not initialized', 'error');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+        const mapDisplay = this.requireMapInitialized();
+        if (!mapDisplay) {
+            return { handled: true, sendToServer: false };
         }
 
         // Try to parse as coordinates first (format: "lat,lon" or "lat lon")
@@ -234,13 +231,9 @@ export class CommandHandler {
             };
         }
 
-        const mapDisplay = this.app.getMapDisplay();
-        if (!mapDisplay || !mapDisplay.isInitialized()) {
-            this.sendEcho('Map not initialized', 'error');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+        const mapDisplay = this.requireMapInitialized();
+        if (!mapDisplay) {
+            return { handled: true, sendToServer: false };
         }
 
         const upperArgs = args.trim().toUpperCase();
@@ -276,13 +269,9 @@ export class CommandHandler {
      * Handle ZOOMIN command - zoom in one level
      */
     private handleZoomInCommand(): CommandResult {
-        const mapDisplay = this.app.getMapDisplay();
-        if (!mapDisplay || !mapDisplay.isInitialized()) {
-            this.sendEcho('Map not initialized', 'error');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+        const mapDisplay = this.requireMapInitialized();
+        if (!mapDisplay) {
+            return { handled: true, sendToServer: false };
         }
 
         mapDisplay.zoomIn();
@@ -298,13 +287,9 @@ export class CommandHandler {
      * Handle ZOOMOUT command - zoom out one level
      */
     private handleZoomOutCommand(): CommandResult {
-        const mapDisplay = this.app.getMapDisplay();
-        if (!mapDisplay || !mapDisplay.isInitialized()) {
-            this.sendEcho('Map not initialized', 'error');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+        const mapDisplay = this.requireMapInitialized();
+        if (!mapDisplay) {
+            return { handled: true, sendToServer: false };
         }
 
         mapDisplay.zoomOut();
@@ -321,13 +306,9 @@ export class CommandHandler {
      * Usage: MCRE [number] [ac_type]
      */
     private handleMcreCommand(args: string): CommandResult {
-        const mapDisplay = this.app.getMapDisplay();
-        if (!mapDisplay || !mapDisplay.isInitialized()) {
-            this.sendEcho('Map not initialized', 'error');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+        const mapDisplay = this.requireMapInitialized();
+        if (!mapDisplay) {
+            return { handled: true, sendToServer: false };
         }
 
         // Get current map bounds [west, south, east, north]
@@ -387,6 +368,20 @@ export class CommandHandler {
      */
     private sendEcho(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info'): void {
         echoManager.addMessage(message, type, 'webatm');
+    }
+
+    /**
+     * Returns the initialized MapDisplay, or null after emitting a
+     * "Map not initialized" echo. Every caller that needs a ready map
+     * uses this guard so the same error message is emitted everywhere.
+     */
+    private requireMapInitialized(): MapDisplay | null {
+        const mapDisplay = this.app.getMapDisplay();
+        if (!mapDisplay || !mapDisplay.isInitialized()) {
+            this.sendEcho('Map not initialized', 'error');
+            return null;
+        }
+        return mapDisplay;
     }
 
     /**

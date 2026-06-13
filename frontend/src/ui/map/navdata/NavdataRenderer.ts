@@ -1,4 +1,5 @@
 import { Map as MapLibreMap } from 'maplibre-gl';
+import type { ExpressionSpecification } from 'maplibre-gl';
 import { DisplayOptions } from '../../../data/types';
 import type { MapDisplay } from '../MapDisplay';
 import type { StateManager } from '../../../core/StateManager';
@@ -124,8 +125,8 @@ export class NavdataRenderer {
      * built from AIRPORT_IMPORTANCE_BY_ZOOM. Lives in the style (not the
      * tiles), so the thresholds above can be tuned without re-tiling.
      */
-    private importanceOpacity(): any {
-        const expr: any[] = ['step', ['zoom'], 0];
+    private importanceOpacity(): ExpressionSpecification {
+        const expr: unknown[] = ['step', ['zoom'], 0];
         for (const [zoom, minRank] of this.AIRPORT_IMPORTANCE_BY_ZOOM) {
             expr.push(
                 zoom,
@@ -134,7 +135,7 @@ export class NavdataRenderer {
                     : ['case', ['>=', ['coalesce', ['get', 'rank'], 0], minRank], 1, 0]
             );
         }
-        return expr;
+        return expr as ExpressionSpecification;
     }
 
     public initialize(): void {

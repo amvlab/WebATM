@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { onDOMReady, escapeHtml } from '../utils/dom';
 
 /**
  * Console Management System
@@ -16,12 +17,7 @@ export class ConsoleManager {
 
     private init(): void {
         if (this.isInitialized) return;
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initializeElements());
-        } else {
-            this.initializeElements();
-        }
+        onDOMReady(() => this.initializeElements());
     }
 
     private initializeElements(): void {
@@ -46,7 +42,7 @@ export class ConsoleManager {
         // Removing keypress listener to avoid conflicts with Console.ts history management
 
         // Listen for global console events
-        document.addEventListener('consoleMessage', (e: any) => {
+        document.addEventListener('consoleMessage', (e) => {
             const { message, type } = e.detail;
             this.addMessage(message, type);
         });
@@ -77,7 +73,7 @@ export class ConsoleManager {
             const timestamp = new Date().toLocaleTimeString();
             messageElement.innerHTML = `
                 <span class="console-timestamp">${timestamp}</span>
-                <span class="console-text">${this.escapeHtml(message)}</span>
+                <span class="console-text">${escapeHtml(message)}</span>
             `;
             
             this.consoleLog.appendChild(messageElement);
@@ -137,78 +133,6 @@ export class ConsoleManager {
     }
 
     /**
-     * Handle command input
-     */
-    private handleCommand(command: string): void {
-        if (!command.trim()) return;
-
-        // Add command to console
-        this.addMessage(`> ${command}`, 'command');
-
-        // Emit command event for processing
-        const event = new CustomEvent('consoleCommand', {
-            detail: { command: command.trim() }
-        });
-        document.dispatchEvent(event);
-
-        // Also emit via custom event for API handling
-        this.processCommand(command.trim());
-    }
-
-    /**
-     * Process command (can be extended)
-     */
-    private async processCommand(command: string): Promise<void> {
-        try {
-            // Handle built-in commands
-            if (command.toLowerCase() === 'clear') {
-                this.clear();
-                return;
-            }
-
-            if (command.toLowerCase() === 'help') {
-                this.showHelp();
-                return;
-            }
-
-            // Send command to server API
-            const response = await fetch('/api/simulation/command', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ command })
-            });
-
-            const result = await response.json();
-            
-            if (result.success) {
-                if (result.message) {
-                    this.success(result.message);
-                }
-            } else {
-                this.error(result.error || 'Command failed');
-            }
-        } catch (error) {
-            this.error(`Command error: ${(error as Error).message}`);
-        }
-    }
-
-    /**
-     * Show help information
-     */
-    private showHelp(): void {
-        const helpText = `
-Available commands:
-- clear: Clear console messages
-- help: Show this help information
-- Any BlueSky simulation command
-        `.trim();
-        
-        this.info(helpText);
-    }
-
-    /**
      * Limit console messages to prevent memory issues
      */
     private limitMessages(): void {
@@ -218,15 +142,6 @@ Available commands:
         while (messages.length > this.maxMessages) {
             this.consoleLog.removeChild(messages[0]);
         }
-    }
-
-    /**
-     * Escape HTML to prevent XSS
-     */
-    private escapeHtml(text: string): string {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
     }
 
     /**

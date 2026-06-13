@@ -1,17 +1,17 @@
-import maplibregl, { Map, NavigationControl, ScaleControl, MapOptions } from 'maplibre-gl';
+import maplibregl, { Map, MapOptions } from 'maplibre-gl';
+import type { FitBoundsOptions, FlyToOptions } from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
 import { storage } from '../../utils/StorageManager';
-import { settingsModal } from '../SettingsModal';
 import { logger } from '../../utils/Logger';
 import { TerrainToggleControl } from './TerrainToggleControl';
+import { MapStyleManager } from './MapStyleManager';
 
 // Register the `pmtiles://` protocol once for the lifetime of the page so
 // offline styles can read directly from a static .pmtiles archive. Guarded so
 // reloading the MapDisplay module (HMR / test harnesses) does not re-register.
-const PMTILES_PROTOCOL_KEY = '__webatmPmtilesRegistered__';
-if (!(window as any)[PMTILES_PROTOCOL_KEY]) {
+if (!window.__webatmPmtilesRegistered__) {
     maplibregl.addProtocol('pmtiles', new Protocol().tile);
-    (window as any)[PMTILES_PROTOCOL_KEY] = true;
+    window.__webatmPmtilesRegistered__ = true;
 }
 
 /**
@@ -28,18 +28,12 @@ export class MapDisplay {
     private styleChangeCallback: (() => void) | null = null;
     private mapLoadCallback: (() => void) | null = null;
 
-    // Map style constants
-    private readonly DEFAULT_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json';
-    private readonly OFFLINE_STYLE = '/static/map/offline-style.json';
-    private readonly STORAGE_KEY_STYLE = 'webatm-map-style';
+    // Style selection, persistence, and offline fallback
+    private readonly styleManager = new MapStyleManager(() => this.map);
+
     private readonly STORAGE_KEY_PROJECTION = 'webatm-map-projection';
     private readonly STORAGE_KEY_CENTER = 'map-center';
     private readonly STORAGE_KEY_ZOOM = 'map-zoom';
-
-    // Tracks whether we've already swapped to the offline style after a
-    // network failure, so we don't trigger the fallback repeatedly.
-    private hasFallenBackToOffline = false;
-    private currentStyle: string = '';
 
     // Always-present terrain toggle. Self-disables when the active style has
     // no raster-dem source. Created once in addControls() and refreshed on
@@ -91,9 +85,7 @@ export class MapDisplay {
         }
 
         // Get saved style from storage, or use default
-        const savedStyle = storage.get<string>(this.STORAGE_KEY_STYLE);
-        const initialStyle = savedStyle || this.DEFAULT_STYLE;
-        this.currentStyle = initialStyle;
+        const initialStyle = this.styleManager.resolveInitialStyle();
 
         // Get saved view settings (center and zoom) from storage
         const savedCenter = storage.get<[number, number]>(this.STORAGE_KEY_CENTER);
@@ -129,7 +121,11 @@ export class MapDisplay {
             // jagged, stringy outlines once they are small on screen
             // (thin wings/stabilizers fall below one pixel), in both
             // mercator and globe projections.
-            canvasContextAttributes: { antialias: true }
+            canvasContextAttributes: { antialias: true },
+            // Render attribution as a fixed single line instead of the
+            // compact expandable (i) button, whose auto expand/collapse
+            // shifts layout after the style loads (counts towards CLS).
+            attributionControl: { compact: false }
         };
 
         // Initialize the map
@@ -147,7 +143,7 @@ export class MapDisplay {
         this.watchDevicePixelRatio();
 
         // Hide the map style message since we have a default style
-        this.hideMapStyleMessage();
+        this.styleManager.hideMapStyleMessage();
 
         logger.info('MapDisplay', 'MapDisplay initialized with style:', initialStyle);
     }
@@ -190,10 +186,10 @@ export class MapDisplay {
             this.onStyleLoad();
         });
 
-        // Handle map errors
+        // Handle map errors (style fallback + noise suppression)
         this.map.on('error', (e) => {
             logger.error('MapDisplay', 'Map error:', e);
-            this.onMapError(e);
+            this.styleManager.handleMapError(e);
         });
 
         // Handle move events for position display updates
@@ -253,79 +249,6 @@ export class MapDisplay {
     }
 
     /**
-     * Handle map error event
-     */
-    private onMapError(e: any): void {
-        // Log detailed error information
-        logger.error('MapDisplay', 'Map error details:', {
-            error: e.error,
-            sourceId: e.sourceId,
-            tile: e.tile,
-            type: e.type,
-            target: e.target
-        });
-
-        // If the current style is a remote URL and we're hitting what looks
-        // like a network failure (AJAXError / status 0 / fetch rejection),
-        // fall back to the bundled offline style. Guarded so we only try once.
-        if (this.shouldFallBackToOffline(e)) {
-            this.hasFallenBackToOffline = true;
-            logger.warn('MapDisplay', 'Remote style/tiles unreachable; switching to offline basemap.');
-            this.changeMapStyle(this.OFFLINE_STYLE);
-            return;
-        }
-
-        // Check for common errors and suppress non-critical ones
-        if (e.error) {
-            const errorMsg = e.error.message || String(e.error);
-
-            // Suppress font loading errors (non-critical)
-            if (errorMsg.includes('Could not load') && errorMsg.includes('font')) {
-                logger.verbose('MapDisplay', 'Font loading error (non-critical):', errorMsg);
-                return;
-            }
-
-            // Suppress tile loading errors during sprite updates (transient)
-            if (errorMsg.includes('tile') || errorMsg.includes('Tile')) {
-                logger.verbose('MapDisplay', 'Tile loading error (may be transient):', errorMsg);
-                return;
-            }
-        }
-
-        // Log other errors for debugging
-        logger.error('MapDisplay', 'Map style error:', e);
-    }
-
-    /**
-     * Decide whether a MapLibre error warrants swapping to the offline style.
-     *
-     * MapLibre surfaces a few shapes for network failures: AJAXError objects
-     * with a `status` field (0 when the browser couldn't reach the host at
-     * all), and generic `TypeError: Failed to fetch` for cross-origin / DNS
-     * problems. We only fall back once, and only if the current style is a
-     * remote URL — local styles failing usually mean a config mistake, not
-     * missing internet.
-     */
-    private shouldFallBackToOffline(e: any): boolean {
-        if (this.hasFallenBackToOffline) return false;
-        if (!this.currentStyle.startsWith('http')) return false;
-
-        const err = e?.error;
-        if (!err) return false;
-
-        const status = typeof err.status === 'number' ? err.status : null;
-        const message = (err.message || String(err)).toLowerCase();
-
-        // status 0 = no response (offline / DNS / CORS preflight failure).
-        // "failed to fetch" is Chromium's TypeError for the same thing.
-        return (
-            status === 0 ||
-            message.includes('failed to fetch') ||
-            message.includes('networkerror')
-        );
-    }
-
-    /**
      * Handle map move event
      */
     private onMapMove(): void {
@@ -360,172 +283,21 @@ export class MapDisplay {
     }
 
     /**
-     * Change the map style
+     * Change the map style (delegates to MapStyleManager)
      * @param styleUrl - URL of the new map style
      */
     public changeMapStyle(styleUrl: string): void {
-        if (!this.map) {
-            logger.error('MapDisplay', 'Cannot change style: map not initialized');
-            return;
-        }
-
-        try {
-            logger.debug('MapDisplay', 'Changing map style to:', styleUrl);
-
-            // Save the style to storage for persistence
-            storage.set(this.STORAGE_KEY_STYLE, styleUrl);
-            this.currentStyle = styleUrl;
-
-            // Change the map style
-            // Note: styleChangeCallback is already called from the persistent
-            // 'style.load' handler in setupEventHandlers/onStyleLoad, so we
-            // only need to trigger a resize after the style settles.
-            this.map.once('idle', () => {
-                // Resize to fix canvas/viewport sync after style change
-                this.map?.resize();
-            });
-
-            this.map.setStyle(styleUrl);
-
-            // Hide the map style message now that a style has been selected
-            this.hideMapStyleMessage();
-
-        } catch (error) {
-            logger.error('MapDisplay', 'Error changing map style:', error);
-            alert(`Error changing map style: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
+        this.styleManager.changeStyle(styleUrl);
     }
 
     /**
-     * Set up map style selector event handlers
-     * This connects the HTML select element to the map style changing logic
+     * Wire the settings-modal style selector (delegates to MapStyleManager)
      */
     public setupStyleSelector(): void {
-        const styleSelect = document.getElementById('map-style-select-modal') as HTMLSelectElement;
-        const customStyleControl = document.getElementById('custom-style-control-modal');
-        const customStyleInput = document.getElementById('custom-style-url-modal') as HTMLInputElement;
-        const applyCustomStyleBtn = document.getElementById('apply-custom-style-modal');
-        const applyMapStyleBtn = document.getElementById('apply-map-style-btn') as HTMLButtonElement;
-
-        if (!styleSelect) {
-            logger.warn('MapDisplay', 'Map style select element not found');
-            return;
-        }
-
-        // Handle style select change - only toggle custom input visibility
-        styleSelect.addEventListener('change', (e) => {
-            const target = e.target as HTMLSelectElement;
-
-            if (target.value === 'custom') {
-                // Show custom style input
-                if (customStyleControl) {
-                    customStyleControl.style.display = 'block';
-                }
-                // Hide apply button for predefined styles
-                if (applyMapStyleBtn) {
-                    applyMapStyleBtn.style.display = 'none';
-                }
-            } else if (target.value === '') {
-                // User selected "Select a map style..." placeholder
-                if (customStyleControl) {
-                    customStyleControl.style.display = 'none';
-                }
-            } else {
-                // User selected a predefined style - just hide custom input
-                if (customStyleControl) {
-                    customStyleControl.style.display = 'none';
-                }
-                // Show apply button for predefined styles
-                if (applyMapStyleBtn) {
-                    applyMapStyleBtn.style.display = 'block';
-                }
-            }
-        });
-
-        // Handle apply map style button - applies the selected style from dropdown
-        if (applyMapStyleBtn) {
-            applyMapStyleBtn.addEventListener('click', () => {
-                const selectedValue = styleSelect.value;
-
-                if (selectedValue === '' || selectedValue === 'custom') {
-                    // Don't apply if placeholder or custom is selected
-                    return;
-                }
-
-                const styleUrl = selectedValue;
-
-                // Handle MapTiler URLs that need API key
-                if (styleUrl.includes('api.maptiler.com') && styleUrl.endsWith('?key=')) {
-                    const apiKeyInput = document.getElementById('maptiler-api-key-input') as HTMLInputElement;
-                    const apiKey = apiKeyInput?.value.trim();
-
-                    if (!apiKey) {
-                        alert('MapTiler API key is required. Please enter your API key in the field above.');
-                        return;
-                    }
-
-                    // Append the API key to the URL
-                    const urlWithKey = styleUrl + apiKey;
-                    this.changeMapStyle(urlWithKey);
-                } else {
-                    // Change the map style without API key
-                    this.changeMapStyle(styleUrl);
-                }
-            });
-        }
-
-        // Handle custom style apply button
-        if (applyCustomStyleBtn) {
-            applyCustomStyleBtn.addEventListener('click', () => {
-                if (customStyleInput && customStyleInput.value.trim()) {
-                    const customUrl = customStyleInput.value.trim();
-                    this.changeMapStyle(customUrl);
-                } else {
-                    alert('Please enter a valid style URL.');
-                }
-            });
-        }
-
-        // Handle Enter key in custom style input
-        if (customStyleInput) {
-            customStyleInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter' && applyCustomStyleBtn) {
-                    applyCustomStyleBtn.click();
-                }
-            });
-        }
-
-        // Handle Enter key in MapTiler API key input
-        const apiKeyInput = document.getElementById('maptiler-api-key-input') as HTMLInputElement;
-        if (apiKeyInput) {
-            apiKeyInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    // Try to apply the currently selected MapTiler style if one is selected
-                    const currentStyle = styleSelect.value;
-                    if (currentStyle.includes('api.maptiler.com')) {
-                        // Trigger the apply button click instead of change event
-                        if (applyMapStyleBtn) {
-                            applyMapStyleBtn.click();
-                        }
-                    }
-                }
-            });
-        }
-
-        logger.debug('MapDisplay', 'Map style selector initialized');
+        this.styleManager.setupStyleSelector();
     }
 
 
-    /**
-     * Hide the map style message overlay
-     */
-    private hideMapStyleMessage(): void {
-        const messageElement = document.getElementById('map-style-message');
-        if (messageElement) {
-            messageElement.style.display = 'none';
-            logger.verbose('MapDisplay', 'Map style message hidden');
-        }
-    }
 
 
     /**
@@ -573,7 +345,7 @@ export class MapDisplay {
      * non-local style and uses the light palette.
      */
     public getMapTheme(): 'light' | 'dark' {
-        const s = this.currentStyle || '';
+        const s = this.styleManager.getCurrentStyle() || '';
         if (s.includes('offline-style-light')) return 'light';
         if (s.includes('dark-matter') || s.includes('offline-style.json')) return 'dark';
         return 'light';
@@ -676,7 +448,7 @@ export class MapDisplay {
     public setCenter(lng: number, lat: number, zoom?: number): void {
         if (!this.map) return;
 
-        const options: any = { center: [lng, lat] };
+        const options: FlyToOptions = { center: [lng, lat] };
         if (zoom !== undefined) {
             options.zoom = zoom;
         }
@@ -741,7 +513,7 @@ export class MapDisplay {
     /**
      * Fit the map to bounds
      */
-    public fitBounds(bounds: [[number, number], [number, number]], options?: any): void {
+    public fitBounds(bounds: [[number, number], [number, number]], options?: FitBoundsOptions): void {
         if (!this.map) return;
         this.map.fitBounds(bounds, options);
     }

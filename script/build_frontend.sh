@@ -20,9 +20,14 @@ echo "Frontend directory: $FRONTEND_DIR"
 # Change to frontend directory
 cd "$FRONTEND_DIR"
 
-# Install dependencies
-echo "Installing dependencies..."
-npm ci
+# Install dependencies if node_modules is missing or stale relative to the lockfile.
+# (npm ci wipes node_modules each run, so we skip it when it's already in sync.)
+if [ ! -d node_modules ] || [ package-lock.json -nt node_modules ]; then
+    echo "Installing dependencies..."
+    npm ci
+else
+    echo "Dependencies up to date, skipping install."
+fi
 
 # Build the frontend bundles
 echo "Building frontend..."

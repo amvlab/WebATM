@@ -16,6 +16,7 @@
 
 import { echoManager } from '../ui/EchoManager';
 import { logger } from '../utils/Logger';
+import { EventEmitter } from '../utils/events';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -63,7 +64,7 @@ export class ConnectionStatusService {
         nodeInfoInterval: null
     };
 
-    private listeners: Set<ConnectionStatusListener> = new Set();
+    private statusEmitter = new EventEmitter<ConnectionStatusData>('ConnectionStatus');
     private dataTimeoutId: number | null = null;
     private readonly DATA_TIMEOUT_MS = 5000; // Consider disconnected if no data for 5 seconds
 
@@ -73,11 +74,11 @@ export class ConnectionStatusService {
     private readonly INITIAL_CONNECTION_CHECK_DELAY_MS = 500; // Wait 0.5s before checking initial connection
 
     // Connection event callbacks
-    private onBlueSkyDisconnectCallbacks: Set<ConnectionEventCallback> = new Set();
+    private blueSkyDisconnectEmitter = new EventEmitter<boolean>('ConnectionStatus.disconnect');
 
     private constructor() {
-        // Private constructor for singleton
-        this.startDataMonitoring();
+        // Private constructor for singleton. The data timeout that
+        // detects disconnection is armed when the first data arrives.
         this.loadInitialLoadState();
     }
 
@@ -96,28 +97,24 @@ export class ConnectionStatusService {
      * Returns unsubscribe function
      */
     public subscribe(listener: ConnectionStatusListener): () => void {
-        this.listeners.add(listener);
+        const unsubscribe = this.statusEmitter.subscribe(listener);
 
-        // Immediately call listener with current status
-        listener(this.getStatus());
+        // Immediately call listener with current status, with the same
+        // error isolation the emitter applies on later updates.
+        try {
+            listener(this.getStatus());
+        } catch (error) {
+            logger.error('ConnectionStatus', 'Error in connection status listener:', error);
+        }
 
-        return () => {
-            this.listeners.delete(listener);
-        };
+        return unsubscribe;
     }
 
     /**
      * Notify all listeners of status change
      */
     private notifyListeners(): void {
-        const currentStatus = this.getStatus();
-        this.listeners.forEach(listener => {
-            try {
-                listener(currentStatus);
-            } catch (error) {
-                logger.error('ConnectionStatus', 'Error in connection status listener:', error);
-            }
-        });
+        this.statusEmitter.emit(this.getStatus());
     }
 
     /**
@@ -221,6 +218,28 @@ export class ConnectionStatusService {
     }
 
     /**
+     * Shared handling for every server data event: receiving anything
+     * proves the BlueSky connection is up and resets the disconnect
+     * timeout. Data-bearing events (siminfo/acdata) additionally flip
+     * the receivingData flag.
+     */
+    private onServerDataReceived(kind: string, marksReceivingData: boolean): void {
+        logger.debug('ConnectionStatus', `${kind} received`);
+
+        if (!this.status.blueSkyConnected) {
+            logger.info('ConnectionStatus', `Setting BlueSky connected (via ${kind})`);
+            this.setBlueSkyConnected(true);
+        }
+
+        if (marksReceivingData && !this.status.receivingData) {
+            this.setReceivingData(true);
+        }
+
+        // Reset the timeout for detecting disconnection (any data type resets it)
+        this.resetDataTimeout();
+    }
+
+    /**
      * Called when nodeinfo is received
      * This is an indicator that we're connected to BlueSky server
      */
@@ -231,20 +250,9 @@ export class ConnectionStatusService {
         if (this.status.lastNodeInfoReceived !== null) {
             this.status.nodeInfoInterval = now - this.status.lastNodeInfoReceived;
         }
-
         this.status.lastNodeInfoReceived = now;
 
-        // Log nodeinfo reception
-        logger.debug('ConnectionStatus', 'Node info received');
-
-        // If we're receiving nodeinfo, we're definitely connected
-        if (!this.status.blueSkyConnected) {
-            logger.info('ConnectionStatus', 'Setting BlueSky connected (via nodeinfo)');
-            this.setBlueSkyConnected(true);
-        }
-
-        // Reset the timeout for detecting disconnection (any data type resets this)
-        this.resetDataTimeout();
+        this.onServerDataReceived('node info', false);
     }
 
     /**
@@ -252,25 +260,8 @@ export class ConnectionStatusService {
      * This is a strong indicator that we're connected and receiving data
      */
     public onSimInfoReceived(): void {
-        const now = Date.now();
-        this.status.lastDataReceived = now;
-
-        // Log siminfo reception
-        logger.debug('ConnectionStatus', 'Simulation info received');
-
-        // If we're receiving siminfo, we're connected and receiving data
-        if (!this.status.blueSkyConnected) {
-            logger.info('ConnectionStatus', 'Setting BlueSky connected (via siminfo)');
-            this.setBlueSkyConnected(true);
-        }
-
-        // Mark as receiving data
-        if (!this.status.receivingData) {
-            this.setReceivingData(true);
-        }
-
-        // Reset the timeout for detecting disconnection
-        this.resetDataTimeout();
+        this.status.lastDataReceived = Date.now();
+        this.onServerDataReceived('simulation info', true);
     }
 
     /**
@@ -278,25 +269,8 @@ export class ConnectionStatusService {
      * This is a strong indicator that we're connected and receiving data
      */
     public onAircraftDataReceived(): void {
-        const now = Date.now();
-        this.status.lastDataReceived = now;
-
-        // Log aircraft data reception
-        logger.debug('ConnectionStatus', 'Aircraft data received');
-
-        // If we're receiving aircraft data, we're connected and receiving data
-        if (!this.status.blueSkyConnected) {
-            logger.info('ConnectionStatus', 'Setting BlueSky connected (via aircraft data)');
-            this.setBlueSkyConnected(true);
-        }
-
-        // Mark as receiving data
-        if (!this.status.receivingData) {
-            this.setReceivingData(true);
-        }
-
-        // Reset the timeout for detecting disconnection
-        this.resetDataTimeout();
+        this.status.lastDataReceived = Date.now();
+        this.onServerDataReceived('aircraft data', true);
     }
 
     /**
@@ -304,27 +278,8 @@ export class ConnectionStatusService {
      * This is an indicator that we're connected to BlueSky server
      */
     public onShapeDataReceived(): void {
-        const now = Date.now();
-        this.status.lastDataReceived = now;
-
-        // Log shape data reception
-        logger.debug('ConnectionStatus', 'Shape data received');
-
-        // If we're receiving shape data, we're connected to BlueSky
-        if (!this.status.blueSkyConnected) {
-            logger.info('ConnectionStatus', 'Setting BlueSky connected (via shape data)');
-            this.setBlueSkyConnected(true);
-        }
-
-        // Reset the timeout for detecting disconnection
-        this.resetDataTimeout();
-    }
-
-    /**
-     * Monitor data reception to detect disconnection
-     */
-    private startDataMonitoring(): void {
-        // This will be set up when first data is received
+        this.status.lastDataReceived = Date.now();
+        this.onServerDataReceived('shape data', false);
     }
 
     /**
@@ -598,11 +553,7 @@ export class ConnectionStatusService {
      * Returns unsubscribe function
      */
     public onBlueSkyDisconnect(callback: ConnectionEventCallback): () => void {
-        this.onBlueSkyDisconnectCallbacks.add(callback);
-
-        return () => {
-            this.onBlueSkyDisconnectCallbacks.delete(callback);
-        };
+        return this.blueSkyDisconnectEmitter.subscribe(callback);
     }
 
     /**
@@ -610,13 +561,7 @@ export class ConnectionStatusService {
      */
     private triggerDisconnectCallbacks(): void {
         logger.debug('ConnectionStatus', 'Triggering disconnect callbacks');
-        this.onBlueSkyDisconnectCallbacks.forEach(callback => {
-            try {
-                callback(false);
-            } catch (error) {
-                logger.error('ConnectionStatus', 'Error in disconnect callback:', error);
-            }
-        });
+        this.blueSkyDisconnectEmitter.emit(false);
     }
 }
 

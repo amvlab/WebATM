@@ -10,12 +10,15 @@
 import { BasePanel } from '../BasePanel';
 import { MapDisplay } from '../../map/MapDisplay';
 import { logger } from '../../../utils/Logger';
+import type { AircraftCreationManager } from '../../map/aircraft/AircraftCreationManager';
+import type { ShapeDrawingManager } from '../../map/shapes/ShapeDrawingManager';
+import type { RouteDrawingManager } from '../../map/routes/RouteDrawingManager';
 
 export class MapControlsPanel extends BasePanel {
     private mapDisplay: MapDisplay | null = null;
-    private aircraftCreationManager: any = null; // Will be typed when manager is created
-    private shapeDrawingManager: any = null; // Will be typed when manager is created
-    private routeDrawingManager: any = null; // Will be typed when manager is created
+    private aircraftCreationManager: AircraftCreationManager | null = null;
+    private shapeDrawingManager: ShapeDrawingManager | null = null;
+    private routeDrawingManager: RouteDrawingManager | null = null;
     private readonly DEFAULT_CENTER: [number, number] = [4.9, 52.3]; // Amsterdam
     private readonly DEFAULT_ZOOM = 8;
 
@@ -37,38 +40,9 @@ export class MapControlsPanel extends BasePanel {
      * Set up button event handlers
      */
     private setupButtonHandlers(): void {
-        // Create Aircraft button
-        const createAircraftBtn = document.getElementById('create-aircraft-btn');
-        if (createAircraftBtn) {
-            createAircraftBtn.addEventListener('click', () => {
-                this.onCreateAircraftClick();
-            });
-            logger.debug('MapControlsPanel', 'Create Aircraft button handler attached');
-        } else {
-            logger.warn('MapControlsPanel', '✗ Create Aircraft button not found');
-        }
-
-        // Draw Shape button
-        const drawShapeBtn = document.getElementById('draw-shape-btn');
-        if (drawShapeBtn) {
-            drawShapeBtn.addEventListener('click', () => {
-                this.onDrawShapeClick();
-            });
-            logger.debug('MapControlsPanel', 'Draw Shape button handler attached');
-        } else {
-            logger.warn('MapControlsPanel', '✗ Draw Shape button not found');
-        }
-
-        // Draw Route button
-        const drawRouteBtn = document.getElementById('draw-route-btn');
-        if (drawRouteBtn) {
-            drawRouteBtn.addEventListener('click', () => {
-                this.onDrawRouteClick();
-            });
-            logger.debug('MapControlsPanel', 'Draw Route button handler attached');
-        } else {
-            logger.warn('MapControlsPanel', '✗ Draw Route button not found');
-        }
+        this.bindClick('create-aircraft-btn', () => this.onCreateAircraftClick());
+        this.bindClick('draw-shape-btn', () => this.onDrawShapeClick());
+        this.bindClick('draw-route-btn', () => this.onDrawRouteClick());
     }
 
     /**
@@ -133,17 +107,8 @@ export class MapControlsPanel extends BasePanel {
      * Set up map info handlers (zoom, bbox)
      */
     private setupMapInfoHandlers(): void {
-        // Set up map info toggle
-        const mapInfoToggle = document.getElementById('map-info-toggle');
-        if (mapInfoToggle) {
-            mapInfoToggle.addEventListener('click', () => {
-                this.toggleMapInfoSection();
-            });
-            logger.debug('MapControlsPanel', 'Map Info toggle handler attached');
-        } else {
-            logger.warn('MapControlsPanel', '✗ Map Info toggle button not found');
-        }
-        
+        this.bindClick('map-info-toggle', () => this.toggleMapInfoSection());
+
         // Initial update of zoom and bounding box will happen when map is set
     }
 
@@ -207,12 +172,7 @@ export class MapControlsPanel extends BasePanel {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        const zoom = map.getZoom();
-        const zoomElement = document.getElementById('current-zoom');
-
-        if (zoomElement) {
-            zoomElement.textContent = zoom.toFixed(1);
-        }
+        this.setText('current-zoom', map.getZoom().toFixed(1));
     }
 
     /**
@@ -226,27 +186,16 @@ export class MapControlsPanel extends BasePanel {
 
         const bounds = map.getBounds();
 
-        const north = bounds.getNorth();
-        const south = bounds.getSouth();
-        const east = bounds.getEast();
-        const west = bounds.getWest();
-
-        // Update the display elements
-        const northElement = document.getElementById('bbox-north');
-        const southElement = document.getElementById('bbox-south');
-        const eastElement = document.getElementById('bbox-east');
-        const westElement = document.getElementById('bbox-west');
-
-        if (northElement) northElement.textContent = north.toFixed(2);
-        if (southElement) southElement.textContent = south.toFixed(2);
-        if (eastElement) eastElement.textContent = east.toFixed(2);
-        if (westElement) westElement.textContent = west.toFixed(2);
+        this.setText('bbox-north', bounds.getNorth().toFixed(2));
+        this.setText('bbox-south', bounds.getSouth().toFixed(2));
+        this.setText('bbox-east', bounds.getEast().toFixed(2));
+        this.setText('bbox-west', bounds.getWest().toFixed(2));
     }
 
     /**
      * Set the AircraftCreationManager instance
      */
-    public setAircraftCreationManager(manager: any): void {
+    public setAircraftCreationManager(manager: AircraftCreationManager): void {
         this.aircraftCreationManager = manager;
         logger.debug('MapControlsPanel', 'MapControlsPanel connected to AircraftCreationManager');
     }
@@ -254,7 +203,7 @@ export class MapControlsPanel extends BasePanel {
     /**
      * Set the ShapeDrawingManager instance
      */
-    public setShapeDrawingManager(manager: any): void {
+    public setShapeDrawingManager(manager: ShapeDrawingManager): void {
         this.shapeDrawingManager = manager;
         logger.debug('MapControlsPanel', 'MapControlsPanel connected to ShapeDrawingManager');
     }
@@ -262,7 +211,7 @@ export class MapControlsPanel extends BasePanel {
     /**
      * Set the RouteDrawingManager instance
      */
-    public setRouteDrawingManager(manager: any): void {
+    public setRouteDrawingManager(manager: RouteDrawingManager): void {
         this.routeDrawingManager = manager;
         logger.debug('MapControlsPanel', 'MapControlsPanel connected to RouteDrawingManager');
     }
@@ -337,22 +286,25 @@ export class MapControlsPanel extends BasePanel {
     private toggleMapInfoSection(): void {
         const section = document.getElementById('map-info-controls');
         const toggleBtn = document.getElementById('map-info-toggle');
-        
+
         if (!section || !toggleBtn) return;
 
-        const isVisible = section.style.display === 'block';
-        const newVisibility = !isVisible;
+        const open = !section.classList.contains('open');
+        section.classList.toggle('open', open);
+        toggleBtn.classList.toggle('open', open);
 
-        // Update display
-        section.style.display = newVisibility ? 'block' : 'none';
-        
-        // Update button text
-        toggleBtn.textContent = `Map Info ${newVisibility ? '▲' : '▼'}`;
-        
-        logger.debug('MapControlsPanel', `Map Info section ${newVisibility ? 'expanded' : 'collapsed'}`);
+        if (open) {
+            // Once the expand animation has finished, make sure the section
+            // is visible within the scrollable panel
+            window.setTimeout(() => {
+                section.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }, 240);
+        }
+
+        logger.debug('MapControlsPanel', `Map Info section ${open ? 'expanded' : 'collapsed'}`);
     }
 
-    public update(data?: any): void {
+    public update(_data?: unknown): void {
         // Update logic if needed
     }
 }

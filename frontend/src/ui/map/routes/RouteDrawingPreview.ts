@@ -1,6 +1,13 @@
-import { GeoJSONSource } from 'maplibre-gl';
 import { MapDisplay } from '../MapDisplay';
 import { StateManager } from '../../../core/StateManager';
+import { lineStringFeature, pointFeature, toLngLatCoords } from '../../../utils/geojson';
+import {
+    ensureGeoJSONSource,
+    ensureLayer,
+    safeRemoveLayer,
+    safeRemoveSource,
+    updateSourceFeatures
+} from '../../../utils/maplibre';
 
 /**
  * RouteDrawingPreview - Temporary map sources and layers for the route
@@ -33,88 +40,70 @@ export class RouteDrawingPreview {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        const ensureSource = (id: string) => {
-            if (!map.getSource(id)) {
-                map.addSource(id, {
-                    type: 'geojson',
-                    data: { type: 'FeatureCollection', features: [] }
-                });
-            }
-        };
-        ensureSource('temp-route-draw-leader');
-        ensureSource('temp-route-draw-line');
-        ensureSource('temp-route-draw-preview');
-        ensureSource('temp-route-draw-points');
+        ensureGeoJSONSource(map, 'temp-route-draw-leader');
+        ensureGeoJSONSource(map, 'temp-route-draw-line');
+        ensureGeoJSONSource(map, 'temp-route-draw-preview');
+        ensureGeoJSONSource(map, 'temp-route-draw-points');
 
-        if (!map.getLayer('temp-route-draw-leader')) {
-            map.addLayer({
-                id: 'temp-route-draw-leader',
-                source: 'temp-route-draw-leader',
-                type: 'line',
-                paint: {
-                    'line-color': '#ffaa00',
-                    'line-width': 2,
-                    'line-dasharray': [2, 2]
-                }
-            });
-        }
-        if (!map.getLayer('temp-route-draw-line')) {
-            map.addLayer({
-                id: 'temp-route-draw-line',
-                source: 'temp-route-draw-line',
-                type: 'line',
-                paint: {
-                    'line-color': '#00aaff',
-                    'line-width': 2
-                }
-            });
-        }
-        if (!map.getLayer('temp-route-draw-preview')) {
-            map.addLayer({
-                id: 'temp-route-draw-preview',
-                source: 'temp-route-draw-preview',
-                type: 'line',
-                paint: {
-                    'line-color': '#00aaff',
-                    'line-width': 2,
-                    'line-dasharray': [4, 4],
-                    'line-opacity': 1
-                }
-            });
-        }
-        if (!map.getLayer('temp-route-draw-points')) {
-            map.addLayer({
-                id: 'temp-route-draw-points',
-                source: 'temp-route-draw-points',
-                type: 'circle',
-                paint: {
-                    'circle-radius': 6,
-                    'circle-color': '#00aaff',
-                    'circle-stroke-width': 2,
-                    'circle-stroke-color': '#ffffff'
-                }
-            });
-        }
-        if (!map.getLayer('temp-route-draw-labels')) {
-            const labelSize = this.stateManager.getState().displayOptions.mapLabelsTextSize;
-            map.addLayer({
-                id: 'temp-route-draw-labels',
-                source: 'temp-route-draw-points',
-                type: 'symbol',
-                layout: {
-                    'text-field': ['get', 'label'],
-                    'text-font': ['Open Sans Regular'],
-                    'text-size': labelSize,
-                    'text-offset': [0, -1.4],
-                    'text-anchor': 'bottom'
-                },
-                paint: {
-                    'text-color': '#ffffff',
-                    'text-halo-color': '#000000',
-                    'text-halo-width': 1.2
-                }
-            });
-        }
+        ensureLayer(map, {
+            id: 'temp-route-draw-leader',
+            source: 'temp-route-draw-leader',
+            type: 'line',
+            paint: {
+                'line-color': '#ffaa00',
+                'line-width': 2,
+                'line-dasharray': [2, 2]
+            }
+        });
+        ensureLayer(map, {
+            id: 'temp-route-draw-line',
+            source: 'temp-route-draw-line',
+            type: 'line',
+            paint: {
+                'line-color': '#00aaff',
+                'line-width': 2
+            }
+        });
+        ensureLayer(map, {
+            id: 'temp-route-draw-preview',
+            source: 'temp-route-draw-preview',
+            type: 'line',
+            paint: {
+                'line-color': '#00aaff',
+                'line-width': 2,
+                'line-dasharray': [4, 4],
+                'line-opacity': 1
+            }
+        });
+        ensureLayer(map, {
+            id: 'temp-route-draw-points',
+            source: 'temp-route-draw-points',
+            type: 'circle',
+            paint: {
+                'circle-radius': 6,
+                'circle-color': '#00aaff',
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#ffffff'
+            }
+        });
+        const labelSize = this.stateManager.getState().displayOptions.mapLabelsTextSize;
+        ensureLayer(map, {
+            id: 'temp-route-draw-labels',
+            source: 'temp-route-draw-points',
+            type: 'symbol',
+            layout: {
+                'text-field': ['get', 'label'],
+                'text-font': ['Open Sans Regular'],
+                'text-size': labelSize,
+                'text-offset': [0, -1.4],
+                'text-anchor': 'bottom'
+            },
+            paint: {
+                'text-color': '#ffffff',
+                'text-halo-color': '#000000',
+                'text-halo-width': 1.2
+            }
+        });
     }
 
     /**
@@ -127,65 +116,25 @@ export class RouteDrawingPreview {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        const pointFeatures = routePoints.map((p, i) => ({
-            type: 'Feature' as const,
-            geometry: {
-                type: 'Point' as const,
-                coordinates: [p.lng, p.lat]
-            },
-            properties: {
-                index: i,
-                label: `WP${i + 1}`
-            }
-        }));
-        const pointSource = map.getSource('temp-route-draw-points') as GeoJSONSource | undefined;
-        if (pointSource) {
-            pointSource.setData({ type: 'FeatureCollection', features: pointFeatures });
-        }
+        const pointFeatures = routePoints.map((p, i) =>
+            pointFeature([p.lng, p.lat], { index: i, label: `WP${i + 1}` }));
+        updateSourceFeatures(map, 'temp-route-draw-points', pointFeatures);
 
-        const lineSource = map.getSource('temp-route-draw-line') as GeoJSONSource | undefined;
-        if (lineSource) {
-            if (routePoints.length >= 2) {
-                const coords = routePoints.map(p => [p.lng, p.lat]);
-                lineSource.setData({
-                    type: 'FeatureCollection',
-                    features: [
-                        {
-                            type: 'Feature',
-                            geometry: { type: 'LineString', coordinates: coords },
-                            properties: {}
-                        }
-                    ]
-                });
-            } else {
-                lineSource.setData({ type: 'FeatureCollection', features: [] });
-            }
-        }
+        updateSourceFeatures(
+            map,
+            'temp-route-draw-line',
+            routePoints.length >= 2
+                ? [lineStringFeature(toLngLatCoords(routePoints))]
+                : []
+        );
 
-        const leaderSource = map.getSource('temp-route-draw-leader') as GeoJSONSource | undefined;
-        if (leaderSource) {
-            if (leaderAnchor && routePoints.length >= 1) {
-                const first = routePoints[0];
-                leaderSource.setData({
-                    type: 'FeatureCollection',
-                    features: [
-                        {
-                            type: 'Feature',
-                            geometry: {
-                                type: 'LineString',
-                                coordinates: [
-                                    [leaderAnchor.lng, leaderAnchor.lat],
-                                    [first.lng, first.lat]
-                                ]
-                            },
-                            properties: {}
-                        }
-                    ]
-                });
-            } else {
-                leaderSource.setData({ type: 'FeatureCollection', features: [] });
-            }
-        }
+        updateSourceFeatures(
+            map,
+            'temp-route-draw-leader',
+            leaderAnchor && routePoints.length >= 1
+                ? [lineStringFeature(toLngLatCoords([leaderAnchor, routePoints[0]]))]
+                : []
+        );
     }
 
     /**
@@ -202,9 +151,6 @@ export class RouteDrawingPreview {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        const previewSource = map.getSource('temp-route-draw-preview') as GeoJSONSource | undefined;
-        if (!previewSource) return;
-
         let start: { lat: number; lng: number } | null = null;
         if (routePoints.length > 0) {
             start = routePoints[routePoints.length - 1];
@@ -212,27 +158,11 @@ export class RouteDrawingPreview {
             start = leaderAnchor;
         }
 
-        if (!start) {
-            previewSource.setData({ type: 'FeatureCollection', features: [] });
-            return;
-        }
-
-        previewSource.setData({
-            type: 'FeatureCollection',
-            features: [
-                {
-                    type: 'Feature',
-                    geometry: {
-                        type: 'LineString',
-                        coordinates: [
-                            [start.lng, start.lat],
-                            [cursor.lng, cursor.lat]
-                        ]
-                    },
-                    properties: {}
-                }
-            ]
-        });
+        updateSourceFeatures(
+            map,
+            'temp-route-draw-preview',
+            start ? [lineStringFeature(toLngLatCoords([start, cursor]))] : []
+        );
     }
 
     public clear(): void {
@@ -245,12 +175,7 @@ export class RouteDrawingPreview {
             'temp-route-draw-line',
             'temp-route-draw-preview'
         ];
-        sources.forEach(id => {
-            const src = map.getSource(id) as GeoJSONSource | undefined;
-            if (src) {
-                src.setData({ type: 'FeatureCollection', features: [] });
-            }
-        });
+        sources.forEach(id => updateSourceFeatures(map, id, []));
     }
 
     public teardown(): void {
@@ -264,9 +189,7 @@ export class RouteDrawingPreview {
             'temp-route-draw-line',
             'temp-route-draw-leader'
         ];
-        layers.forEach(id => {
-            if (map.getLayer(id)) map.removeLayer(id);
-        });
+        layers.forEach(id => safeRemoveLayer(map, id));
 
         const sources = [
             'temp-route-draw-leader',
@@ -274,8 +197,6 @@ export class RouteDrawingPreview {
             'temp-route-draw-line',
             'temp-route-draw-preview'
         ];
-        sources.forEach(id => {
-            if (map.getSource(id)) map.removeSource(id);
-        });
+        sources.forEach(id => safeRemoveSource(map, id));
     }
 }

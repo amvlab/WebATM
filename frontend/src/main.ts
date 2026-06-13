@@ -19,27 +19,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const app = new App();
 
     // Make app and managers available globally for console and other components
-    (window as any).app = app;
-    (window as any).echoManager = echoManager;
-    (window as any).blueSkyApp = app;
-    (window as any).connectionStatus = connectionStatus;
+    window.app = app;
+    window.echoManager = echoManager;
+    window.blueSkyApp = app;
+    window.connectionStatus = connectionStatus;
 
     logger.info('main', 'Global debug helpers available: window.app, window.blueSkyApp, window.connectionStatus');
 
     app.initialize().then(() => {
         // Make console available globally for compatibility
-        (window as any).console_ui = app.getConsole();
+        window.console_ui = app.getConsole();
 
         // Expose map instance globally for PanelResizer and debugging
         const mapDisplay = app.getMapDisplay();
-        (window as any).map = mapDisplay.getMap();
+        window.map = mapDisplay.getMap() ?? undefined;
         logger.info('main', 'Global map instance available: window.map');
 
         // Expose map control functions globally for HTML onclick handlers
         const mapControlsPanel = app.getMapControlsPanel();
-        (window as any).zoomIn = () => mapControlsPanel.zoomIn();
-        (window as any).zoomOut = () => mapControlsPanel.zoomOut();
-        (window as any).resetView = () => mapControlsPanel.resetView();
+        window.zoomIn = () => mapControlsPanel.zoomIn();
+        window.zoomOut = () => mapControlsPanel.zoomOut();
+        window.resetView = () => mapControlsPanel.resetView();
 
         logger.info('main', 'Global map control functions available: zoomIn, zoomOut, resetView');
     }).catch((error) => {

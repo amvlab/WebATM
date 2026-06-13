@@ -96,7 +96,7 @@ export interface NodeData {
   server_id_hex?: string;
   server_id_raw?: string;
   server_id?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -104,7 +104,7 @@ export interface NodeData {
  */
 export interface ServerData {
   server_id: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -124,6 +124,33 @@ export interface ConnectionStatus {
   connected: boolean;
   server: string;
   timestamp: number;
+}
+
+/**
+ * Detail payloads for the connection-related CustomEvents dispatched on
+ * `document`. The event-name-to-payload mapping lives in the
+ * DocumentEventMap augmentation in types/globals.d.ts.
+ */
+export interface ConnectionUpdateDetail {
+  connected: boolean;
+}
+
+export interface ServerStatusUpdateDetail {
+  status: ServerStatus;
+  message: string;
+}
+
+export interface NodeInfoUpdateDetail {
+  nodeInfo: NodeInfo;
+}
+
+export interface ConnectionStatusChangedDetail {
+  type: 'web' | 'bluesky' | 'server' | 'nodes';
+  connected?: boolean;
+  status?: ServerStatus;
+  message?: string;
+  nodeInfo?: NodeInfo;
+  timestamp: Date;
 }
 
 export interface ServerConfig {
@@ -289,6 +316,26 @@ export interface InitialData {
   nodes: NodeInfo[];
   poly?: PolyData[];
   polyline?: PolylineData[];
+  cmddict?: CommandDict;
+  poly_data?: ShapeBatchData<PolyData>;
+  polyline_data?: ShapeBatchData<PolylineData>;
+}
+
+/**
+ * Batched shape payload sent in initial_data: shapes keyed by name.
+ */
+export interface ShapeBatchData<T extends PolyData | PolylineData = PolyData | PolylineData> {
+  polys: { [name: string]: T };
+}
+
+/**
+ * Echo message payload from the BlueSky server.
+ * flags: 0 = info (default), 1 = error, 2 = warning.
+ */
+export interface EchoData {
+  text: string;
+  flags?: number;
+  sender?: string;
 }
 
 // Modal and UI Component Types

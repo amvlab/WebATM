@@ -10,6 +10,7 @@
  */
 
 import { BasePanel } from '../BasePanel';
+import { AircraftClickSelector } from '../AircraftClickSelector';
 import { AircraftData } from '../../../data/types';
 import { StateManager } from '../../../core/StateManager';
 import { logger } from '../../../utils/Logger';
@@ -19,7 +20,7 @@ export class TrafficListPanel extends BasePanel {
     private stateManager: StateManager | null = null;
     private currentAircraftData: AircraftData | null = null;
     private selectedAircraft: string | null = null;
-    private clickTimeouts: Map<string, number> = new Map();
+    private clickSelector = new AircraftClickSelector('TrafficListPanel', () => this.stateManager);
 
     constructor() {
         super('.traffic-panel', 'traffic-content');
@@ -43,7 +44,7 @@ export class TrafficListPanel extends BasePanel {
         this.stateManager = stateManager;
 
         // Subscribe to selected aircraft changes from other sources (e.g., map clicks)
-        this.stateManager.subscribe('selectedAircraft', (newAircraft, oldAircraft) => {
+        this.stateManager.subscribe('selectedAircraft', (newAircraft) => {
             this.selectedAircraft = newAircraft;
             this.updateSelectionVisuals();
         });
@@ -117,7 +118,7 @@ export class TrafficListPanel extends BasePanel {
                 item.textContent = aircraftId;
 
                 // Add click and double-click listeners
-                this.addAircraftClickHandlers(item, aircraftId, originalIndex);
+                this.clickSelector.attach(item, aircraftId, originalIndex);
 
                 this.trafficListElement!.appendChild(item);
             }
@@ -149,91 +150,6 @@ export class TrafficListPanel extends BasePanel {
     }
 
     /**
-     * Add click handlers for aircraft items (single and double click)
-     */
-    private addAircraftClickHandlers(element: HTMLElement, aircraftId: string, index: number): void {
-        let clickCount = 0;
-
-        element.addEventListener('click', () => {
-            clickCount++;
-
-            // Clear any existing timeout for this aircraft
-            const existingTimeout = this.clickTimeouts.get(aircraftId);
-            if (existingTimeout) {
-                clearTimeout(existingTimeout);
-                this.clickTimeouts.delete(aircraftId);
-            }
-
-            if (clickCount === 2) {
-                // Double click detected - select and zoom/follow aircraft
-                clickCount = 0;
-                this.handleAircraftDoubleClick(aircraftId, index);
-            } else {
-                // Single click - wait to see if there's a second click
-                const timeout = window.setTimeout(() => {
-                    clickCount = 0;
-                    this.clickTimeouts.delete(aircraftId);
-                    this.handleAircraftSingleClick(aircraftId, index);
-                }, 300); // 300ms delay to detect double-click
-
-                this.clickTimeouts.set(aircraftId, timeout);
-            }
-        });
-    }
-
-    /**
-     * Handle single click on aircraft
-     */
-    private handleAircraftSingleClick(aircraftId: string, index: number): void {
-        if (!this.stateManager) return;
-
-        // Check if clicking the same aircraft that's already selected
-        const isSameAircraft = this.selectedAircraft === aircraftId;
-
-        if (isSameAircraft) {
-            // Unselect aircraft
-            this.stateManager.setSelectedAircraft(null);
-            logger.debug('TrafficListPanel', `Unselected aircraft: ${aircraftId}`);
-        } else {
-            // Select new aircraft
-            this.stateManager.setSelectedAircraft(aircraftId);
-            logger.debug('TrafficListPanel', `Selected aircraft: ${aircraftId}`);
-
-            // Emit custom event for map to handle zoom/pan
-            const event = new CustomEvent('aircraft-single-click', {
-                detail: { aircraftId, index }
-            });
-            document.dispatchEvent(event);
-        }
-    }
-
-    /**
-     * Handle double click on aircraft (zoom/follow behavior)
-     */
-    private handleAircraftDoubleClick(aircraftId: string, index: number): void {
-        if (!this.stateManager) return;
-
-        // Select aircraft
-        this.stateManager.setSelectedAircraft(aircraftId);
-
-        // Emit custom event for map to handle zoom/follow
-        const event = new CustomEvent('aircraft-double-click', {
-            detail: { aircraftId, index }
-        });
-        document.dispatchEvent(event);
-
-        logger.debug('TrafficListPanel', `Double-clicked aircraft: ${aircraftId} - zooming/following`);
-    }
-
-    /**
-     * Find aircraft index by ID
-     */
-    private findAircraftIndex(aircraftId: string): number {
-        if (!this.currentAircraftData?.id) return -1;
-        return this.currentAircraftData.id.indexOf(aircraftId);
-    }
-
-    /**
      * Get selected aircraft ID
      */
     public getSelectedAircraft(): string | null {
@@ -256,9 +172,7 @@ export class TrafficListPanel extends BasePanel {
         this.selectAircraft(null);
     }
 
-    protected onDestroy(): void {
-        // Clear all click timeouts
-        this.clickTimeouts.forEach(timeout => clearTimeout(timeout));
-        this.clickTimeouts.clear();
+    protected override onDestroy(): void {
+        this.clickSelector.dispose();
     }
 }

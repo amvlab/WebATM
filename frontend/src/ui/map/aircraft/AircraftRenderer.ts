@@ -3,7 +3,9 @@ import { DataProcessor } from '../../../data/DataProcessor';
 import { AircraftData, DisplayOptions } from '../../../data/types';
 import { StateManager } from '../../../core/StateManager';
 import { EntityRenderer, EntityShapeDrawer, EntityRenderConfig } from '../EntityRenderer';
+import { featureCollection, lineStringFeature } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
+import { isValidCoordinate, buildConditionalColorExpr } from '../../../utils/maplibre';
 
 /**
  * Aircraft shape drawing function type (for backward compatibility)
@@ -63,23 +65,8 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         const altitude = aircraftData.alt ? aircraftData.alt[index] : 0;
         const verticalSpeed = aircraftData.vs ? aircraftData.vs[index] : 0;
 
-        // Get speed based on display options
-        let speed = 0;
-        switch (this.displayOptions.speedType) {
-            case 'cas':
-                speed = aircraftData.cas ? aircraftData.cas[index] : 0;
-                break;
-            case 'tas':
-                speed = aircraftData.tas ? aircraftData.tas[index] : 0;
-                break;
-            case 'gs':
-                speed = aircraftData.gs ? aircraftData.gs[index] :
-                    (aircraftData.tas ? aircraftData.tas[index] :
-                        (aircraftData.cas ? aircraftData.cas[index] : 0));
-                break;
-            default:
-                speed = aircraftData.cas ? aircraftData.cas[index] : 0;
-        }
+        // Get speed based on display options (with the standard fallback chain)
+        const speed = DataProcessor.getSpeedValue(aircraftData, index, this.displayOptions.speedType);
 
         const labelParts: string[] = [];
 
@@ -92,35 +79,13 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         }
 
         if (this.displayOptions.showAircraftSpeed && speed > 0) {
-            // Speed values from BlueSky are in knots, format using DataProcessor
-            const speedValue = Math.round(DataProcessor.convertSpeed(speed, this.displayOptions.speedUnit));
-            const speedUnit = this.getSpeedUnitLabel(this.displayOptions.speedUnit);
-            labelParts.push(`${speedValue}${speedUnit}`);
+            // Speed values from BlueSky are in knots
+            labelParts.push(DataProcessor.formatSpeedLabel(speed, this.displayOptions.speedUnit));
         }
 
         if (this.displayOptions.showAircraftAltitude && altitude > 0) {
-            // Altitude values from BlueSky are in meters, format using DataProcessor
-            const converted = DataProcessor.convertAltitude(altitude, this.displayOptions.altitudeUnit);
-            let altitudeLabel: string;
-
-            // Format based on unit type
-            switch (this.displayOptions.altitudeUnit) {
-                case 'fl':
-                    altitudeLabel = 'FL' + Math.round(converted).toString().padStart(3, '0');
-                    break;
-                case 'km':
-                    altitudeLabel = converted.toFixed(1) + 'km';
-                    break;
-                case 'ft':
-                    altitudeLabel = Math.round(converted).toString() + 'ft';
-                    break;
-                case 'm':
-                    altitudeLabel = Math.round(converted).toString() + 'm';
-                    break;
-                default:
-                    altitudeLabel = Math.round(converted).toString();
-                    break;
-            }
+            // Altitude values from BlueSky are in meters
+            let altitudeLabel = DataProcessor.formatAltitudeLabel(altitude, this.displayOptions.altitudeUnit);
 
             // Add vertical speed arrow
             if (Math.abs(verticalSpeed) > 0.5) {
@@ -134,27 +99,9 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
     }
 
     /**
-     * Get unit label suffix for speed display
-     */
-    private getSpeedUnitLabel(unit: string): string {
-        switch (unit) {
-            case 'knots':
-                return 'kt';
-            case 'km/h':
-                return 'km/h';
-            case 'mph':
-                return 'mph';
-            case 'm/s':
-                return 'm/s';
-            default:
-                return 'kt';
-        }
-    }
-
-    /**
      * Get conflict status for an aircraft
      */
-    protected getConflictStatus(aircraftData: AircraftData, index: number): boolean {
+    protected override getConflictStatus(aircraftData: AircraftData, index: number): boolean {
         return aircraftData.inconf ? aircraftData.inconf[index] : false;
     }
 
@@ -203,7 +150,7 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
      * data arrives before the map is fully ready) can leave the 2D icons
      * stacked above the 3D models.
      */
-    protected setupLayers(): void {
+    protected override setupLayers(): void {
         super.setupLayers();
         this.raise3DLayerIfPresent();
     }
@@ -265,11 +212,7 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
             const lon = lons[i];
 
             // Validate coordinates
-            if (
-                typeof lat !== 'number' || typeof lon !== 'number' ||
-                isNaN(lat) || isNaN(lon) ||
-                lat < -90 || lat > 90 || lon < -180 || lon > 180
-            ) {
+            if (!isValidCoordinate(lat, lon)) {
                 continue;
             }
 
@@ -337,25 +280,15 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
             const inConflict = index >= 0 ? this.getConflictStatus(aircraftData, index) : false;
             const isSelected = id === this.selectedEntity;
 
-            trailFeatures.push({
-                type: 'Feature',
-                geometry: {
-                    type: 'LineString',
-                    coordinates: trailData.coordinates
-                },
-                properties: {
-                    aircraftId: id,
-                    selected: isSelected,
-                    in_conflict: inConflict
-                }
-            });
+            trailFeatures.push(lineStringFeature(trailData.coordinates, {
+                aircraftId: id,
+                selected: isSelected,
+                in_conflict: inConflict
+            }));
         }
 
         // Update the trail source
-        trailSource.setData({
-            type: 'FeatureCollection',
-            features: trailFeatures
-        });
+        trailSource.setData(featureCollection(trailFeatures));
     }
 
     /**
@@ -367,10 +300,7 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         // Clear the trail layer
         const trailSource = this.map.getSource('aircraft-trails') as GeoJSONSource;
         if (trailSource) {
-            trailSource.setData({
-                type: 'FeatureCollection',
-                features: []
-            });
+            trailSource.setData(featureCollection());
         }
     }
 
@@ -386,7 +316,6 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
      * Update display options
      */
     public updateDisplayOptions(options: Partial<DisplayOptions>): void {
-        const oldIconSize = this.displayOptions.aircraftIconSize;
         this.displayOptions = { ...this.displayOptions, ...options };
 
         // Check if any colors have changed
@@ -438,17 +367,15 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
             return;
         }
 
-        // Build color expression for trails
-        const lineColorExpr: any[] = [
-            'case',
-            ['==', ['get', 'selected'], true],
-            this.displayOptions.aircraftSelectedColor,
-            ['==', ['get', 'in_conflict'], true],
-            this.displayOptions.trailConflictColor,
-            this.displayOptions.aircraftTrailColor
-        ];
-
-        this.map.setPaintProperty('aircraft-trails', 'line-color', lineColorExpr as any);
+        this.map.setPaintProperty(
+            'aircraft-trails',
+            'line-color',
+            buildConditionalColorExpr(
+                this.displayOptions.aircraftTrailColor,
+                this.displayOptions.aircraftSelectedColor,
+                this.displayOptions.trailConflictColor
+            )
+        );
     }
 
     /**

@@ -1,4 +1,4 @@
-import { modalManager } from './ModalManager';
+import type { Socket } from 'socket.io-client';
 import { connectionStatus } from '../core/ConnectionStatusService';
 import {
     ServerStatus,
@@ -6,6 +6,8 @@ import {
     ServerControlResponse
 } from '../data/types';
 import { logger } from '../utils/Logger';
+import { onDOMReady } from '../utils/dom';
+import { StatusDisplayManager } from './StatusDisplayManager';
 
 /**
  * Server Management System
@@ -13,7 +15,7 @@ import { logger } from '../utils/Logger';
  * status monitoring, and log management
  */
 export class ServerManager {
-    private socket: any = null;
+    private socket: Socket | null = null;
     private statusCheckInterval: number | null = null;
     private currentServerStatus: ServerStatus = 'unknown';
     private isInitialized = false;
@@ -36,12 +38,7 @@ export class ServerManager {
 
     private init(): void {
         if (this.isInitialized) return;
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initializeElements());
-        } else {
-            this.initializeElements();
-        }
+        onDOMReady(() => this.initializeElements());
     }
 
     private initializeElements(): void {
@@ -75,7 +72,7 @@ export class ServerManager {
     /**
      * Set socket connection for real-time updates
      */
-    public setSocket(socket: any): void {
+    public setSocket(socket: Socket | null): void {
         this.socket = socket;
         this.bindSocketHandlers();
     }
@@ -165,28 +162,15 @@ export class ServerManager {
      * Update server status display
      */
     private updateStatus(message: string, status: ServerStatus): void {
-        // Track current server status
         this.currentServerStatus = status;
-        
-        // Update modal elements
-        if (this.elements.statusTextModal) {
-            this.elements.statusTextModal.textContent = message;
-        }
-        
-        if (this.elements.statusIndicatorModal) {
-            // Remove all status classes
-            this.elements.statusIndicatorModal.classList.remove(
-                'status-running', 'status-stopped', 'status-unknown', 
-                'status-starting', 'status-stopping', 'status-restarting'
-            );
-            // Add the new status class
-            this.elements.statusIndicatorModal.classList.add(`status-${status}`);
-        }
-        
-        // Update button states based on server status
+
+        new StatusDisplayManager(
+            this.elements.statusTextModal,
+            this.elements.statusIndicatorModal
+        ).update(message, status);
+
         this.updateButtonStates(status);
-        
-        // Emit event for server status change
+
         const event = new CustomEvent('serverStatusUpdate', {
             detail: { status, message }
         });

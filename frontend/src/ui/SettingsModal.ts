@@ -9,6 +9,7 @@ import { modalManager } from './ModalManager';
 import { serverManager } from './ServerManager';
 import { logger, LogLevel } from '../utils/Logger';
 import { storage } from '../utils/StorageManager';
+import { onDOMReady, setDisabled } from '../utils/dom';
 
 /**
  * Settings Modal Component
@@ -18,7 +19,6 @@ export class SettingsModal {
     private modalId = 'settings-modal';
     private isInitialized = false;
     private currentServerIP: string = 'localhost'; // Will be updated from backend config
-    private serverDisconnected = false;
     private blueSkyConnected = false;
     private blueSkyServerRunning = false;
 
@@ -59,12 +59,7 @@ export class SettingsModal {
 
     private init(): void {
         if (this.isInitialized) return;
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initializeElements());
-        } else {
-            this.initializeElements();
-        }
+        onDOMReady(() => this.initializeElements());
     }
 
     private initializeElements(): void {
@@ -169,11 +164,10 @@ export class SettingsModal {
     private toggleDeveloperSection(): void {
         const developerControls = document.getElementById('developer-controls');
         const toggleButton = this.elements.developerToggle;
-        
+
         if (developerControls && toggleButton) {
-            const isVisible = developerControls.style.display !== 'none';
-            developerControls.style.display = isVisible ? 'none' : 'block';
-            toggleButton.textContent = isVisible ? 'Developer ▼' : 'Developer ▲';
+            const open = developerControls.classList.toggle('open');
+            toggleButton.classList.toggle('open', open);
         }
     }
 
@@ -221,9 +215,8 @@ export class SettingsModal {
         });
 
         // Listen for server status updates
-        document.addEventListener('serverStatusUpdate', (event: Event) => {
-            const customEvent = event as CustomEvent;
-            this.handleServerStatusUpdate(customEvent.detail);
+        document.addEventListener('serverStatusUpdate', (event) => {
+            this.handleServerStatusUpdate(event.detail);
         });
 
         // Subscribe to ConnectionStatusService for BlueSky connection state
@@ -408,9 +401,6 @@ export class SettingsModal {
             const result: ServerControlResponse = await response.json();
 
             if (result.success) {
-                // Reset disconnection flag when reconnecting
-                this.serverDisconnected = false;
-
                 // Save server IP to session storage on successful connection
                 this.saveServerIP(serverIp);
                 // Note: Connection success message is automatically logged by ConnectionStatusService
@@ -503,18 +493,7 @@ export class SettingsModal {
     private updateConnectButtonState(): void {
         if (this.elements.connectButton) {
             const shouldDisable = !this.blueSkyServerRunning || this.blueSkyConnected;
-
-            this.elements.connectButton.disabled = shouldDisable;
-
-            if (shouldDisable) {
-                this.elements.connectButton.classList.add('disabled');
-                this.elements.connectButton.style.opacity = '0.5';
-                this.elements.connectButton.style.cursor = 'not-allowed';
-            } else {
-                this.elements.connectButton.classList.remove('disabled');
-                this.elements.connectButton.style.opacity = '1';
-                this.elements.connectButton.style.cursor = 'pointer';
-            }
+            setDisabled(this.elements.connectButton, shouldDisable);
         }
     }
 
@@ -543,16 +522,14 @@ export class SettingsModal {
             logger.warn('SettingsModal', 'Disconnect button element not found!');
         }
 
-        // Disable hostname input when connected, enable when disconnected
+        // Disable hostname input when connected, enable when disconnected.
+        // Not using the shared setDisabled() helper because this input uses
+        // a text-input cursor + different opacity than the button convention.
         if (this.elements.serverIpInput) {
-            this.elements.serverIpInput.disabled = isConnected;
-            if (isConnected) {
-                this.elements.serverIpInput.style.opacity = '0.6';
-                this.elements.serverIpInput.style.cursor = 'not-allowed';
-            } else {
-                this.elements.serverIpInput.style.opacity = '1';
-                this.elements.serverIpInput.style.cursor = 'text';
-            }
+            const input = this.elements.serverIpInput;
+            input.disabled = isConnected;
+            input.style.opacity = isConnected ? '0.6' : '1';
+            input.style.cursor = isConnected ? 'not-allowed' : 'text';
             logger.debug('SettingsModal', `Hostname input ${isConnected ? 'disabled' : 'enabled'}`);
         }
 
@@ -570,25 +547,30 @@ export class SettingsModal {
         }
     }
 
+    private static readonly SERVER_IP_KEY = 'bluesky-server-ip';
+
     /**
      * Get saved server IP from localStorage
      */
     private getSavedServerIP(): string | null {
-        return localStorage.getItem('bluesky-server-ip');
+        return storage.getStringWithLegacyMigration(
+            SettingsModal.SERVER_IP_KEY,
+            SettingsModal.SERVER_IP_KEY
+        );
     }
 
     /**
      * Save server IP to localStorage
      */
     private saveServerIP(ip: string): void {
-        localStorage.setItem('bluesky-server-ip', ip);
+        storage.set(SettingsModal.SERVER_IP_KEY, ip);
     }
 
     /**
      * Clear saved server IP
      */
     private clearSavedServerIP(): void {
-        localStorage.removeItem('bluesky-server-ip');
+        storage.remove(SettingsModal.SERVER_IP_KEY);
     }
 
     /**
@@ -711,10 +693,6 @@ export class SettingsModal {
     public setBlueSkyConnected(connected: boolean): void {
         this.blueSkyConnected = connected;
         this.updateConnectionButtons(connected);
-    }
-
-    public setServerDisconnected(disconnected: boolean): void {
-        this.serverDisconnected = disconnected;
     }
 
     public getCurrentServerIP(): string {

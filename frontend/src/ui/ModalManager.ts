@@ -1,5 +1,6 @@
-import { ModalOptions, ModalState, ModalEventType, ModalEventHandler } from '../data/types';
+import { ModalState, ModalEventType, ModalEventHandler } from '../data/types';
 import { logger } from '../utils/Logger';
+import { onDOMReady } from '../utils/dom';
 
 /**
  * Centralized modal management system for the BlueSky Web UI
@@ -10,6 +11,7 @@ export class ModalManager {
     private eventHandlers: Map<string, ModalEventHandler[]> = new Map();
     private initialized = false;
     private modalStack: string[] = []; // Track modal hierarchy for stacking
+    private listenerAbort = new AbortController();
 
     constructor() {
         this.init();
@@ -17,14 +19,7 @@ export class ModalManager {
 
     private init(): void {
         if (this.initialized) return;
-        
-        // Initialize on DOM ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initializeModals());
-        } else {
-            this.initializeModals();
-        }
-        
+        onDOMReady(() => this.initializeModals());
         this.initialized = true;
     }
 
@@ -42,6 +37,8 @@ export class ModalManager {
     }
 
     private setupGlobalEventHandlers(): void {
+        const { signal } = this.listenerAbort;
+
         // Close modals when clicking on backdrop
         document.addEventListener('click', (event) => {
             const target = event.target as HTMLElement;
@@ -51,7 +48,7 @@ export class ModalManager {
                     this.close(modalId);
                 }
             }
-        });
+        }, { signal });
 
         // Close modals with Escape key
         document.addEventListener('keydown', (event) => {
@@ -61,13 +58,20 @@ export class ModalManager {
                     this.close(openModal);
                 }
             }
-        });
+        }, { signal });
+    }
+
+    /**
+     * Remove the document-level listeners. Called from App.cleanup().
+     */
+    public destroy(): void {
+        this.listenerAbort.abort();
     }
 
     /**
      * Register a modal for management
      */
-    public registerModal(modalId: string, options?: Partial<ModalOptions>): void {
+    public registerModal(modalId: string): void {
         const element = document.getElementById(modalId);
         if (!element) {
             logger.warn('ModalManager', `Modal element with id "${modalId}" not found`);

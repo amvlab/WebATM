@@ -1,6 +1,7 @@
 import { GeoJSONSource, MapMouseEvent } from 'maplibre-gl';
 import type { MapDisplay } from '../MapDisplay';
 import type { StateManager } from '../../../core/StateManager';
+import { featureCollection, pointFeature } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
 
 /**
@@ -136,20 +137,13 @@ export class NavaidSnapper {
         if (!source) return;
 
         if (!candidate) {
-            source.setData({ type: 'FeatureCollection', features: [] });
+            source.setData(featureCollection());
             return;
         }
 
-        source.setData({
-            type: 'FeatureCollection',
-            features: [
-                {
-                    type: 'Feature',
-                    geometry: { type: 'Point', coordinates: [candidate.lng, candidate.lat] },
-                    properties: { ident: candidate.ident }
-                }
-            ]
-        });
+        source.setData(featureCollection([
+            pointFeature([candidate.lng, candidate.lat], { ident: candidate.ident })
+        ]));
     }
 
     /** Hide the highlight (keeps the layers around for the next hover). */
@@ -158,7 +152,7 @@ export class NavaidSnapper {
         if (!map) return;
         const source = map.getSource(this.HIGHLIGHT_SOURCE) as GeoJSONSource | undefined;
         if (source) {
-            source.setData({ type: 'FeatureCollection', features: [] });
+            source.setData(featureCollection());
         }
     }
 
@@ -184,7 +178,7 @@ export class NavaidSnapper {
         if (!map.getSource(this.HIGHLIGHT_SOURCE)) {
             map.addSource(this.HIGHLIGHT_SOURCE, {
                 type: 'geojson',
-                data: { type: 'FeatureCollection', features: [] }
+                data: featureCollection()
             });
         }
 

@@ -169,7 +169,7 @@ export class AircraftInteractionManager {
         if (!this.map) return;
 
         // Single click on aircraft - select and zoom
-        this.map.on('click', 'aircraft-points', (e: any) => {
+        this.map.on('click', 'aircraft-points', (e) => {
             if (!e.features || e.features.length === 0) return;
 
             const aircraftId = e.features[0].properties?.entity_id || e.features[0].properties?.callsign;
@@ -180,7 +180,7 @@ export class AircraftInteractionManager {
         });
 
         // Double click on aircraft - select, zoom, and follow
-        this.map.on('dblclick', 'aircraft-points', (e: any) => {
+        this.map.on('dblclick', 'aircraft-points', (e) => {
             if (!e.features || e.features.length === 0) return;
 
             const aircraftId = e.features[0].properties?.entity_id || e.features[0].properties?.callsign;
@@ -199,24 +199,24 @@ export class AircraftInteractionManager {
      */
     private setupPanelEventListeners(): void {
         // Listen for single-click events from panels (TrafficListPanel, ConflictsPanel)
-        document.addEventListener('aircraft-single-click', ((e: CustomEvent<AircraftClickEvent>) => {
+        document.addEventListener('aircraft-single-click', (e) => {
             const { aircraftId } = e.detail;
             logger.debug('AircraftInteractionManager', '📋 Panel single-click event received:', aircraftId);
 
             // UNIFIED BEHAVIOR: Request route data + Simple zoom (same as map clicks)
             this.requestRouteData(aircraftId);
             this.zoomToAircraft(aircraftId, { follow: false, adaptive: true });
-        }) as EventListener);
+        });
 
         // Listen for double-click events from panels
-        document.addEventListener('aircraft-double-click', ((e: CustomEvent<AircraftClickEvent>) => {
+        document.addEventListener('aircraft-double-click', (e) => {
             const { aircraftId } = e.detail;
             logger.debug('AircraftInteractionManager', '📋 Panel double-click event received:', aircraftId);
 
             // UNIFIED BEHAVIOR: Request route data + Fancy zoom effect + follow (same as map)
             this.requestRouteData(aircraftId);
             this.zoomToAircraftWithEffect(aircraftId, true);
-        }) as EventListener);
+        });
 
         logger.debug('AircraftInteractionManager', 'Panel event listeners set up');
     }
@@ -306,7 +306,6 @@ export class AircraftInteractionManager {
         logger.debug('AircraftInteractionManager', `Flying to ${aircraftId} at ${lat.toFixed(2)}, ${lon.toFixed(2)}, zoom ${targetZoom.toFixed(1)}`);
 
         // Temporarily disable following during animation
-        const wasFollowing = this.followingAircraft;
         this.followingAircraft = null;
 
         this.map.flyTo({
@@ -401,15 +400,6 @@ export class AircraftInteractionManager {
         } else {
             return Math.min(currentZoom + 2, 12); // If already zoomed in, zoom in a bit more
         }
-    }
-
-    /**
-     * Start following an aircraft
-     * @param aircraftId - Aircraft ID to follow
-     */
-    private startFollowing(aircraftId: string): void {
-        logger.info('AircraftInteractionManager', '📍 Starting follow mode for:', aircraftId);
-        this.followingAircraft = aircraftId;
     }
 
     /**

@@ -1,19 +1,21 @@
 import { AppState, SimInfo, AircraftData, ShapeDisplayOptions, ServerStatus, DisplayOptions, CommandDict, Shape, PolygonShape, PolylineShape, PolyData, PolylineData } from '../data/types';
 import { AUTO_MODEL_SENTINEL } from '../data/aircraftCategories';
+import { ShapeStore, ShapeChangeListener, polyDataToShape, polylineDataToShape } from './ShapeStore';
 import { logger } from '../utils/Logger';
 
 type StateListener<T> = (newValue: T, oldValue: T) => void;
-type ShapeChangeListener = (shapes: Map<string, Shape>) => void;
 
 export class StateManager {
     private state: AppState;
-    private listeners: Map<keyof AppState, Set<StateListener<any>>> = new Map();
+    // Listener sets are heterogeneous across keys; StateListener<never>
+    // accepts any key-specific listener, and notifyListeners restores the
+    // key-specific type before invoking.
+    private listeners: Map<keyof AppState, Set<StateListener<never>>> = new Map();
     private aircraftDrawingMode: boolean = false;
     private aircraftDrawingPoints: [number, number][] = [];
 
     // Shape storage - indexed by name for fast lookup
-    private shapes: Map<string, Shape> = new Map();
-    private shapeListeners: Set<ShapeChangeListener> = new Set();
+    private shapeStore = new ShapeStore();
 
     constructor() {
         this.state = {
@@ -147,7 +149,7 @@ export class StateManager {
         if (keyListeners) {
             keyListeners.forEach(listener => {
                 try {
-                    listener(newValue, oldValue);
+                    (listener as StateListener<AppState[K]>)(newValue, oldValue);
                 } catch (error) {
                     logger.error('StateManager', `Error in state listener for ${String(key)}:`, error);
                 }
@@ -488,260 +490,74 @@ export class StateManager {
     }
 
     // ==================== Shape Management ====================
+    // Thin facade over ShapeStore so existing callers keep their API.
 
-    /**
-     * Subscribe to shape changes
-     * Returns unsubscribe function
-     */
     subscribeToShapes(listener: ShapeChangeListener): () => void {
-        this.shapeListeners.add(listener);
-        return () => {
-            this.shapeListeners.delete(listener);
-        };
+        return this.shapeStore.subscribe(listener);
     }
 
-    /**
-     * Notify all shape listeners of changes
-     */
     public notifyShapeListeners(): void {
-        const shapesCopy = new Map(this.shapes);
-        this.shapeListeners.forEach(listener => {
-            try {
-                listener(shapesCopy);
-            } catch (error) {
-                logger.error('StateManager', 'Error in shape change listener:', error);
-            }
-        });
+        this.shapeStore.notifyListeners();
     }
 
-    /**
-     * Convert PolyData from server format to client PolygonShape format
-     * Server sends: {name, lat[], lon[], color?, fill?}
-     * Client uses: {type, name, coordinates: {lat, lng}[], ...styling}
-     */
     public convertServerPolyToClientShape(data: PolyData, nodeId?: string): PolygonShape {
-        // Defensive check: ensure lat and lon arrays exist
-        if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
-            logger.warn('StateManager', 'Invalid PolyData received - missing or invalid lat/lon arrays:', data);
-            // Return a minimal valid shape with empty coordinates
-            return {
-                type: 'polygon',
-                name: data.name || 'unnamed',
-                visible: true,
-                nodeId,
-                coordinates: [],
-                fillColor: data.color,
-                fillOpacity: data.fill ? 0.2 : 0,
-                strokeColor: data.color,
-                strokeWidth: 2
-            };
-        }
-
-        const coordinates = data.lat.map((lat, i) => ({
-            lat,
-            lng: data.lon[i]
-        }));
-
-        return {
-            type: 'polygon',
-            name: data.name,
-            visible: true,
-            nodeId,
-            coordinates,
-            topAltitude: data.top,
-            bottomAltitude: data.bottom,
-            fillColor: data.color,
-            fillOpacity: 0.2,  // Always set visible opacity - display toggle controls visibility
-            strokeColor: data.color,
-            strokeWidth: 2
-        };
+        return polyDataToShape(data, nodeId);
     }
 
-    /**
-     * Convert PolylineData from server format to client PolylineShape format
-     * Server sends: {name, lat[], lon[], color?, width?}
-     * Client uses: {type, name, coordinates: {lat, lng}[], ...styling}
-     */
     public convertServerPolylineToClientShape(data: PolylineData, nodeId?: string): PolylineShape {
-        // Defensive check: ensure lat and lon arrays exist
-        if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
-            logger.warn('StateManager', 'Invalid PolylineData received - missing or invalid lat/lon arrays:', data);
-            // Return a minimal valid shape with empty coordinates
-            return {
-                type: 'polyline',
-                name: data.name || 'unnamed',
-                visible: true,
-                nodeId,
-                coordinates: [],
-                color: data.color,
-                width: data.width || 2
-            };
-        }
-
-        const coordinates = data.lat.map((lat, i) => ({
-            lat,
-            lng: data.lon[i]
-        }));
-
-        return {
-            type: 'polyline',
-            name: data.name,
-            visible: true,
-            nodeId,
-            coordinates,
-            color: data.color,
-            width: data.width || 2
-        };
+        return polylineDataToShape(data, nodeId);
     }
 
-    /**
-     * Add or update a shape
-     * @param notify - If false, don't notify listeners (for batch updates)
-     */
     addShape(shape: Shape, notify: boolean = true): void {
-        const isUpdate = this.shapes.has(shape.name);
-        logger.debug('StateManager', `${isUpdate ? 'Updating' : 'Adding'} shape: ${shape.name} (type: ${shape.type})`);
-        this.shapes.set(shape.name, shape);
-        if (notify) {
-            this.notifyShapeListeners();
-        }
+        this.shapeStore.add(shape, notify);
     }
 
-    /**
-     * Add multiple shapes in a batch (only notifies once)
-     */
     addShapes(shapes: Shape[]): void {
-        logger.debug('StateManager', `Adding ${shapes.length} shapes in batch`);
-        shapes.forEach(shape => this.addShape(shape, false));
-        this.notifyShapeListeners();
+        this.shapeStore.addBatch(shapes);
     }
 
-    /**
-     * Add or update shape from server PolyData format
-     */
     addPolyData(data: PolyData, nodeId?: string): void {
-        // Validate data before converting
-        if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
-            logger.warn('StateManager', 'Skipping PolyData - missing or invalid lat/lon arrays');
-            return;
-        }
-        if (data.lat.length === 0 || data.lon.length === 0) {
-            logger.warn('StateManager', 'Skipping PolyData - empty lat/lon arrays');
-            return;
-        }
-
-        const shape = this.convertServerPolyToClientShape(data, nodeId);
-        this.addShape(shape);
+        this.shapeStore.addPolyData(data, nodeId);
     }
 
-    /**
-     * Add or update shape from server PolylineData format
-     */
     addPolylineData(data: PolylineData, nodeId?: string): void {
-        // Validate data before converting
-        if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
-            logger.warn('StateManager', 'Skipping PolylineData - missing or invalid lat/lon arrays');
-            return;
-        }
-        if (data.lat.length === 0 || data.lon.length === 0) {
-            logger.warn('StateManager', 'Skipping PolylineData - empty lat/lon arrays');
-            return;
-        }
-
-        const shape = this.convertServerPolylineToClientShape(data, nodeId);
-        this.addShape(shape);
+        this.shapeStore.addPolylineData(data, nodeId);
     }
 
-    /**
-     * Delete a shape by name
-     */
     deleteShape(name: string): boolean {
-        logger.debug('StateManager', `Deleting shape: ${name}`);
-        const deleted = this.shapes.delete(name);
-        if (deleted) {
-            this.notifyShapeListeners();
-        }
-        return deleted;
+        return this.shapeStore.delete(name);
     }
 
-    /**
-     * Get a shape by name
-     */
     getShape(name: string): Shape | undefined {
-        return this.shapes.get(name);
+        return this.shapeStore.get(name);
     }
 
-    /**
-     * Get all shapes
-     */
     getAllShapes(): Map<string, Shape> {
-        return new Map(this.shapes);
+        return this.shapeStore.getAll();
     }
 
-    /**
-     * Get shapes by type
-     */
     getShapesByType<T extends Shape['type']>(type: T): Shape[] {
-        return Array.from(this.shapes.values()).filter(
-            (shape): shape is Extract<Shape, { type: T }> => shape.type === type
-        );
+        return this.shapeStore.getByType(type);
     }
 
-    /**
-     * Get shapes for a specific node
-     */
     getShapesByNode(nodeId: string): Shape[] {
-        return Array.from(this.shapes.values()).filter(
-            shape => shape.nodeId === nodeId
-        );
+        return this.shapeStore.getByNode(nodeId);
     }
 
-    /**
-     * Clear all shapes
-     * Called when switching nodes or resetting simulation
-     */
     clearAllShapes(): void {
-        logger.debug('StateManager', 'Clearing all shapes');
-        this.shapes.clear();
-        this.notifyShapeListeners();
+        this.shapeStore.clear();
     }
 
-    /**
-     * Clear shapes for a specific node
-     */
     clearShapesForNode(nodeId: string): void {
-        logger.debug('StateManager', `Clearing shapes for node: ${nodeId}`);
-        let changed = false;
-
-        // Delete all shapes for this node
-        for (const [name, shape] of this.shapes.entries()) {
-            if (shape.nodeId === nodeId) {
-                this.shapes.delete(name);
-                changed = true;
-            }
-        }
-
-        if (changed) {
-            this.notifyShapeListeners();
-        }
+        this.shapeStore.clearForNode(nodeId);
     }
 
-    /**
-     * Update shape visibility
-     */
     setShapeVisibility(name: string, visible: boolean): void {
-        const shape = this.shapes.get(name);
-        if (shape && shape.visible !== visible) {
-            shape.visible = visible;
-            this.notifyShapeListeners();
-        }
+        this.shapeStore.setVisibility(name, visible);
     }
 
-    /**
-     * Get shape count
-     */
     getShapeCount(): number {
-        return this.shapes.size;
+        return this.shapeStore.size;
     }
 }
 

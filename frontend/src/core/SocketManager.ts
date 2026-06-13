@@ -9,9 +9,11 @@ import {
     PolyData,
     PolylineData,
     InitialData,
-    CommandDictData
+    CommandDictData,
+    EchoData
 } from '../data/types';
 import type { StateManager } from './StateManager';
+import { parseShapePayload } from './shapePayload';
 import { connectionStatus } from './ConnectionStatusService';
 import { echoManager } from '../ui/EchoManager';
 import { logger } from '../utils/Logger';
@@ -26,13 +28,13 @@ interface SocketEventHandlers {
     onAircraftData?: (data: AircraftData) => void;
     onCommandResult?: (data: CommandResult) => void;
     onNodeInfo?: (data: NodeInfo) => void;
-    onEcho?: (data: string) => void;
+    onEcho?: (data: EchoData) => void;
     onRouteData?: (data: RouteData) => void;
     onConnectionStatus?: (data: ConnectionStatus) => void;
-    onServerDisconnected?: (data: any) => void;
+    onServerDisconnected?: () => void;
     onPoly?: (data: PolyData) => void;
     onPolyline?: (data: PolylineData) => void;
-    onReset?: (data: any) => void;
+    onReset?: () => void;
     onCommandDict?: (data: CommandDictData) => void;
 }
 
@@ -107,8 +109,8 @@ export class SocketManager {
                     connectionStatus.onAircraftDataReceived();
                 }
                 // Handle cmddict from initial data if available
-                if ((data as any).cmddict) {
-                    this.stateManager.updateCommandDict((data as any).cmddict);
+                if (data.cmddict) {
+                    this.stateManager.updateCommandDict(data.cmddict);
                     logger.debug('SocketManager', 'Command dictionary loaded from initial data');
                 }
 
@@ -116,8 +118,8 @@ export class SocketManager {
                 // Process in batch mode to avoid triggering multiple render cycles
                 let shapeCount = 0;
 
-                if ((data as any).poly_data) {
-                    const polyData = (data as any).poly_data;
+                if (data.poly_data) {
+                    const polyData = data.poly_data;
                     logger.verbose('SocketManager', 'Processing polygon data from initial_data:', polyData);
 
                     // Process the poly data - add shapes without notifying yet
@@ -125,7 +127,7 @@ export class SocketManager {
                         const polysDict = polyData.polys;
                         if (polysDict && typeof polysDict === 'object' && Object.keys(polysDict).length > 0) {
                             const state = this.stateManager.getState();
-                            for (const [name, shapeData] of Object.entries(polysDict)) {
+                            for (const shapeData of Object.values(polysDict)) {
                                 if (shapeData && typeof shapeData === 'object') {
                                     const polyDataItem = shapeData as PolyData;
                                     if (polyDataItem.lat && polyDataItem.lon &&
@@ -146,8 +148,8 @@ export class SocketManager {
                     }
                 }
 
-                if ((data as any).polyline_data) {
-                    const polylineData = (data as any).polyline_data;
+                if (data.polyline_data) {
+                    const polylineData = data.polyline_data;
                     logger.verbose('SocketManager', 'Processing polyline data from initial_data:', polylineData);
 
                     // Process the polyline data - add shapes without notifying yet
@@ -155,7 +157,7 @@ export class SocketManager {
                         const polylinesDict = polylineData.polys;
                         if (polylinesDict && typeof polylinesDict === 'object' && Object.keys(polylinesDict).length > 0) {
                             const state = this.stateManager.getState();
-                            for (const [name, shapeData] of Object.entries(polylinesDict)) {
+                            for (const shapeData of Object.values(polylinesDict)) {
                                 if (shapeData && typeof shapeData === 'object') {
                                     const polylineDataItem = shapeData as PolylineData;
                                     if (polylineDataItem.lat && polylineDataItem.lon &&
@@ -203,7 +205,7 @@ export class SocketManager {
                     logger.debug('SocketManager', 'Active node updated:', data.active_node);
                 }
             },
-            onEcho: (data: any) => {
+            onEcho: (data: EchoData) => {
                 // Handle echo messages from BlueSky server
                 if (data && data.text) {
                     // Determine message type based on flags
@@ -262,276 +264,114 @@ export class SocketManager {
         });
     }
 
+    // Pure-forward socket events: each just invokes the handler if set.
+    private static readonly FORWARD_EVENTS: ReadonlyArray<[string, keyof SocketEventHandlers]> = [
+        ['initial_data', 'onInitialData'],
+        ['siminfo', 'onSimInfo'],
+        ['acdata', 'onAircraftData'],
+        ['command_result', 'onCommandResult'],
+        ['node_info', 'onNodeInfo'],
+        ['echo', 'onEcho'],
+        ['routedata', 'onRouteData'],
+        ['connection_status', 'onConnectionStatus'],
+        ['server_disconnected', 'onServerDisconnected'],
+        ['reset', 'onReset'],
+        ['cmddict', 'onCommandDict'],
+    ];
+
     private setupEventListeners(): void {
         if (!this.socket) return;
+        const s = this.socket;
 
-        this.socket.on('connect', () => {
+        s.on('connect', () => {
             logger.info('SocketManager', 'Connected to WebATM');
             this.connected = true;
             this.reconnectAttempts = 0;
-            
-            if (this.handlers.onConnect) {
-                this.handlers.onConnect();
-            }
+            this.handlers.onConnect?.();
         });
 
-        this.socket.on('disconnect', (reason: string) => {
+        s.on('disconnect', (reason: string) => {
             logger.info('SocketManager', 'Disconnected from WebATM:', reason);
             this.connected = false;
-            
-            if (this.handlers.onDisconnect) {
-                this.handlers.onDisconnect(reason);
-            }
+            this.handlers.onDisconnect?.(reason);
         });
 
-        this.socket.on('reconnect', (attemptNumber: number) => {
+        s.on('reconnect', (attemptNumber: number) => {
             logger.info('SocketManager', 'Reconnected after', attemptNumber, 'attempts');
             this.connected = true;
             this.reconnectAttempts = 0;
-            
-            if (this.handlers.onReconnect) {
-                this.handlers.onReconnect(attemptNumber);
-            }
+            this.handlers.onReconnect?.(attemptNumber);
         });
 
-        this.socket.on('reconnect_error', (error: Error) => {
+        s.on('reconnect_error', (error: Error) => {
             logger.warn('SocketManager', 'Reconnection failed:', error);
             this.reconnectAttempts++;
-            
-            if (this.handlers.onReconnectError) {
-                this.handlers.onReconnectError(error);
-            }
+            this.handlers.onReconnectError?.(error);
         });
 
-        this.socket.on('initial_data', (data: InitialData) => {
-            if (this.handlers.onInitialData) {
-                this.handlers.onInitialData(data);
-            }
+        for (const [event, key] of SocketManager.FORWARD_EVENTS) {
+            s.on(event, (data: unknown) => {
+                // The handler map is heterogeneous; the server payload for each
+                // event matches the corresponding SocketEventHandlers signature.
+                const handler = this.handlers[key] as ((d: unknown) => void) | undefined;
+                handler?.(data);
+            });
+        }
+
+        s.on('poly', (data: unknown) => {
+            this.handleShapeEvent<PolyData>(
+                'poly',
+                data,
+                (shape, node) => this.stateManager.addPolyData(shape, node),
+                shape => this.handlers.onPoly?.(shape)
+            );
         });
 
-        this.socket.on('siminfo', (data: SimInfo) => {
-            if (this.handlers.onSimInfo) {
-                this.handlers.onSimInfo(data);
-            }
+        s.on('polyline', (data: unknown) => {
+            this.handleShapeEvent<PolylineData>(
+                'polyline',
+                data,
+                (shape, node) => this.stateManager.addPolylineData(shape, node),
+                shape => this.handlers.onPolyline?.(shape)
+            );
         });
+    }
 
-        this.socket.on('acdata', (data: AircraftData) => {
-            if (this.handlers.onAircraftData) {
-                this.handlers.onAircraftData(data);
-            }
-        });
+    /**
+     * Shared processing for 'poly' and 'polyline' events. Valid shapes go
+     * to the StateManager; the first shape (any validity) is forwarded to
+     * the backwards-compatible single-shape handler.
+     */
+    private handleShapeEvent<T extends PolyData | PolylineData>(
+        kind: 'poly' | 'polyline',
+        data: unknown,
+        addToState: (shape: T, activeNode: string | undefined) => void,
+        notifyHandler: (shape: T) => void
+    ): void {
+        const { validShapes, firstShape, skipped, isEmpty } = parseShapePayload<T>(data);
 
-        this.socket.on('command_result', (data: CommandResult) => {
-            if (this.handlers.onCommandResult) {
-                this.handlers.onCommandResult(data);
-            }
-        });
+        if (isEmpty) {
+            logger.verbose('SocketManager', `Ignoring empty ${kind} data`);
+            return;
+        }
 
-        this.socket.on('node_info', (data: NodeInfo) => {
-            if (this.handlers.onNodeInfo) {
-                this.handlers.onNodeInfo(data);
-            }
-        });
+        if (skipped.length > 0) {
+            logger.verbose('SocketManager', `Skipping invalid ${kind}(s) [${skipped.join(', ')}] - missing or empty lat/lon arrays`);
+        }
 
-        this.socket.on('echo', (data: string) => {
-            if (this.handlers.onEcho) {
-                this.handlers.onEcho(data);
-            }
-        });
+        const activeNode = this.stateManager.getState().activeNode || undefined;
+        for (const shape of validShapes) {
+            addToState(shape, activeNode);
+        }
 
-        this.socket.on('routedata', (data: RouteData) => {
-            if (this.handlers.onRouteData) {
-                this.handlers.onRouteData(data);
-            }
-        });
+        // Mark BlueSky as connected if we received valid shape data
+        if (validShapes.length > 0) {
+            connectionStatus.onShapeDataReceived();
+        }
 
-        this.socket.on('connection_status', (data: ConnectionStatus) => {
-            if (this.handlers.onConnectionStatus) {
-                this.handlers.onConnectionStatus(data);
-            }
-        });
-
-        this.socket.on('server_disconnected', (data: any) => {
-            if (this.handlers.onServerDisconnected) {
-                this.handlers.onServerDisconnected(data);
-            }
-        });
-
-        this.socket.on('poly', (data: any) => {
-            // Handle the server's format which can be:
-            // 1. {'polys': {...}} - dictionary of shapes
-            // 2. PolyData - single shape
-            // 3. PolyData[] - array of shapes
-
-            // Check if data is in the BlueSky proxy format with 'polys' dictionary
-            if (data && typeof data === 'object' && 'polys' in data) {
-                const polysDict = data.polys;
-
-                // If polys is empty or not an object, ignore
-                if (!polysDict || typeof polysDict !== 'object' || Object.keys(polysDict).length === 0) {
-                    logger.verbose('SocketManager', 'Ignoring empty poly data');
-                    return;
-                }
-
-                // Process each shape in the dictionary
-                const state = this.stateManager.getState();
-                let validShapeCount = 0;
-                for (const [name, shapeData] of Object.entries(polysDict)) {
-                    if (shapeData && typeof shapeData === 'object') {
-                        const polyData = shapeData as PolyData;
-                        // Validate that the shape has valid lat/lon arrays
-                        if (polyData.lat && polyData.lon &&
-                            Array.isArray(polyData.lat) && Array.isArray(polyData.lon) &&
-                            polyData.lat.length > 0 && polyData.lon.length > 0) {
-                            this.stateManager.addPolyData(polyData, state.activeNode || undefined);
-                            validShapeCount++;
-                        } else {
-                            logger.verbose('SocketManager', `Skipping invalid poly '${name}' - missing or empty lat/lon arrays`);
-                        }
-                    }
-                }
-
-                // Mark BlueSky as connected if we received valid shape data
-                if (validShapeCount > 0) {
-                    connectionStatus.onShapeDataReceived();
-                }
-
-                if (this.handlers.onPoly) {
-                    // For backwards compatibility, pass the first shape
-                    const firstShape = Object.values(polysDict)[0] as PolyData;
-                    if (firstShape) {
-                        this.handlers.onPoly(firstShape);
-                    }
-                }
-            } else {
-                // Handle legacy format: single shape or array of shapes
-                const shapes = Array.isArray(data) ? data : [data];
-                const state = this.stateManager.getState();
-                let validShapeCount = 0;
-
-                shapes.forEach((polyData: PolyData) => {
-                    // Validate that the shape has valid lat/lon arrays
-                    if (polyData && polyData.lat && polyData.lon &&
-                        Array.isArray(polyData.lat) && Array.isArray(polyData.lon) &&
-                        polyData.lat.length > 0 && polyData.lon.length > 0) {
-                        this.stateManager.addPolyData(polyData, state.activeNode || undefined);
-                        validShapeCount++;
-                    } else {
-                        logger.verbose('SocketManager', 'Skipping invalid poly - missing or empty lat/lon arrays');
-                    }
-                });
-
-                // Mark BlueSky as connected if we received valid shape data
-                if (validShapeCount > 0) {
-                    connectionStatus.onShapeDataReceived();
-                }
-
-                if (this.handlers.onPoly) {
-                    this.handlers.onPoly(Array.isArray(data) ? data[0] : data);
-                }
-            }
-        });
-
-        this.socket.on('polyline', (data: any) => {
-            // Handle the server's format which can be:
-            // 1. {'polys': {...}} - dictionary of shapes (using 'polys' key for consistency)
-            // 2. PolylineData - single shape
-            // 3. PolylineData[] - array of shapes
-
-            // Check if data is in the BlueSky proxy format with 'polys' dictionary
-            if (data && typeof data === 'object' && 'polys' in data) {
-                const polylinesDict = data.polys;
-
-                // If polys is empty or not an object, ignore
-                if (!polylinesDict || typeof polylinesDict !== 'object' || Object.keys(polylinesDict).length === 0) {
-                    logger.verbose('SocketManager', 'Ignoring empty polyline data');
-                    return;
-                }
-
-                // Process each shape in the dictionary
-                const state = this.stateManager.getState();
-                let validShapeCount = 0;
-                for (const [name, shapeData] of Object.entries(polylinesDict)) {
-                    if (shapeData && typeof shapeData === 'object') {
-                        const polylineData = shapeData as PolylineData;
-
-                        // Enhanced debugging for polyline validation
-                        logger.verbose('SocketManager', `🔍 DEBUG Processing polyline '${name}':`, {
-                            keys: Object.keys(shapeData),
-                            hasLat: 'lat' in shapeData,
-                            hasLon: 'lon' in shapeData,
-                            latValue: (shapeData as any).lat,
-                            lonValue: (shapeData as any).lon,
-                            latIsArray: Array.isArray((shapeData as any).lat),
-                            lonIsArray: Array.isArray((shapeData as any).lon),
-                            fullData: shapeData
-                        });
-
-                        // Validate that the shape has valid lat/lon arrays
-                        if (polylineData.lat && polylineData.lon &&
-                            Array.isArray(polylineData.lat) && Array.isArray(polylineData.lon) &&
-                            polylineData.lat.length > 0 && polylineData.lon.length > 0) {
-                            logger.verbose('SocketManager', `Polyline '${name}' is valid, adding to state`);
-                            this.stateManager.addPolylineData(polylineData, state.activeNode || undefined);
-                            validShapeCount++;
-                        } else {
-                            logger.verbose('SocketManager', `❌ Skipping invalid polyline '${name}' - missing or empty lat/lon arrays`);
-                        }
-                    }
-                }
-
-                // Mark BlueSky as connected if we received valid shape data
-                if (validShapeCount > 0) {
-                    connectionStatus.onShapeDataReceived();
-                }
-
-                if (this.handlers.onPolyline) {
-                    // For backwards compatibility, pass the first shape
-                    const firstShape = Object.values(polylinesDict)[0] as PolylineData;
-                    if (firstShape) {
-                        this.handlers.onPolyline(firstShape);
-                    }
-                }
-            } else {
-                // Handle legacy format: single shape or array of shapes
-                const shapes = Array.isArray(data) ? data : [data];
-                const state = this.stateManager.getState();
-                let validShapeCount = 0;
-
-                shapes.forEach((polylineData: PolylineData) => {
-                    // Validate that the shape has valid lat/lon arrays
-                    if (polylineData && polylineData.lat && polylineData.lon &&
-                        Array.isArray(polylineData.lat) && Array.isArray(polylineData.lon) &&
-                        polylineData.lat.length > 0 && polylineData.lon.length > 0) {
-                        this.stateManager.addPolylineData(polylineData, state.activeNode || undefined);
-                        validShapeCount++;
-                    } else {
-                        logger.verbose('SocketManager', 'Skipping invalid polyline - missing or empty lat/lon arrays');
-                    }
-                });
-
-                // Mark BlueSky as connected if we received valid shape data
-                if (validShapeCount > 0) {
-                    connectionStatus.onShapeDataReceived();
-                }
-
-                if (this.handlers.onPolyline) {
-                    this.handlers.onPolyline(Array.isArray(data) ? data[0] : data);
-                }
-            }
-        });
-
-        this.socket.on('reset', (data: any) => {
-            if (this.handlers.onReset) {
-                this.handlers.onReset(data);
-            }
-        });
-
-        this.socket.on('cmddict', (data: CommandDictData) => {
-            if (this.handlers.onCommandDict) {
-                this.handlers.onCommandDict(data);
-            }
-        });
+        if (firstShape) {
+            notifyHandler(firstShape);
+        }
     }
 
     setEventHandlers(handlers: Partial<SocketEventHandlers>): void {

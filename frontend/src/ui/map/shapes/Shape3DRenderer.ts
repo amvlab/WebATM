@@ -2,7 +2,15 @@ import { GeoJSONSource } from 'maplibre-gl';
 import { PolygonShape, DisplayOptions } from '../../../data/types';
 import type { MapDisplay } from '../MapDisplay';
 import type { StateManager } from '../../../core/StateManager';
+import { featureCollection, polygonFeature, toLngLatCoords } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
+import {
+    ensureGeoJSONSource,
+    ensureLayer,
+    setLayerVisibility,
+    safeRemoveLayer,
+    safeRemoveSource
+} from '../../../utils/maplibre';
 
 /**
  * Shape3DRenderer - Renders POLYALT shapes as extruded 3D polygons
@@ -44,29 +52,21 @@ export class Shape3DRenderer {
 
         const displayOptions = this.stateManager.getDisplayOptions();
 
-        if (!map.getSource(this.SOURCE_ID)) {
-            map.addSource(this.SOURCE_ID, {
-                type: 'geojson',
-                data: { type: 'FeatureCollection', features: [] }
-            });
-        }
-
-        if (!map.getLayer(this.LAYER_ID)) {
-            map.addLayer({
-                id: this.LAYER_ID,
-                source: this.SOURCE_ID,
-                type: 'fill-extrusion',
-                paint: {
-                    'fill-extrusion-color': ['get', 'fillColor'],
-                    'fill-extrusion-height': ['get', 'extrusionHeight'],
-                    'fill-extrusion-base': ['get', 'extrusionBase'],
-                    'fill-extrusion-opacity': 0.25
-                },
-                layout: {
-                    visibility: (displayOptions.show3DOverlay && displayOptions.showShapes) ? 'visible' : 'none'
-                }
-            });
-        }
+        ensureGeoJSONSource(map, this.SOURCE_ID);
+        ensureLayer(map, {
+            id: this.LAYER_ID,
+            source: this.SOURCE_ID,
+            type: 'fill-extrusion',
+            paint: {
+                'fill-extrusion-color': ['get', 'fillColor'],
+                'fill-extrusion-height': ['get', 'extrusionHeight'],
+                'fill-extrusion-base': ['get', 'extrusionBase'],
+                'fill-extrusion-opacity': 0.25
+            },
+            layout: {
+                visibility: (displayOptions.show3DOverlay && displayOptions.showShapes) ? 'visible' : 'none'
+            }
+        });
 
         logger.debug('Shape3DRenderer', 'Map layers created');
     }
@@ -84,9 +84,6 @@ export class Shape3DRenderer {
         const DEFAULT_EXTRUSION_HEIGHT = 1000; // meters - default height for polygons without altitude
 
         const features = polygons.map(poly => {
-            const coordinates = poly.coordinates.map(c => [c.lng, c.lat]);
-            coordinates.push(coordinates[0]); // close ring
-
             const hasAltitude = poly.topAltitude !== undefined && poly.topAltitude !== null;
             const topAlt = hasAltitude
                 ? (poly.topAltitude || 0)
@@ -95,24 +92,17 @@ export class Shape3DRenderer {
                 ? (poly.bottomAltitude || 0)
                 : 0;
 
-            return {
-                type: 'Feature' as const,
-                geometry: {
-                    type: 'Polygon' as const,
-                    coordinates: [coordinates]
-                },
-                properties: {
-                    name: poly.name,
-                    fillColor: poly.fillColor || displayOptions.shapeFillColor || '#ff00ff',
-                    extrusionHeight: topAlt,
-                    extrusionBase: bottomAlt
-                }
-            };
+            return polygonFeature(toLngLatCoords(poly.coordinates), {
+                name: poly.name,
+                fillColor: poly.fillColor || displayOptions.shapeFillColor || '#ff00ff',
+                extrusionHeight: topAlt,
+                extrusionBase: bottomAlt
+            });
         });
 
         const source = map.getSource(this.SOURCE_ID) as GeoJSONSource;
         if (source) {
-            source.setData({ type: 'FeatureCollection', features });
+            source.setData(featureCollection(features));
         } else {
             logger.debug('Shape3DRenderer', 'Source not found, re-initializing...');
             this.initialized = false;
@@ -120,7 +110,7 @@ export class Shape3DRenderer {
 
             const sourceAfterInit = map.getSource(this.SOURCE_ID) as GeoJSONSource;
             if (sourceAfterInit) {
-                sourceAfterInit.setData({ type: 'FeatureCollection', features });
+                sourceAfterInit.setData(featureCollection(features));
             } else {
                 logger.warn('Shape3DRenderer', `Failed to initialize source - cannot render ${polygons.length} extruded polygons`);
             }
@@ -130,14 +120,7 @@ export class Shape3DRenderer {
     public updateDisplayOptions(displayOptions: DisplayOptions): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
-
-        if (map.getLayer(this.LAYER_ID)) {
-            map.setLayoutProperty(
-                this.LAYER_ID,
-                'visibility',
-                (displayOptions.show3DOverlay && displayOptions.showShapes) ? 'visible' : 'none'
-            );
-        }
+        setLayerVisibility(map, this.LAYER_ID, displayOptions.show3DOverlay && displayOptions.showShapes);
     }
 
     public onStyleChange(): void {
@@ -147,6 +130,11 @@ export class Shape3DRenderer {
     }
 
     public destroy(): void {
+        const map = this.mapDisplay.getMap();
+        if (map) {
+            safeRemoveLayer(map, this.LAYER_ID);
+            safeRemoveSource(map, this.SOURCE_ID);
+        }
         this.initialized = false;
         logger.info('Shape3DRenderer', 'Destroyed');
     }

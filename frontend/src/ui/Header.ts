@@ -16,6 +16,7 @@ import { StateManager } from '../core/StateManager';
 import { SimInfo } from '../data/types';
 import { settingsModal } from './SettingsModal';
 import { logger } from '../utils/Logger';
+import { ListenerRegistry } from '../utils/events';
 
 export class Header {
     // DOM Elements - Left side
@@ -36,11 +37,7 @@ export class Header {
     // State
     private socketManager: SocketManager | null = null;
     private stateManager: StateManager | null = null;
-    private eventListeners: Array<{
-        element: HTMLElement | Document;
-        event: string;
-        handler: EventListener;
-    }> = [];
+    private listeners = new ListenerRegistry();
 
     /**
      * Initialize the header
@@ -50,7 +47,7 @@ export class Header {
         this.headerElement = document.querySelector('.header');
 
         if (!this.headerElement) {
-            console.warn('[Header] Header element not found');
+            logger.warn('Header', 'Header element not found');
             return;
         }
 
@@ -135,8 +132,7 @@ export class Header {
         event: string,
         handler: EventListener
     ): void {
-        element.addEventListener(event, handler);
-        this.eventListeners.push({ element, event, handler });
+        this.listeners.add(element, event, handler);
     }
 
     /**
@@ -234,6 +230,8 @@ export class Header {
     public updateConnectionStatus(status: string): void {
         if (this.connectionStatusElement) {
             this.connectionStatusElement.textContent = status;
+            // Long messages are truncated by CSS; expose the full text on hover
+            this.connectionStatusElement.title = status;
 
             // Update CSS class based on status
             // Default to waiting/yellow state for disconnected messages
@@ -477,11 +475,7 @@ export class Header {
      * Clean up header resources
      */
     public destroy(): void {
-        // Remove all event listeners
-        this.eventListeners.forEach(({ element, event, handler }) => {
-            element.removeEventListener(event, handler);
-        });
-        this.eventListeners = [];
+        this.listeners.removeAll();
 
         // Clear references
         this.socketManager = null;

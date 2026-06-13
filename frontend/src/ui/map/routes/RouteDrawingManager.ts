@@ -1,9 +1,9 @@
 import { MapDisplay } from '../MapDisplay';
-import { MapMouseEvent } from 'maplibre-gl';
 import type { App } from '../../../core/App';
 import { StateManager } from '../../../core/StateManager';
 import { AltitudeUnit, SpeedUnit } from '../../../data/types';
 import { logger } from '../../../utils/Logger';
+import { BaseDrawingManager, DrawingPoint } from '../BaseDrawingManager';
 import { RouteDrawingPreview } from './RouteDrawingPreview';
 import { RouteConstraintsModal } from './RouteConstraintsModal';
 import type { NavaidSnapper } from '../navdata/NavaidSnapper';
@@ -39,38 +39,31 @@ import type { NavaidSnapper } from '../navdata/NavaidSnapper';
  *  - RouteConstraintsModal: per-waypoint constraints UI + ADDWPT command
  *    build/send pipeline.
  */
-export class RouteDrawingManager {
-    private mapDisplay: MapDisplay;
+export class RouteDrawingManager extends BaseDrawingManager {
     private app: App;
     private stateManager: StateManager;
-    private navaidSnapper: NavaidSnapper;
     private preview: RouteDrawingPreview;
     private modal: RouteConstraintsModal;
 
-    private drawingMode: boolean = false;
-    private routePoints: Array<{ lat: number; lng: number }> = [];
+    private routePoints: DrawingPoint[] = [];
     private targetAircraftId: string | null = null;
 
     // Anchor for the leader line. Either the aircraft's current position, or
     // the last existing waypoint of an aircraft that already has a route.
-    private leaderAnchor: { lat: number; lng: number } | null = null;
+    private leaderAnchor: DrawingPoint | null = null;
 
     // Units snapshotted at draw start so the constraints modal is stable even
     // if the user toggles display units mid-flow.
     private capturedAltUnit: AltitudeUnit = 'ft';
     private capturedSpeedUnit: SpeedUnit = 'knots';
 
-    // Event handler refs for clean teardown
-    private mapClickHandler: ((e: MapMouseEvent) => void) | null = null;
-    private mapRightClickHandler: ((e: MapMouseEvent) => void) | null = null;
-    private mapMouseMoveHandler: ((e: MapMouseEvent) => void) | null = null;
-    private keyDownHandler: ((e: KeyboardEvent) => void) | null = null;
+    // Enter finishes the draw, matching right-click.
+    protected override readonly finishOnEnter = true;
 
     constructor(mapDisplay: MapDisplay, app: App, stateManager: StateManager, navaidSnapper: NavaidSnapper) {
-        this.mapDisplay = mapDisplay;
+        super(mapDisplay, navaidSnapper);
         this.app = app;
         this.stateManager = stateManager;
-        this.navaidSnapper = navaidSnapper;
         this.preview = new RouteDrawingPreview(mapDisplay, stateManager);
         this.modal = new RouteConstraintsModal(
             app,
@@ -142,25 +135,17 @@ export class RouteDrawingManager {
             tooltip.style.display = 'none';
         };
 
-        wrapper.addEventListener('mouseenter', positionAndShow);
-        wrapper.addEventListener('mouseleave', hide);
+        const signal = this.teardownSignal;
+        wrapper.addEventListener('mouseenter', positionAndShow, { signal });
+        wrapper.addEventListener('mouseleave', hide, { signal });
         // If the viewport scrolls/resizes while the tooltip is visible,
         // reposition it so it stays anchored to the button.
         window.addEventListener('scroll', () => {
             if (tooltip.style.display === 'block') positionAndShow();
-        }, true);
+        }, { capture: true, signal });
         window.addEventListener('resize', () => {
             if (tooltip.style.display === 'block') positionAndShow();
-        });
-    }
-
-    /**
-     * Public - whether interactive route drawing is currently active.
-     * Consumed by AircraftInteractionManager to suppress its empty-map-click
-     * "unselect aircraft" behavior while a route is being drawn.
-     */
-    public isDrawing(): boolean {
-        return this.drawingMode;
+        }, { signal });
     }
 
     /**
@@ -254,9 +239,7 @@ export class RouteDrawingManager {
      * Resolve the leader-line anchor: last existing waypoint if the aircraft
      * already has a route, else the aircraft's current position.
      */
-    private resolveLeaderAnchor(
-        aircraftId: string
-    ): { lat: number; lng: number } | null {
+    private resolveLeaderAnchor(aircraftId: string): DrawingPoint | null {
         const route = this.app.getRouteData();
         if (
             route &&
@@ -315,66 +298,21 @@ export class RouteDrawingManager {
         logger.debug('RouteDrawingManager', 'Stopped route drawing');
     }
 
-    private cancelDrawing(): void {
+    protected cancelDrawing(): void {
         logger.info('RouteDrawingManager', 'Route drawing cancelled');
         this.stopDrawing();
     }
 
-    private enableMapDrawing(): void {
-        const map = this.mapDisplay.getMap();
-        if (!map) return;
-
-        map.getCanvas().style.cursor = 'crosshair';
-
+    protected onDrawingEnabled(): void {
         this.preview.setup();
-
-        this.mapClickHandler = this.onMapClick.bind(this);
-        this.mapRightClickHandler = this.onMapRightClick.bind(this);
-        this.mapMouseMoveHandler = this.onMapMouseMove.bind(this);
-        this.keyDownHandler = this.onKeyDown.bind(this);
-
-        map.on('click', this.mapClickHandler);
-        map.on('contextmenu', this.mapRightClickHandler);
-        map.on('mousemove', this.mapMouseMoveHandler);
-        document.addEventListener('keydown', this.keyDownHandler);
     }
 
-    private disableMapDrawing(): void {
-        const map = this.mapDisplay.getMap();
-        if (!map) return;
-
-        map.getCanvas().style.cursor = '';
-
-        if (this.mapClickHandler) {
-            map.off('click', this.mapClickHandler);
-            this.mapClickHandler = null;
-        }
-        if (this.mapRightClickHandler) {
-            map.off('contextmenu', this.mapRightClickHandler);
-            this.mapRightClickHandler = null;
-        }
-        if (this.mapMouseMoveHandler) {
-            map.off('mousemove', this.mapMouseMoveHandler);
-            this.mapMouseMoveHandler = null;
-        }
-        if (this.keyDownHandler) {
-            document.removeEventListener('keydown', this.keyDownHandler);
-            this.keyDownHandler = null;
-        }
-
+    protected onDrawingDisabled(): void {
         this.preview.clear();
         this.preview.teardown();
-        this.navaidSnapper.clearHighlight();
     }
 
-    private onMapClick(e: MapMouseEvent): void {
-        if (!this.drawingMode) return;
-
-        // Snap the waypoint to a nearby navaid when enabled, else use raw click.
-        const snapped = this.navaidSnapper.snap(e);
-        const point = snapped
-            ? { lat: snapped.lat, lng: snapped.lng }
-            : { lat: e.lngLat.lat, lng: e.lngLat.lng };
+    protected onPointAdded(point: DrawingPoint): void {
         this.routePoints.push(point);
 
         const anchorLabel = this.leaderAnchorLabel();
@@ -389,35 +327,11 @@ export class RouteDrawingManager {
         );
     }
 
-    private onMapRightClick(e: MapMouseEvent): void {
-        e.preventDefault();
-        if (!this.drawingMode) return;
-        this.finishDrawing();
+    protected onCursorMove(point: DrawingPoint): void {
+        this.preview.updateCursor(point, this.routePoints, this.leaderAnchor);
     }
 
-    private onMapMouseMove(e: MapMouseEvent): void {
-        if (!this.drawingMode) return;
-        this.navaidSnapper.highlight(e);
-        this.preview.updateCursor(
-            { lat: e.lngLat.lat, lng: e.lngLat.lng },
-            this.routePoints,
-            this.leaderAnchor
-        );
-    }
-
-    private onKeyDown(e: KeyboardEvent): void {
-        if (!this.drawingMode) return;
-
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            this.cancelDrawing();
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            this.finishDrawing();
-        }
-    }
-
-    private finishDrawing(): void {
+    protected finishDrawing(): void {
         if (this.routePoints.length < 1) {
             alert('Add at least 1 waypoint to create a route');
             return;
@@ -432,22 +346,4 @@ export class RouteDrawingManager {
         );
     }
 
-    /**
-     * Show the shared drawing banner with a message.
-     */
-    private showDrawingBanner(message: string): void {
-        const banner = document.getElementById('drawing-banner');
-        const bannerText = document.getElementById('drawing-banner-text');
-        if (banner && bannerText) {
-            bannerText.textContent = message;
-            banner.style.display = 'flex';
-        }
-    }
-
-    private hideDrawingBanner(): void {
-        const banner = document.getElementById('drawing-banner');
-        if (banner) {
-            banner.style.display = 'none';
-        }
-    }
 }
