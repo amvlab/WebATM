@@ -1,6 +1,4 @@
-import { App } from '../core/App';
 import type { StateManager } from '../core/StateManager';
-import { storage } from '../utils/StorageManager';
 import { CommandHandler } from '../data/CommandHandler';
 import { OPENAP_AIRCRAFT_TYPES } from '../data/aircraftTypes';
 import { logger } from '../utils/Logger';
@@ -14,35 +12,19 @@ import {
     getDisplaySignature,
     SignatureArg,
 } from '../data/CommandSignature';
+import { CommandHistory } from './CommandHistory';
+import { getArgAtCursor } from './consoleTokens';
 import { CommandListView } from './CommandListView';
-
-interface AppWindow extends Window {
-    app?: App;
-    console_ui?: Console;
-}
-
-declare const window: AppWindow;
+import { ConsoleAutocomplete } from './ConsoleAutocomplete';
 
 export class Console {
-    private history: string[] = [];
-    private historyIndex: number | null = null; // null means fresh input line
-    private readonly maxHistory: number = 100;
-    private readonly aircraftTypes: string[];
+    private history = new CommandHistory();
     private stateManager: StateManager | null = null;
     private suggestionOverlay: HTMLDivElement | null = null;
     private commandHandler: CommandHandler | null = null;
 
-    // ACID autocomplete state
-    private acidDropdown: HTMLDivElement | null = null;
-    private acidSuggestions: string[] = [];
-    private acidSelectedIndex: number = -1;
-    private acidWarning: HTMLDivElement | null = null;
-
-    // Aircraft type autocomplete state
-    private typeDropdown: HTMLDivElement | null = null;
-    private typeSuggestions: string[] = [];
-    private typeSelectedIndex: number = -1;
-    private typeWarning: HTMLDivElement | null = null;
+    // ACID and aircraft-type dropdowns attached to the input
+    private autocomplete: ConsoleAutocomplete;
 
     // Map-click picker for lat/lon/hdg arguments
     private mapPicker: ConsoleMapPicker | null = null;
@@ -51,8 +33,14 @@ export class Console {
     private argHint: HTMLDivElement | null = null;
 
     constructor() {
-        // Aircraft types supported by the openap library (shared constant)
-        this.aircraftTypes = [...OPENAP_AIRCRAFT_TYPES];
+        this.autocomplete = new ConsoleAutocomplete({
+            getCommandDict: () => this.stateManager?.getCommandDict() ?? null,
+            getAircraftIds: () => this.stateManager?.getState().aircraftData?.id ?? [],
+            onAfterSelect: () => {
+                this.updateSuggestion();
+                this.updateMapPicker();
+            }
+        });
 
         // Load command history from localStorage
         this.loadHistory();
@@ -64,10 +52,7 @@ export class Console {
         this.setupEventListeners();
         this.createSuggestionOverlay();
         this.createArgHint();
-        this.createAcidDropdown();
-        this.createAcidWarning();
-        this.createTypeDropdown();
-        this.createTypeWarning();
+        this.autocomplete.createElements();
         this.clearDisplay();
         this.applyPlatformPlaceholder();
     }
@@ -132,7 +117,7 @@ export class Console {
     private createSuggestionOverlay(): void {
         const inputContainer = document.querySelector('.console-input-container');
         if (!inputContainer) {
-            console.error('[Console] Console input container not found');
+            logger.error('Console', 'Console input container not found');
             return;
         }
 
@@ -146,18 +131,7 @@ export class Console {
      * Load command history from localStorage
      */
     private loadHistory(): void {
-        const savedHistory = storage.get<string[]>('console-command-history', []);
-        if (savedHistory && Array.isArray(savedHistory)) {
-            this.history = savedHistory;
-            logger.info('Console', `Loaded ${this.history.length} commands from history`);
-        }
-    }
-
-    /**
-     * Save command history to localStorage
-     */
-    private saveHistory(): void {
-        storage.set('console-command-history', this.history);
+        this.history.load();
     }
 
     /**
@@ -173,18 +147,14 @@ export class Console {
     private setupEventListeners(): void {
         const input = document.getElementById('console-input') as HTMLInputElement;
         if (!input) {
-            console.error('[Console] Console input element not found');
+            logger.error('Console', 'Console input element not found');
             return;
         }
 
         // Handle arrow keys for command history and ACID/type dropdowns
         input.addEventListener('keydown', (e: KeyboardEvent) => {
             // Let dropdowns handle keys first when visible
-            if (this.handleTypeDropdownKey(e.key)) {
-                e.preventDefault();
-                return;
-            }
-            if (this.handleAcidDropdownKey(e.key)) {
+            if (this.autocomplete.handleKey(e.key)) {
                 e.preventDefault();
                 return;
             }
@@ -217,9 +187,7 @@ export class Console {
                     this.resetInput();
                     break;
                 case 'Escape':
-                    this.hideAcidDropdown();
-                    this.hideTypeDropdown();
-                    this.hideTypeWarning();
+                    this.autocomplete.hideTransient();
                     this.mapPicker?.disable();
                     break;
             }
@@ -229,8 +197,7 @@ export class Console {
         input.addEventListener('input', () => {
             this.updateSuggestion();
             this.updateArgHint();
-            this.updateAcidAutocomplete();
-            this.updateTypeAutocomplete();
+            this.autocomplete.update();
             this.updateMapPicker();
         });
 
@@ -239,8 +206,7 @@ export class Console {
         // keys / Home / End) re-opens that slot's dropdown.
         const refreshForCursor = () => {
             this.updateArgHint();
-            this.updateAcidAutocomplete();
-            this.updateTypeAutocomplete();
+            this.autocomplete.update();
             this.updateMapPicker();
         };
         input.addEventListener('click', refreshForCursor);
@@ -260,9 +226,7 @@ export class Console {
         input.addEventListener('blur', () => {
             // Small delay to allow mousedown on dropdown items to fire
             setTimeout(() => {
-                this.hideAcidDropdown();
-                this.hideTypeDropdown();
-                this.hideTypeWarning();
+                this.autocomplete.hideTransient();
             }, 150);
         });
 
@@ -327,7 +291,7 @@ export class Console {
             // MCRE count, type, alt, spd, dest         -> type is also the 2nd argument
             const cmd = words[0].toUpperCase();
             if ((cmd === 'CRE' || cmd === 'MCRE') && words.length === 3 && currentWord.length > 0) {
-                suggestions = this.aircraftTypes.filter(type =>
+                suggestions = OPENAP_AIRCRAFT_TYPES.filter(type =>
                     type.startsWith(currentWord)
                 );
             }
@@ -404,18 +368,7 @@ export class Console {
     }
 
     private addToHistory(command: string): void {
-        if (!command.trim()) return;
-
-        // Add to end of history (newest commands at the end)
-        this.history.push(command);
-
-        // Limit history size
-        if (this.history.length > this.maxHistory) {
-            this.history.shift(); // Remove oldest command
-        }
-
-        // Save history to localStorage
-        this.saveHistory();
+        this.history.add(command);
 
         // Also add to app.js history to keep them in sync
         if (window.app && window.app.addToHistory) {
@@ -424,40 +377,22 @@ export class Console {
     }
 
     private showPreviousCommand(): void {
-        if (this.history.length === 0) return;
-
         const input = document.getElementById('console-input') as HTMLInputElement;
         if (!input) return;
 
-        // If we're at fresh input state, go to newest command
-        if (this.historyIndex === null) {
-            this.historyIndex = this.history.length - 1;
-        } else if (this.historyIndex > 0) {
-            // Move to older command
-            this.historyIndex--;
+        const command = this.history.previous();
+        if (command !== null) {
+            input.value = command;
         }
-        // If already at oldest command, do nothing (no cycling)
-
-        input.value = this.history[this.historyIndex];
     }
 
     private showNextCommand(): void {
         const input = document.getElementById('console-input') as HTMLInputElement;
         if (!input) return;
 
-        // If no history or at fresh input state, do nothing
-        if (this.history.length === 0 || this.historyIndex === null) {
-            return;
-        }
-
-        // Move to newer command
-        if (this.historyIndex < this.history.length - 1) {
-            this.historyIndex++;
-            input.value = this.history[this.historyIndex];
-        } else {
-            // At newest command, go back to fresh input
-            this.historyIndex = null;
-            input.value = '';
+        const command = this.history.next();
+        if (command !== null) {
+            input.value = command;
         }
     }
 
@@ -766,8 +701,7 @@ export class Console {
         input.setSelectionRange(text.length, text.length);
         this.updateSuggestion();
         this.updateArgHint();
-        this.updateAcidAutocomplete();
-        this.updateTypeAutocomplete();
+        this.autocomplete.update();
         this.updateMapPicker();
     }
 
@@ -806,689 +740,20 @@ export class Console {
     private resetInput(): void {
         const input = document.getElementById('console-input') as HTMLInputElement;
         if (input) input.value = '';
-        this.historyIndex = null;
+        this.history.resetNavigation();
         this.hideSuggestion();
         this.hideArgHint();
-        this.hideAcidDropdown();
-        this.hideAcidWarning();
-        this.hideTypeDropdown();
-        this.hideTypeWarning();
+        this.autocomplete.hideAll();
         this.mapPicker?.disable();
-    }
-
-    /**
-     * Create the ACID autocomplete dropdown element
-     */
-    private createAcidDropdown(): void {
-        const inputContainer = document.querySelector('.console-input-container');
-        if (!inputContainer) return;
-
-        this.acidDropdown = document.createElement('div');
-        this.acidDropdown.className = 'acid-autocomplete-dropdown';
-        this.acidDropdown.style.display = 'none';
-        inputContainer.appendChild(this.acidDropdown);
-    }
-
-    /**
-     * Create the CRE warning element for duplicate aircraft IDs
-     */
-    private createAcidWarning(): void {
-        const inputContainer = document.querySelector('.console-input-container');
-        if (!inputContainer) return;
-
-        this.acidWarning = document.createElement('div');
-        this.acidWarning.className = 'acid-warning';
-        this.acidWarning.style.display = 'none';
-        inputContainer.appendChild(this.acidWarning);
-    }
-
-    /**
-     * Get current aircraft IDs from state
-     */
-    private getAircraftIds(): string[] {
-        if (!this.stateManager) return [];
-        const aircraftData = this.stateManager.getState().aircraftData;
-        if (!aircraftData || !aircraftData.id) return [];
-        return aircraftData.id;
-    }
-
-    /**
-     * Parse a cmddict parameter string into normalized parameter names.
-     *
-     * Thin wrapper over the shared `parseSignature` helper used by the
-     * command palette, so both surfaces stay aligned on bracket / slash
-     * handling.
-     */
-    private parseCmdParams(paramString: string): string[] {
-        return parseSignature(paramString).map(arg => arg.name);
-    }
-
-    /**
-     * Split the console input into tokens, keeping the character range each
-     * token occupies. Used by getArgAtCursor() so callers can locate the
-     * token under the cursor without re-scanning the string.
-     */
-    private tokenizeInput(value: string): Array<{ text: string; start: number; end: number }> {
-        const SEP = /[\s,]/;
-        const tokens: Array<{ text: string; start: number; end: number }> = [];
-        let i = 0;
-        while (i < value.length) {
-            while (i < value.length && SEP.test(value[i])) i++;
-            if (i >= value.length) break;
-            const start = i;
-            while (i < value.length && !SEP.test(value[i])) i++;
-            tokens.push({ text: value.substring(start, i), start, end: i });
-        }
-        return tokens;
-    }
-
-    /**
-     * Find which argument slot the cursor currently sits on. Callers use this
-     * to show the ACID / aircraft-type dropdowns based on the actual cursor
-     * position rather than always assuming the cursor is at the end of the
-     * input - so clicking back into an earlier token (e.g. the aircraft type
-     * in a fully-typed CRE command) correctly re-opens that slot's dropdown.
-     *
-     * currentArgIndex is 0-based into the command's parameter list: the
-     * command token itself is conceptually at index -1, the first real
-     * argument is 0, and so on. When the cursor is inside a separator run,
-     * partialText is empty and currentArgIndex is the slot that would be
-     * filled next.
-     */
-    private getArgAtCursor(value: string, cursorPos: number): {
-        currentArgIndex: number;
-        partialText: string;
-        tokenStart: number;
-        tokenEnd: number;
-        parts: string[];
-    } {
-        const tokens = this.tokenizeInput(value);
-        const parts = tokens.map(t => t.text);
-
-        // Cursor sitting on a token (including at its boundaries) reports that
-        // token as the active slot. The <= end check lets a fresh keystroke at
-        // end of token still match, matching the previous end-of-input path.
-        for (let t = 0; t < tokens.length; t++) {
-            const tok = tokens[t];
-            if (cursorPos >= tok.start && cursorPos <= tok.end) {
-                return {
-                    currentArgIndex: t - 1,
-                    partialText: tok.text,
-                    tokenStart: tok.start,
-                    tokenEnd: tok.end,
-                    parts,
-                };
-            }
-        }
-
-        // Cursor is in a separator run (or past all tokens): the active slot
-        // is whatever would come next, so count completed tokens before the
-        // cursor.
-        let tokensBefore = 0;
-        for (const tok of tokens) {
-            if (tok.end <= cursorPos) tokensBefore++;
-            else break;
-        }
-        return {
-            currentArgIndex: tokensBefore - 1,
-            partialText: '',
-            tokenStart: cursorPos,
-            tokenEnd: cursorPos,
-            parts,
-        };
     }
 
     /**
      * Read the console input's current cursor position, falling back to the
      * end of the value when the selection API returns null.
      */
+
     private getCursorPos(input: HTMLInputElement): number {
         return input.selectionStart ?? input.value.length;
-    }
-
-    /**
-     * Check if the current command expects an acid parameter at the current cursor position
-     * Returns the partial acid text if applicable, null otherwise
-     */
-    private getAcidContext(value: string, cursorPos: number): { partialAcid: string; isCreCommand: boolean; acidArgIndex: number; isMidInput: boolean } | null {
-        const { currentArgIndex, partialText, tokenEnd, parts } = this.getArgAtCursor(value, cursorPos);
-        if (parts.length < 1) return null;
-
-        // "Mid-input" means the cursor sits on a token that's followed by more
-        // command content - the user is editing an earlier slot rather than
-        // typing at the end. We use this to keep the dropdown visible even on
-        // an exact match, so they can swap the value for a different one.
-        const isMidInput = value.substring(tokenEnd).trim().length > 0;
-
-        const command = parts[0].toUpperCase();
-        const isCreCommand = command === 'CRE' || command === 'MCRE';
-
-        // Get command parameters from cmddict
-        if (!this.stateManager) return null;
-        const cmddict = this.stateManager.getCommandDict();
-        if (!cmddict || !cmddict[command]) return null;
-
-        const rawParamString = cmddict[command];
-        if (!rawParamString) return null;
-
-        // Use the user-facing signature so MCRE (where CommandHandler
-        // injects lat/lon) lines up the user's typed args with the param
-        // positions we're inspecting.
-        const paramString = getDisplaySignature(command, rawParamString);
-        const params = this.parseCmdParams(paramString);
-
-        // Find which parameter position we're at
-        if (currentArgIndex < 0 || currentArgIndex >= params.length) return null;
-
-        const currentParam = params[currentArgIndex];
-
-        // Check if this parameter is an acid-type parameter
-        const acidParamNames = ['acid', 'acidx', 'id', 'idx'];
-        if (!acidParamNames.includes(currentParam)) return null;
-
-        return { partialAcid: partialText, isCreCommand, acidArgIndex: currentArgIndex, isMidInput };
-    }
-
-    /**
-     * Update the ACID autocomplete dropdown based on current input
-     */
-    private updateAcidAutocomplete(): void {
-        const input = document.getElementById('console-input') as HTMLInputElement;
-        if (!input) return;
-
-        const value = input.value;
-        if (!value.trim()) {
-            this.hideAcidDropdown();
-            this.hideAcidWarning();
-            return;
-        }
-
-        const context = this.getAcidContext(value, this.getCursorPos(input));
-        if (!context) {
-            this.hideAcidDropdown();
-            this.hideAcidWarning();
-            return;
-        }
-
-        const { partialAcid, isCreCommand, isMidInput } = context;
-        const allIds = this.getAircraftIds();
-
-        if (isCreCommand) {
-            // For CRE/MCRE: don't autocomplete, but warn if acid exists
-            this.hideAcidDropdown();
-            if (partialAcid.length > 0) {
-                const upperPartial = partialAcid.toUpperCase();
-                const exists = allIds.some(id => id.toUpperCase() === upperPartial);
-                if (exists) {
-                    this.showAcidWarning(`Aircraft "${partialAcid.toUpperCase()}" already exists`);
-                } else {
-                    this.hideAcidWarning();
-                }
-            } else {
-                this.hideAcidWarning();
-            }
-            return;
-        }
-
-        // For non-CRE commands: show autocomplete dropdown
-        this.hideAcidWarning();
-
-        if (allIds.length === 0) {
-            this.hideAcidDropdown();
-            return;
-        }
-
-        // Filter aircraft IDs by partial match
-        const upperPartial = partialAcid.toUpperCase();
-        let filtered: string[];
-        if (upperPartial.length === 0) {
-            filtered = [...allIds]; // Show all, dropdown scrolls
-        } else {
-            filtered = allIds.filter(id =>
-                id.toUpperCase().startsWith(upperPartial)
-            );
-            // Also include IDs that contain the search term (not just starts-with)
-            const containsMatches = allIds.filter(id =>
-                !id.toUpperCase().startsWith(upperPartial) &&
-                id.toUpperCase().includes(upperPartial)
-            );
-            filtered = [...filtered, ...containsMatches];
-        }
-
-        if (filtered.length === 0) {
-            this.hideAcidDropdown();
-            return;
-        }
-
-        // When typing at end-of-input, an exact single match means the user
-        // is done entering this slot - hide the dropdown to get out of the way.
-        // When the cursor sits on a token that's followed by more content, the
-        // user is editing an earlier slot, so we keep the dropdown visible so
-        // they can swap the value for a different one.
-        if (
-            !isMidInput &&
-            filtered.length === 1 &&
-            filtered[0].toUpperCase() === upperPartial
-        ) {
-            this.hideAcidDropdown();
-            return;
-        }
-
-        this.acidSuggestions = filtered;
-        if (this.acidSelectedIndex >= filtered.length) {
-            this.acidSelectedIndex = -1;
-        }
-        this.renderAcidDropdown();
-    }
-
-    /**
-     * Render the ACID dropdown with current suggestions
-     */
-    private renderAcidDropdown(): void {
-        if (!this.acidDropdown) return;
-
-        this.acidDropdown.innerHTML = '';
-
-        this.acidSuggestions.forEach((id, index) => {
-            const item = document.createElement('div');
-            item.className = 'acid-dropdown-item';
-            if (index === this.acidSelectedIndex) {
-                item.classList.add('selected');
-            }
-            item.textContent = id;
-            item.addEventListener('mousedown', (e) => {
-                e.preventDefault(); // Prevent input blur
-                this.selectAcidSuggestion(index);
-            });
-            item.addEventListener('mouseenter', () => {
-                // Update selection visually without re-rendering DOM
-                const prev = this.acidDropdown?.querySelector('.acid-dropdown-item.selected');
-                if (prev) prev.classList.remove('selected');
-                item.classList.add('selected');
-                this.acidSelectedIndex = index;
-            });
-            this.acidDropdown!.appendChild(item);
-        });
-
-        this.acidDropdown.style.display = 'block';
-
-        // Scroll selected item into view
-        if (this.acidSelectedIndex >= 0) {
-            const selectedEl = this.acidDropdown.children[this.acidSelectedIndex] as HTMLElement;
-            if (selectedEl) {
-                selectedEl.scrollIntoView({ block: 'nearest' });
-            }
-        }
-    }
-
-    /**
-     * Select an ACID suggestion and insert it into the input
-     */
-    private selectAcidSuggestion(index: number): void {
-        const input = document.getElementById('console-input') as HTMLInputElement;
-        if (!input || index < 0 || index >= this.acidSuggestions.length) return;
-
-        const selectedId = this.acidSuggestions[index];
-        this.replaceTokenAtCursor(input, selectedId);
-
-        this.hideAcidDropdown();
-        input.focus();
-        this.updateSuggestion();
-        this.updateMapPicker();
-    }
-
-    /**
-     * Replace the argument token under the cursor with `replacement`. When the
-     * cursor is at end-of-input the replacement is followed by a space so the
-     * user can keep typing the next argument; mid-input replacements leave
-     * whatever followed the token untouched and place the cursor right after
-     * the inserted text.
-     */
-    private replaceTokenAtCursor(input: HTMLInputElement, replacement: string): void {
-        const value = input.value;
-        const cursorPos = this.getCursorPos(input);
-        const { tokenStart, tokenEnd } = this.getArgAtCursor(value, cursorPos);
-
-        const before = value.substring(0, tokenStart);
-        const after = value.substring(tokenEnd);
-        const atEnd = after.length === 0;
-
-        const newValue = atEnd
-            ? before + replacement + ' '
-            : before + replacement + after;
-        const newCursor = tokenStart + replacement.length + (atEnd ? 1 : 0);
-
-        input.value = newValue;
-        input.setSelectionRange(newCursor, newCursor);
-    }
-
-    /**
-     * Handle arrow key navigation in the ACID dropdown
-     * Returns true if the event was handled
-     */
-    private handleAcidDropdownKey(key: string): boolean {
-        if (!this.acidDropdown || this.acidDropdown.style.display === 'none') {
-            return false;
-        }
-
-        if (key === 'ArrowDown') {
-            this.acidSelectedIndex = Math.min(
-                this.acidSelectedIndex + 1,
-                this.acidSuggestions.length - 1
-            );
-            this.renderAcidDropdown();
-            return true;
-        }
-
-        if (key === 'ArrowUp') {
-            this.acidSelectedIndex = Math.max(this.acidSelectedIndex - 1, -1);
-            this.renderAcidDropdown();
-            return true;
-        }
-
-        if (key === 'Tab' || key === 'Enter') {
-            if (this.acidSelectedIndex >= 0) {
-                this.selectAcidSuggestion(this.acidSelectedIndex);
-                return true;
-            }
-        }
-
-        if (key === 'Escape') {
-            this.hideAcidDropdown();
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * Hide the ACID autocomplete dropdown
-     */
-    private hideAcidDropdown(): void {
-        if (this.acidDropdown) {
-            this.acidDropdown.style.display = 'none';
-        }
-        this.acidSuggestions = [];
-        this.acidSelectedIndex = -1;
-    }
-
-    /**
-     * Show the CRE duplicate aircraft warning
-     */
-    private showAcidWarning(message: string): void {
-        if (!this.acidWarning) return;
-        this.acidWarning.textContent = message;
-        this.acidWarning.style.display = 'block';
-    }
-
-    /**
-     * Hide the CRE duplicate aircraft warning
-     */
-    private hideAcidWarning(): void {
-        if (this.acidWarning) {
-            this.acidWarning.style.display = 'none';
-        }
-    }
-
-    /**
-     * Create the aircraft type autocomplete dropdown element
-     */
-    private createTypeDropdown(): void {
-        const inputContainer = document.querySelector('.console-input-container');
-        if (!inputContainer) return;
-
-        this.typeDropdown = document.createElement('div');
-        this.typeDropdown.className = 'actype-autocomplete-dropdown';
-        this.typeDropdown.style.display = 'none';
-        inputContainer.appendChild(this.typeDropdown);
-    }
-
-    /**
-     * Check if the cursor sits on the aircraft-type parameter of a CRE/MCRE
-     * command. Returns the partial type being typed when applicable.
-     */
-    private getTypeContext(value: string, cursorPos: number): { partialType: string; isMidInput: boolean } | null {
-        const { currentArgIndex, partialText, tokenEnd, parts } = this.getArgAtCursor(value, cursorPos);
-        if (parts.length < 1) return null;
-
-        const isMidInput = value.substring(tokenEnd).trim().length > 0;
-
-        const command = parts[0].toUpperCase();
-        if (command !== 'CRE' && command !== 'MCRE') return null;
-
-        // Look up the parameter list from cmddict so we follow whatever
-        // argument order the server advertises.
-        if (!this.stateManager) return null;
-        const cmddict = this.stateManager.getCommandDict();
-        if (!cmddict || !cmddict[command]) return null;
-
-        const rawParamString = cmddict[command];
-        if (!rawParamString) return null;
-
-        // Use the user-facing signature so MCRE's `type` arg lines up at
-        // the position the user actually types it (right after `n`).
-        const paramString = getDisplaySignature(command, rawParamString);
-        const params = this.parseCmdParams(paramString);
-
-        if (currentArgIndex < 0 || currentArgIndex >= params.length) return null;
-
-        const currentParam = params[currentArgIndex];
-        const typeParamNames = ['type', 'actype'];
-        if (!typeParamNames.includes(currentParam)) return null;
-
-        return { partialType: partialText, isMidInput };
-    }
-
-    /**
-     * Update the aircraft type autocomplete dropdown based on current input
-     */
-    private updateTypeAutocomplete(): void {
-        const input = document.getElementById('console-input') as HTMLInputElement;
-        if (!input) return;
-
-        const value = input.value;
-        if (!value.trim()) {
-            this.hideTypeDropdown();
-            this.hideTypeWarning();
-            return;
-        }
-
-        const context = this.getTypeContext(value, this.getCursorPos(input));
-        if (!context) {
-            this.hideTypeDropdown();
-            this.hideTypeWarning();
-            return;
-        }
-
-        const { partialType, isMidInput } = context;
-        const upperPartial = partialType.toUpperCase();
-
-        // Filter aircraft types by prefix, then by contains (so users can still
-        // find types by partial substring). Empty partial = show all types.
-        let filtered: string[];
-        if (upperPartial.length === 0) {
-            filtered = [...this.aircraftTypes];
-        } else {
-            const startsWith = this.aircraftTypes.filter(t =>
-                t.startsWith(upperPartial)
-            );
-            const contains = this.aircraftTypes.filter(t =>
-                !t.startsWith(upperPartial) && t.includes(upperPartial)
-            );
-            filtered = [...startsWith, ...contains];
-        }
-
-        if (filtered.length === 0) {
-            // Non-openap type being typed - hide the dropdown so the user
-            // can enter a custom type without interference, but show an
-            // inline warning (mirrors the Create Aircraft modal).
-            this.hideTypeDropdown();
-            this.showTypeWarning(
-                `openap library does not include "${upperPartial}"`
-            );
-            return;
-        }
-
-        // When typing at end-of-input, an exact single match means the user is
-        // done entering this slot - hide the dropdown. When the cursor sits on
-        // a token followed by more content, the user is editing an earlier
-        // slot, so keep the dropdown visible so they can pick a different type.
-        if (
-            !isMidInput &&
-            filtered.length === 1 &&
-            filtered[0].toUpperCase() === upperPartial
-        ) {
-            this.hideTypeDropdown();
-            this.hideTypeWarning();
-            return;
-        }
-
-        // Partial matches exist - user is still typing a valid openap type.
-        this.hideTypeWarning();
-
-        this.typeSuggestions = filtered;
-        if (this.typeSelectedIndex >= filtered.length) {
-            this.typeSelectedIndex = -1;
-        }
-        this.renderTypeDropdown();
-    }
-
-    /**
-     * Render the type dropdown with current suggestions
-     */
-    private renderTypeDropdown(): void {
-        if (!this.typeDropdown) return;
-
-        this.typeDropdown.innerHTML = '';
-
-        this.typeSuggestions.forEach((type, index) => {
-            const item = document.createElement('div');
-            item.className = 'actype-dropdown-item';
-            if (index === this.typeSelectedIndex) {
-                item.classList.add('selected');
-            }
-            item.textContent = type;
-            item.addEventListener('mousedown', (e) => {
-                e.preventDefault(); // Prevent input blur
-                this.selectTypeSuggestion(index);
-            });
-            item.addEventListener('mouseenter', () => {
-                const prev = this.typeDropdown?.querySelector('.actype-dropdown-item.selected');
-                if (prev) prev.classList.remove('selected');
-                item.classList.add('selected');
-                this.typeSelectedIndex = index;
-            });
-            this.typeDropdown!.appendChild(item);
-        });
-
-        this.typeDropdown.style.display = 'block';
-
-        // Scroll selected item into view
-        if (this.typeSelectedIndex >= 0) {
-            const selectedEl = this.typeDropdown.children[this.typeSelectedIndex] as HTMLElement;
-            if (selectedEl) {
-                selectedEl.scrollIntoView({ block: 'nearest' });
-            }
-        }
-    }
-
-    /**
-     * Select a type suggestion and insert it into the input
-     */
-    private selectTypeSuggestion(index: number): void {
-        const input = document.getElementById('console-input') as HTMLInputElement;
-        if (!input || index < 0 || index >= this.typeSuggestions.length) return;
-
-        const selectedType = this.typeSuggestions[index];
-        this.replaceTokenAtCursor(input, selectedType);
-
-        this.hideTypeDropdown();
-        input.focus();
-        this.updateSuggestion();
-        this.updateMapPicker();
-    }
-
-    /**
-     * Handle arrow key navigation in the type dropdown
-     * Returns true if the event was handled
-     */
-    private handleTypeDropdownKey(key: string): boolean {
-        if (!this.typeDropdown || this.typeDropdown.style.display === 'none') {
-            return false;
-        }
-
-        if (key === 'ArrowDown') {
-            this.typeSelectedIndex = Math.min(
-                this.typeSelectedIndex + 1,
-                this.typeSuggestions.length - 1
-            );
-            this.renderTypeDropdown();
-            return true;
-        }
-
-        if (key === 'ArrowUp') {
-            this.typeSelectedIndex = Math.max(this.typeSelectedIndex - 1, -1);
-            this.renderTypeDropdown();
-            return true;
-        }
-
-        if (key === 'Tab' || key === 'Enter') {
-            if (this.typeSelectedIndex >= 0) {
-                this.selectTypeSuggestion(this.typeSelectedIndex);
-                return true;
-            }
-        }
-
-        if (key === 'Escape') {
-            this.hideTypeDropdown();
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * Hide the aircraft type autocomplete dropdown
-     */
-    private hideTypeDropdown(): void {
-        if (this.typeDropdown) {
-            this.typeDropdown.style.display = 'none';
-        }
-        this.typeSuggestions = [];
-        this.typeSelectedIndex = -1;
-    }
-
-    /**
-     * Create the inline warning element shown when the aircraft type in a
-     * CRE/MCRE command is not part of the openap library. Mirrors the
-     * Create Aircraft modal behaviour.
-     */
-    private createTypeWarning(): void {
-        const inputContainer = document.querySelector('.console-input-container');
-        if (!inputContainer) return;
-
-        this.typeWarning = document.createElement('div');
-        this.typeWarning.className = 'actype-warning';
-        this.typeWarning.style.display = 'none';
-        inputContainer.appendChild(this.typeWarning);
-    }
-
-    /**
-     * Show the openap aircraft type warning with the given message
-     */
-    private showTypeWarning(message: string): void {
-        if (!this.typeWarning) return;
-        this.typeWarning.textContent = message;
-        this.typeWarning.style.display = 'block';
-    }
-
-    /**
-     * Hide the openap aircraft type warning
-     */
-    private hideTypeWarning(): void {
-        if (this.typeWarning) {
-            this.typeWarning.style.display = 'none';
-        }
     }
 
     /**
@@ -1502,7 +767,7 @@ export class Console {
      * instead of disabling after the first explicit pair.
      */
     private getGeoContext(value: string, cursorPos: number): GeoContext | null {
-        const { currentArgIndex, parts } = this.getArgAtCursor(value, cursorPos);
+        const { currentArgIndex, parts } = getArgAtCursor(value, cursorPos);
         if (parts.length < 1) return null;
 
         const command = parts[0].toUpperCase();
@@ -1517,7 +782,7 @@ export class Console {
         // Honour user-facing overrides so commands like MCRE don't engage
         // the picker on lat/lon slots that CommandHandler fills in.
         const paramString = getDisplaySignature(command, rawParamString);
-        let params = this.parseCmdParams(paramString);
+        let params = parseSignature(paramString).map(arg => arg.name);
 
         if (currentArgIndex < 0) return null;
 

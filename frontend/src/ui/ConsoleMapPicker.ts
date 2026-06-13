@@ -1,8 +1,16 @@
-import { Map as MapLibreMap, MapMouseEvent, GeoJSONSource } from 'maplibre-gl';
+import { Map as MapLibreMap, MapMouseEvent } from 'maplibre-gl';
 import type { MapDisplay } from './map/MapDisplay';
 import type { Console } from './Console';
 import type { NavaidSnapper } from './map/navdata/NavaidSnapper';
+import { lineStringFeature, pointFeature } from '../utils/geojson';
 import { logger } from '../utils/Logger';
+import {
+    ensureGeoJSONSource,
+    ensureLayer,
+    safeRemoveLayer,
+    safeRemoveSource,
+    updateSourceFeatures
+} from '../utils/maplibre';
 
 /**
  * Context describing the geo-picking slot currently under the console cursor.
@@ -385,50 +393,28 @@ export class ConsoleMapPicker {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        const data = {
-            type: 'FeatureCollection' as const,
-            features: [
-                {
-                    type: 'Feature' as const,
-                    geometry: {
-                        type: 'LineString' as const,
-                        coordinates: [
-                            [originLon, originLat],
-                            [e.lngLat.lng, e.lngLat.lat]
-                        ]
-                    },
-                    properties: {}
-                }
-            ]
-        };
-
-        const existing = map.getSource(this.GUIDE_SOURCE_ID) as
-            | GeoJSONSource
-            | undefined;
-
-        if (existing) {
-            existing.setData(data);
-        } else {
-            map.addSource(this.GUIDE_SOURCE_ID, {
-                type: 'geojson',
-                data
-            });
-            map.addLayer({
-                id: this.GUIDE_LAYER_ID,
-                type: 'line',
-                source: this.GUIDE_SOURCE_ID,
-                layout: {
-                    'line-join': 'round',
-                    'line-cap': 'round'
-                },
-                paint: {
-                    'line-color': '#ff6600',
-                    'line-width': 2,
-                    'line-dasharray': [3, 3],
-                    'line-opacity': 0.8
-                }
-            });
-        }
+        ensureGeoJSONSource(map, this.GUIDE_SOURCE_ID);
+        ensureLayer(map, {
+            id: this.GUIDE_LAYER_ID,
+            type: 'line',
+            source: this.GUIDE_SOURCE_ID,
+            layout: {
+                'line-join': 'round',
+                'line-cap': 'round'
+            },
+            paint: {
+                'line-color': '#ff6600',
+                'line-width': 2,
+                'line-dasharray': [3, 3],
+                'line-opacity': 0.8
+            }
+        });
+        updateSourceFeatures(map, this.GUIDE_SOURCE_ID, [
+            lineStringFeature([
+                [originLon, originLat],
+                [e.lngLat.lng, e.lngLat.lat]
+            ])
+        ]);
 
         // Live heading readout in the hint while moving.
         const brng = this.computeBearing(
@@ -467,12 +453,8 @@ export class ConsoleMapPicker {
      * Remove the heading guide layer+source if present.
      */
     private removeHeadingGuide(map: MapLibreMap): void {
-        if (map.getLayer(this.GUIDE_LAYER_ID)) {
-            map.removeLayer(this.GUIDE_LAYER_ID);
-        }
-        if (map.getSource(this.GUIDE_SOURCE_ID)) {
-            map.removeSource(this.GUIDE_SOURCE_ID);
-        }
+        safeRemoveLayer(map, this.GUIDE_LAYER_ID);
+        safeRemoveSource(map, this.GUIDE_SOURCE_ID);
     }
 
     /**
@@ -483,23 +465,14 @@ export class ConsoleMapPicker {
      * to CRE.
      */
     private ensurePositionMarker(map: MapLibreMap): void {
-        this.removePositionMarker(map);
-
         const origin = this.resolveHdgOrigin();
-        if (!origin) return;
+        if (!origin) {
+            this.removePositionMarker(map);
+            return;
+        }
 
-        map.addSource(this.MARKER_SOURCE_ID, {
-            type: 'geojson',
-            data: {
-                type: 'Feature',
-                geometry: {
-                    type: 'Point',
-                    coordinates: [origin.lon, origin.lat]
-                },
-                properties: {}
-            }
-        });
-        map.addLayer({
+        ensureGeoJSONSource(map, this.MARKER_SOURCE_ID);
+        ensureLayer(map, {
             id: this.MARKER_LAYER_ID,
             type: 'circle',
             source: this.MARKER_SOURCE_ID,
@@ -510,18 +483,17 @@ export class ConsoleMapPicker {
                 'circle-stroke-color': '#ffffff'
             }
         });
+        updateSourceFeatures(map, this.MARKER_SOURCE_ID, [
+            pointFeature([origin.lon, origin.lat])
+        ]);
     }
 
     /**
      * Remove the origin position marker if present.
      */
     private removePositionMarker(map: MapLibreMap): void {
-        if (map.getLayer(this.MARKER_LAYER_ID)) {
-            map.removeLayer(this.MARKER_LAYER_ID);
-        }
-        if (map.getSource(this.MARKER_SOURCE_ID)) {
-            map.removeSource(this.MARKER_SOURCE_ID);
-        }
+        safeRemoveLayer(map, this.MARKER_LAYER_ID);
+        safeRemoveSource(map, this.MARKER_SOURCE_ID);
     }
 
     /**
@@ -644,23 +616,8 @@ export class ConsoleMapPicker {
         coords: Array<[number, number]>,
         style: { color: string; dashed: boolean }
     ): void {
-        const data = {
-            type: 'Feature' as const,
-            geometry: {
-                type: 'LineString' as const,
-                coordinates: coords
-            },
-            properties: {}
-        };
-
-        const existing = map.getSource(sourceId) as GeoJSONSource | undefined;
-        if (existing) {
-            existing.setData(data);
-            return;
-        }
-
-        map.addSource(sourceId, { type: 'geojson', data });
-        map.addLayer({
+        ensureGeoJSONSource(map, sourceId);
+        ensureLayer(map, {
             id: layerId,
             type: 'line',
             source: sourceId,
@@ -672,6 +629,7 @@ export class ConsoleMapPicker {
                 ...(style.dashed ? { 'line-dasharray': [3, 3] } : {})
             }
         });
+        updateSourceFeatures(map, sourceId, [lineStringFeature(coords)]);
     }
 
     /**
@@ -681,28 +639,8 @@ export class ConsoleMapPicker {
         map: MapLibreMap,
         verts: Array<[number, number]>
     ): void {
-        const data = {
-            type: 'FeatureCollection' as const,
-            features: verts.map(v => ({
-                type: 'Feature' as const,
-                geometry: { type: 'Point' as const, coordinates: v },
-                properties: {}
-            }))
-        };
-
-        const existing = map.getSource(this.POLY_VERTEX_SOURCE_ID) as
-            | GeoJSONSource
-            | undefined;
-        if (existing) {
-            existing.setData(data);
-            return;
-        }
-
-        map.addSource(this.POLY_VERTEX_SOURCE_ID, {
-            type: 'geojson',
-            data
-        });
-        map.addLayer({
+        ensureGeoJSONSource(map, this.POLY_VERTEX_SOURCE_ID);
+        ensureLayer(map, {
             id: this.POLY_VERTEX_LAYER_ID,
             type: 'circle',
             source: this.POLY_VERTEX_SOURCE_ID,
@@ -713,33 +651,26 @@ export class ConsoleMapPicker {
                 'circle-stroke-color': '#ffffff'
             }
         });
+        updateSourceFeatures(
+            map,
+            this.POLY_VERTEX_SOURCE_ID,
+            verts.map(v => pointFeature(v))
+        );
     }
 
     /** Tear down all POLY-overlay layers and sources. Idempotent. */
     private removePolyOverlay(map: MapLibreMap): void {
         this.removePreviewLine(map);
-        if (map.getLayer(this.POLY_LINE_LAYER_ID)) {
-            map.removeLayer(this.POLY_LINE_LAYER_ID);
-        }
-        if (map.getSource(this.POLY_LINE_SOURCE_ID)) {
-            map.removeSource(this.POLY_LINE_SOURCE_ID);
-        }
-        if (map.getLayer(this.POLY_VERTEX_LAYER_ID)) {
-            map.removeLayer(this.POLY_VERTEX_LAYER_ID);
-        }
-        if (map.getSource(this.POLY_VERTEX_SOURCE_ID)) {
-            map.removeSource(this.POLY_VERTEX_SOURCE_ID);
-        }
+        safeRemoveLayer(map, this.POLY_LINE_LAYER_ID);
+        safeRemoveSource(map, this.POLY_LINE_SOURCE_ID);
+        safeRemoveLayer(map, this.POLY_VERTEX_LAYER_ID);
+        safeRemoveSource(map, this.POLY_VERTEX_SOURCE_ID);
     }
 
     /** Tear down just the preview segment (used between mousemove updates). */
     private removePreviewLine(map: MapLibreMap): void {
-        if (map.getLayer(this.POLY_PREVIEW_LAYER_ID)) {
-            map.removeLayer(this.POLY_PREVIEW_LAYER_ID);
-        }
-        if (map.getSource(this.POLY_PREVIEW_SOURCE_ID)) {
-            map.removeSource(this.POLY_PREVIEW_SOURCE_ID);
-        }
+        safeRemoveLayer(map, this.POLY_PREVIEW_LAYER_ID);
+        safeRemoveSource(map, this.POLY_PREVIEW_SOURCE_ID);
     }
 
     /**
