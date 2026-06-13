@@ -42,17 +42,6 @@ interface PanelConfigs {
     [key: string]: PanelConfig;
 }
 
-interface MapInstance {
-    resize(): void;
-}
-
-interface WindowWithMap extends Window {
-    map?: MapInstance;
-    panelResizer?: PanelResizer;
-}
-
-declare const window: WindowWithMap;
-
 export class PanelResizer {
     private static readonly STORAGE_KEY = 'panel-layout';
     private static readonly LAYOUT_VERSION = '1.0';
@@ -63,6 +52,9 @@ export class PanelResizer {
     private startSizes: PanelSizes = {};
     private handles: NodeListOf<Element> | null = null;
     private panelConfigs: PanelConfigs = {};
+    // Aborting this controller removes every listener registered in
+    // setupEventListeners, including the document-level drag handlers.
+    private listenerAbort = new AbortController();
 
     constructor() {
         this.initializeResizers();
@@ -147,23 +139,29 @@ export class PanelResizer {
     }
 
     private setupEventListeners(): void {
+        const { signal } = this.listenerAbort;
+
         // Add mouse events to each handle
         if (this.handles) {
             this.handles.forEach(handle => {
-                handle.addEventListener('mousedown', ((e: MouseEvent) => this.onMouseDown(e)) as EventListener);
+                handle.addEventListener(
+                    'mousedown',
+                    ((e: MouseEvent) => this.onMouseDown(e)) as EventListener,
+                    { signal }
+                );
             });
         }
 
         // Global mouse events
-        document.addEventListener('mousemove', ((e: MouseEvent) => this.onMouseMove(e)) as EventListener);
-        document.addEventListener('mouseup', ((e: MouseEvent) => this.onMouseUp(e)) as EventListener);
+        document.addEventListener('mousemove', (e) => this.onMouseMove(e), { signal });
+        document.addEventListener('mouseup', (e) => this.onMouseUp(e), { signal });
 
         // Prevent text selection during resize
-        document.addEventListener('selectstart', (e: Event) => {
+        document.addEventListener('selectstart', (e) => {
             if (this.isDragging) {
                 e.preventDefault();
             }
-        });
+        }, { signal });
     }
 
     private onMouseDown(e: MouseEvent): void {
@@ -216,7 +214,7 @@ export class PanelResizer {
         }
     }
 
-    private onMouseUp(e: MouseEvent): void {
+    private onMouseUp(_e: MouseEvent): void {
         if (!this.isDragging) return;
 
         this.isDragging = false;
@@ -511,15 +509,7 @@ export class PanelResizer {
      * Clean up event listeners
      */
     public destroy(): void {
-        if (this.handles) {
-            this.handles.forEach(handle => {
-                // Note: We can't remove the bound event listeners without storing references
-                // This is a limitation we'll accept for now
-            });
-        }
-
-        document.removeEventListener('mousemove', this.onMouseMove.bind(this));
-        document.removeEventListener('mouseup', this.onMouseUp.bind(this));
+        this.listenerAbort.abort();
     }
 }
 

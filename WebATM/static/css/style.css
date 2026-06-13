@@ -57,6 +57,10 @@ body {
     display: flex;
     align-items: center;
     gap: 1px;
+    /* Allow the connection status to truncate instead of wrapping the
+       header onto a second line (which shifts the whole layout down) */
+    flex: 1;
+    min-width: 0;
 }
 
 .header-left h1 {
@@ -65,6 +69,8 @@ body {
     color: #66BB6A;
     margin-bottom: 0;
     text-shadow: 0 0 2px rgba(102, 187, 106, 0.3);
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .amvlab-link {
@@ -102,6 +108,18 @@ body {
 
 .sim-info span {
     margin-right: 15px;
+    display: inline-block;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Reserve space so live time/rate updates don't nudge the header controls */
+#sim-time {
+    min-width: 8ch;
+}
+
+#sim-rate {
+    min-width: 9ch;
 }
 
 .status-connected {
@@ -123,6 +141,14 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.connection-statuses span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .connection-label {
@@ -147,6 +173,7 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
 }
 
 .header-right .sim-info {
@@ -249,14 +276,14 @@ body {
 }
 
 .left-panel {
-    flex: 0 0 250px;
+    flex: 0 0 var(--left-panel-basis, 250px);
     height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
 }
 
 .right-panel {
-    flex: 0 0 250px;
+    flex: 0 0 var(--right-panel-basis, 250px);
     border-right: none;
     border-left: 1px solid #404040;
     height: 100%;
@@ -280,18 +307,26 @@ body {
     min-height: 120px;
 }
 
+/* Traffic and aircraft panels keep a fixed height (content scrolls
+   internally) so live simulation data can't resize them and shift the
+   panels below */
 .right-panel .traffic-panel {
-    flex: 0 0 auto;
+    flex: 0 0 var(--traffic-panel-basis, 200px);
     min-height: 200px;
 }
 
 .right-panel .aircraft-panel {
-    flex: 0 0 auto;
+    flex: 0 0 var(--aircraft-panel-basis, 200px);
     min-height: 200px;
 }
 
+.aircraft-panel .panel-content,
+.conflicts-panel .panel-content {
+    overflow-y: auto;
+}
+
 .right-panel .conflicts-panel {
-    flex: 1;
+    flex: 1 1 var(--conflicts-panel-basis, auto);
     min-height: 200px;
     max-height: none;
 }
@@ -303,27 +338,27 @@ body {
 }
 
 .left-panel .node-panel {
-    flex: 0 0 auto;
+    flex: 0 0 var(--node-panel-basis, auto);
     min-height: 160px;
 }
 
 .left-panel .nav-panel {
-    flex: 0 0 250px;
+    flex: 0 0 var(--nav-panel-basis, 250px);
     height: 250px;
     overflow-y: auto;
 }
 
 .left-panel .display-panel {
-    flex: none;
+    flex: 0 0 var(--display-panel-basis, auto);
     min-height: 200px;
 }
 
 .panel h3 {
-    font-size: calc(var(--panel-font-size) + 2px);
+    font-size: calc(var(--panel-font-size) + 1px);
     color: #4CAF50;
-    margin-bottom: 8px;
-    border-bottom: 1px solid #404040;
-    padding-bottom: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
     flex-shrink: 0;
 }
 
@@ -541,57 +576,73 @@ body {
     font-weight: bold;
 }
 
-.sizes-toggle-control {
-    margin-top: 8px;
-    padding: 4px 0;
-}
-
-.sizes-toggle-control button {
+/* Collapsible sub-section disclosures (Map Info, 3D, Text Sizes, Colors,
+   Units, Developer). The toggle button gets an animated chevron and the
+   section expands/collapses smoothly via its 'open' class. The html-level
+   wa-open-* classes are set by the pre-paint script in index.html so
+   sections restored from storage are open at first paint (no layout shift);
+   the bundle swaps them for element-level 'open' classes when it loads. */
+.section-toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
     width: 100%;
-    text-align: left;
-    padding: 6px 8px;
-    font-size: var(--panel-font-size);
-}
-
-.sizes-controls {
-    margin-top: 4px;
-    padding: 8px;
-    background-color: #404040;
-    border-radius: 4px;
-    border: 1px solid #606060;
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-/* Colors toggle control matching sizes-toggle-control */
-.colors-toggle-control {
     margin-top: 8px;
-    padding: 4px 0;
-}
-
-.colors-toggle-control button {
-    width: 100%;
-    text-align: left;
     padding: 6px 8px;
+    background-color: #383838;
+    color: #cccccc;
+    border: 1px solid #555555;
+    border-radius: 3px;
     font-size: var(--panel-font-size);
+    text-align: left;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s, color 0.15s;
 }
 
-.colors-controls {
-    margin-top: 4px;
-    padding: 8px;
-    background-color: #404040;
-    border-radius: 4px;
-    border: 1px solid #606060;
-    max-height: 300px;
-    overflow-y: auto;
+.section-toggle:hover {
+    background-color: #454545;
+    color: #ffffff;
 }
-.threeD-controls {
+
+.section-toggle::before {
+    content: '▸';
+    font-size: 10px;
+    color: #8a8a8a;
+    transition: transform 0.2s ease;
+}
+
+.section-toggle.open::before,
+html.wa-open-sizes-controls #sizes-toggle::before,
+html.wa-open-colors-controls #colors-toggle::before,
+html.wa-open-units-controls #units-toggle::before,
+html.wa-open-threeD-controls #threeD-toggle::before {
+    transform: rotate(90deg);
+}
+
+.collapsible-section {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+    padding: 0;
+    border: 0 solid #606060;
+    border-radius: 4px;
+    background-color: #404040;
+    overflow: hidden;
+    transition: max-height 0.22s ease, opacity 0.18s ease,
+        padding 0.22s ease, margin-top 0.22s ease;
+}
+
+.collapsible-section.open,
+html.wa-open-sizes-controls #sizes-controls,
+html.wa-open-colors-controls #colors-controls,
+html.wa-open-units-controls #units-controls,
+html.wa-open-threeD-controls #threeD-controls {
+    max-height: 300px;
+    opacity: 1;
     margin-top: 4px;
     padding: 8px;
-    background-color: #404040;
-    border-radius: 4px;
-    border: 1px solid #606060;
-    max-height: 300px;
+    border-width: 1px;
     overflow-y: auto;
 }
 
@@ -671,93 +722,25 @@ body {
     border-radius: 3px;
 }
 
-/* Units toggle control matching colors-toggle-control */
-.units-toggle-control {
-    margin-top: 8px;
-    padding: 4px 0;
-}
-/* 3D toggle control matching other toggle controls */
-.threeD-toggle-control {
-    margin-top: 8px;
-    padding: 4px 0;
-}
-.threeD-toggle-control button {
-    width: 100%;
-    text-align: left;
-    padding: 6px 8px;
-    font-size: var(--panel-font-size);
-}
-
-.units-toggle-control button {
-    width: 100%;
-    text-align: left;
-    padding: 6px 8px;
-    font-size: var(--panel-font-size);
-}
-
-.units-controls {
-    margin-top: 4px;
-    padding: 8px;
-    background-color: #404040;
-    border-radius: 4px;
-    border: 1px solid #606060;
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-/* Developer toggle control matching other toggle controls */
-.developer-toggle-control {
-    margin-top: 8px;
-    padding: 4px 0;
-}
-
-/* Map info toggle control matching other toggle controls */
-.map-info-toggle-control {
-    margin-top: 8px;
-    padding: 4px 0;
-}
-.map-info-toggle-control button {
-    width: 100%;
-    text-align: left;
-    padding: 6px 8px;
-    font-size: var(--panel-font-size);
-}
+/* Map info section content (label/value rows) */
 .map-info-controls {
-    background-color: #404040;
-    padding: 8px;
-    border-radius: 4px;
-    border: 1px solid #606060;
     font-size: var(--panel-font-size);
     color: #cccccc;
 }
-.bbox-coordinates {
-    font-size: 0.9em;
-    margin-left: 5px;
-}
-.bbox-row {
+
+.map-info-row {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 4px;
-}
-.bbox-row span {
-    flex: 1;
-}
-.developer-toggle-control button {
-    width: 100%;
-    text-align: left;
-    padding: 6px 8px;
-    font-size: var(--panel-font-size);
+    gap: 8px;
+    padding: 2px 0;
 }
 
-/* Developer controls matching other control sections */
-.developer-controls {
-    margin-top: 4px;
-    padding: 8px;
-    background-color: #404040;
-    border-radius: 4px;
-    border: 1px solid #606060;
-    max-height: 300px;
-    overflow-y: auto;
+.map-info-row span:first-child {
+    color: #999999;
+}
+
+.map-info-row span:last-child {
+    font-variant-numeric: tabular-nums;
 }
 
 /* Developer section controls */
@@ -1139,7 +1122,7 @@ body {
     border-top: 1px solid #404040;
     display: flex;
     flex-direction: row;
-    flex: 0 0 200px;
+    flex: 0 0 var(--console-container-basis, 200px);
     min-height: 120px;
     max-height: 400px;
 }
@@ -1148,14 +1131,14 @@ body {
     display: flex;
     flex-direction: column;
     border-right: 1px solid #404040;
-    flex: 0 0 50%;
+    flex: 0 0 var(--console-section-basis, 50%);
     min-width: 200px;
 }
 
 .echo-section {
     display: flex;
     flex-direction: column;
-    flex: 0 0 50%;
+    flex: 0 0 var(--echo-section-basis, 50%);
     min-width: 150px;
 }
 
@@ -1807,6 +1790,16 @@ body {
 .node-info div {
     display: flex;
     justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+}
+
+/* Truncate long values (e.g. server IDs) instead of wrapping, so
+   late-arriving data doesn't grow the panel and shift the layout */
+.node-info div span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .node-selector-container {
@@ -1861,7 +1854,9 @@ body {
     border: 1px solid #606060;
     border-radius: 4px;
     background-color: #404040;
-    min-height: 60px;
+    /* Reserve room for one node entry (header + three detail lines +
+       padding) so the panel doesn't grow when the first node arrives */
+    min-height: calc(var(--panel-font-size) * 5.6 + 28px);
     max-height: 250px;
     overflow-y: auto;
     overflow-x: hidden;
@@ -2288,10 +2283,14 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
+    /* Span the full panel width as a header bar despite the panel padding */
+    margin: -8px -8px 8px -8px;
+    padding: 0 6px 0 10px;
     flex-shrink: 0;
-    height: 24px;
-    min-height: 24px;
+    height: 28px;
+    min-height: 28px;
+    background-color: #2a2a2a;
+    border-bottom: 1px solid #404040;
 }
 
 .panel-header h3 {
@@ -2302,12 +2301,17 @@ body {
 .collapse-btn {
     background: none;
     border: none;
-    color: #cccccc;
-    font-size: 14px;
+    color: #9e9e9e;
+    font-size: 11px;
     cursor: pointer;
-    padding: 2px 8px;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border-radius: 3px;
-    transition: background-color 0.2s, color 0.2s;
+    transition: background-color 0.2s, color 0.2s, transform 0.3s ease;
     user-select: none;
 }
 
@@ -2334,10 +2338,19 @@ body {
     overflow: hidden;
 }
 
-/* When a panel is collapsed, adjust parent panel min-height */
+/* When a panel is collapsed, shrink it to just the header bar.
+   !important is needed to beat inline flex-basis values restored by
+   PanelResizer and the per-panel min-height rules above. */
 .panel.collapsed {
-    flex: 0 0 auto;
-    min-height: 40px;
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    padding-bottom: 0;
+    overflow: hidden;
+}
+
+.panel.collapsed .panel-header {
+    margin-bottom: 0;
+    border-bottom: none;
 }
 
 /* Specific collapsed panel adjustments */

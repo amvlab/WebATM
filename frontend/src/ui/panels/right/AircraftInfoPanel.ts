@@ -15,12 +15,8 @@ import { AircraftData, DisplayOptions } from '../../../data/types';
 import { StateManager } from '../../../core/StateManager';
 import { DataProcessor } from '../../../data/DataProcessor';
 import { AUTO_MODEL_SENTINEL } from '../../../data/aircraftCategories';
+import { AircraftModelOption, fetchAircraftModels, populateModelSelect } from '../../../data/aircraftModels';
 import { logger } from '../../../utils/Logger';
-
-interface ModelOption {
-    filename: string;
-    displayName: string;
-}
 
 export class AircraftInfoPanel extends BasePanel {
     private aircraftInfoElement: HTMLElement | null = null;
@@ -43,8 +39,7 @@ export class AircraftInfoPanel extends BasePanel {
     // Per-aircraft 3D model override UI state
     private modelSelect: HTMLSelectElement | null = null;
     private modelRowElement: HTMLElement | null = null;
-    private availableModels: ModelOption[] = [];
-    private modelsFetched = false;
+    private availableModels: AircraftModelOption[] = [];
 
     // Per-aircraft 3D scale override UI state
     private scaleInput: HTMLInputElement | null = null;
@@ -436,31 +431,16 @@ export class AircraftInfoPanel extends BasePanel {
     }
 
     /**
-     * Fetch the list of available 3D models once. Subsequent panel
-     * rebuilds reuse the cached list.
+     * Fetch the list of available 3D models (cached module-wide, so
+     * panel rebuilds and other panels reuse the same catalog).
      */
     private async loadAvailableModels(): Promise<void> {
-        if (this.modelsFetched) return;
-        try {
-            const response = await fetch('/api/aircraft/models');
-            if (!response.ok) {
-                logger.warn('AircraftInfoPanel', 'Failed to fetch aircraft models');
-                return;
-            }
-            const data = await response.json();
-            if (data.success && Array.isArray(data.models)) {
-                this.availableModels = data.models.map((m: { filename: string; displayName: string }) => ({
-                    filename: m.filename,
-                    displayName: m.displayName,
-                }));
-                this.modelsFetched = true;
-                // Populate the dropdown if it already exists.
-                this.populateModelDropdown();
-                this.syncModelDropdown();
-            }
-        } catch (error) {
-            logger.error('AircraftInfoPanel', `Error loading aircraft models: ${error}`);
-        }
+        const models = await fetchAircraftModels();
+        if (models.length === 0) return;
+        this.availableModels = models;
+        // Populate the dropdown if it already exists.
+        this.populateModelDropdown();
+        this.syncModelDropdown();
     }
 
     /**
@@ -468,19 +448,7 @@ export class AircraftInfoPanel extends BasePanel {
      */
     private populateModelDropdown(): void {
         if (!this.modelSelect) return;
-        this.modelSelect.innerHTML = '';
-
-        const autoOption = document.createElement('option');
-        autoOption.value = AUTO_MODEL_SENTINEL;
-        autoOption.textContent = 'Auto (by aircraft type)';
-        this.modelSelect.appendChild(autoOption);
-
-        for (const model of this.availableModels) {
-            const option = document.createElement('option');
-            option.value = model.filename;
-            option.textContent = model.displayName;
-            this.modelSelect.appendChild(option);
-        }
+        populateModelSelect(this.modelSelect, this.availableModels);
     }
 
     /**
@@ -586,7 +554,7 @@ export class AircraftInfoPanel extends BasePanel {
         return this.selectedAircraft;
     }
 
-    protected onDestroy(): void {
+    protected override onDestroy(): void {
         this.copyFeedbackTimeouts.forEach((id) => window.clearTimeout(id));
         this.copyFeedbackTimeouts.clear();
         this.valueElements.clear();

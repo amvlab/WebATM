@@ -1,4 +1,5 @@
 import { logger } from '../../utils/Logger';
+import { ListenerRegistry } from '../../utils/events';
 
 /**
  * BasePanel - Abstract base class for all UI panels
@@ -13,11 +14,7 @@ export abstract class BasePanel {
     protected panelElement: HTMLElement | null = null;
     protected panelContent: HTMLElement | null = null;
     protected collapseButton: HTMLElement | null = null;
-    protected eventListeners: Array<{
-        element: HTMLElement;
-        event: string;
-        handler: EventListener;
-    }> = [];
+    protected listeners = new ListenerRegistry();
 
     /**
      * @param panelSelector - CSS selector for the panel container
@@ -75,15 +72,12 @@ export abstract class BasePanel {
     protected toggleCollapse(): void {
         if (!this.panelContent || !this.collapseButton) return;
 
-        const isCollapsed = this.panelContent.style.display === 'none';
+        const collapsed = !this.panelContent.classList.contains('collapsed');
 
-        if (isCollapsed) {
-            this.panelContent.style.display = '';
-            this.collapseButton.textContent = '▼';
-        } else {
-            this.panelContent.style.display = 'none';
-            this.collapseButton.textContent = '▶';
-        }
+        // CSS shrinks the panel to its header bar and rotates the chevron
+        this.panelContent.classList.toggle('collapsed', collapsed);
+        this.collapseButton.classList.toggle('collapsed', collapsed);
+        this.panelElement?.classList.toggle('collapsed', collapsed);
     }
 
     /**
@@ -94,8 +88,85 @@ export abstract class BasePanel {
         event: string,
         handler: EventListener
     ): void {
-        element.addEventListener(event, handler);
-        this.eventListeners.push({ element, event, handler });
+        this.listeners.add(element, event, handler);
+    }
+
+    /**
+     * Attach a tracked event listener to an element by ID, with the
+     * standard warn-if-missing handling that panels used to copy-paste.
+     * Returns the element so callers can chain further setup.
+     */
+    protected bindEvent(
+        id: string,
+        event: string,
+        handler: EventListener
+    ): HTMLElement | null {
+        const element = document.getElementById(id);
+        if (!element) {
+            logger.warn(this.constructor.name, `Element not found: ${id}`);
+            return null;
+        }
+        this.addEventListener(element, event, handler);
+        return element;
+    }
+
+    /**
+     * Attach a tracked click handler to an element by ID.
+     */
+    protected bindClick(id: string, handler: () => void): HTMLElement | null {
+        return this.bindEvent(id, 'click', () => handler());
+    }
+
+    /**
+     * Attach a tracked 'input' handler that receives the input's value.
+     */
+    protected bindInput(id: string, handler: (value: string) => void): HTMLElement | null {
+        return this.bindEvent(id, 'input', (e) => {
+            handler((e.target as HTMLInputElement).value);
+        });
+    }
+
+    /**
+     * Attach a tracked 'change' handler that receives the select/input value.
+     */
+    protected bindChange(id: string, handler: (value: string) => void): HTMLElement | null {
+        return this.bindEvent(id, 'change', (e) => {
+            handler((e.target as HTMLInputElement | HTMLSelectElement).value);
+        });
+    }
+
+    /**
+     * Attach a tracked 'change' handler to a checkbox that receives its
+     * checked state.
+     */
+    protected bindCheckbox(id: string, handler: (checked: boolean) => void): HTMLElement | null {
+        return this.bindEvent(id, 'change', (e) => {
+            handler((e.target as HTMLInputElement).checked);
+        });
+    }
+
+    /**
+     * Set an input/select value by element ID, ignoring missing elements.
+     */
+    protected setInputValue(id: string, value: string | number): void {
+        const element = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
+        if (element) element.value = String(value);
+    }
+
+    /**
+     * Set a checkbox's checked state by element ID, ignoring missing elements.
+     */
+    protected setChecked(id: string, checked: boolean): void {
+        const element = document.getElementById(id) as HTMLInputElement | null;
+        if (element) element.checked = checked;
+    }
+
+    /**
+     * Set an element's text content by element ID, ignoring missing elements.
+     */
+    protected setText(id: string, text: string): void {
+        const element = document.getElementById(id);
+        if (element) element.textContent = text;
     }
 
     /**
@@ -116,18 +187,13 @@ export abstract class BasePanel {
     /**
      * Update panel content (override in subclasses)
      */
-    public abstract update(data?: any): void;
+    public abstract update(data?: unknown): void;
 
     /**
      * Clean up panel resources
      */
     public destroy(): void {
-        // Remove all event listeners
-        this.eventListeners.forEach(({ element, event, handler }) => {
-            element.removeEventListener(event, handler);
-        });
-        this.eventListeners = [];
-
+        this.listeners.removeAll();
         // Call subclass cleanup
         this.onDestroy();
     }

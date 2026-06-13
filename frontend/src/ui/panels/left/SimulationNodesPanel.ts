@@ -16,6 +16,7 @@ import { BasePanel } from '../BasePanel';
 import { NodeInfo, NodeData } from '../../../data/types';
 import { SocketManager } from '../../../core/SocketManager';
 import { logger } from '../../../utils/Logger';
+import { escapeHtml } from '../../../utils/dom';
 
 export class SimulationNodesPanel extends BasePanel {
     private socketManager: SocketManager | null = null;
@@ -225,13 +226,13 @@ export class SimulationNodesPanel extends BasePanel {
         // Build node item HTML
         nodeItem.innerHTML = `
             <div class="node-header">
-                <strong>${alias}</strong>
+                <strong>${escapeHtml(alias)}</strong>
                 ${nodeId === this.nodeData?.active_node ? '<span class="active-badge">Active</span>' : ''}
             </div>
             <div class="node-details">
-                <div>Status: ${scenario}</div>
-                <div>Time: ${currentTime}</div>
-                <div>Node ID: ${displayNodeId}</div>
+                <div>Status: ${escapeHtml(scenario)}</div>
+                <div>Time: ${escapeHtml(currentTime)}</div>
+                <div>Node ID: ${escapeHtml(displayNodeId)}</div>
             </div>
         `;
 
@@ -335,10 +336,7 @@ export class SimulationNodesPanel extends BasePanel {
      */
     private logToConsole(message: string, isError: boolean = false): void {
         // Access global console UI if available
-        const consoleUI = (window as any).console_ui;
-        if (consoleUI && typeof consoleUI.addMessage === 'function') {
-            consoleUI.addMessage(message, isError ? 'console-error' : undefined);
-        }
+        window.console_ui?.addMessage(message, isError ? 'console-error' : undefined);
     }
 
     /**
@@ -367,7 +365,7 @@ export class SimulationNodesPanel extends BasePanel {
     /**
      * Cleanup
      */
-    protected onDestroy(): void {
+    protected override onDestroy(): void {
         // Unsubscribe from socket events
         if (this.socketManager) {
             const socket = this.socketManager.getSocket();

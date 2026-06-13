@@ -12,8 +12,9 @@
 import { BasePanel } from '../BasePanel';
 import { StateManager } from '../../../core/StateManager';
 import { storage } from '../../../utils/StorageManager';
-import { SpeedType, SpeedUnit, AltitudeUnit, VerticalSpeedUnit, AircraftShapeType } from '../../../data/types';
+import { SpeedType, SpeedUnit, AltitudeUnit, VerticalSpeedUnit, AircraftShapeType, DisplayOptions } from '../../../data/types';
 import { AUTO_MODEL_SENTINEL } from '../../../data/aircraftCategories';
+import { fetchAircraftModels, populateModelSelect } from '../../../data/aircraftModels';
 import { logger } from '../../../utils/Logger';
 import type { App } from '../../../core/App';
 
@@ -57,6 +58,53 @@ export class DisplayOptionsPanel extends BasePanel {
      */
     public setApp(app: App): void {
         this.app = app;
+    }
+
+    /**
+     * Wire a checkbox that persists to storage (key = element ID) and
+     * mirrors into a DisplayOptions flag.
+     */
+    private bindBooleanOption(id: string, stateKey: keyof DisplayOptions): void {
+        this.bindCheckbox(id, (checked) => {
+            storage.set(id, checked);
+            this.stateManager?.updateDisplayOptions({ [stateKey]: checked } as Partial<DisplayOptions>);
+        });
+    }
+
+    /**
+     * Wire a master checkbox that drives a group of sub-option checkboxes:
+     * persists every key, syncs the sub checkboxes and their
+     * `<sub-id>-container` visibility, and pushes one combined state update.
+     */
+    private bindMasterToggle(
+        id: string,
+        stateKey: keyof DisplayOptions,
+        subOptions: Array<{ id: string; stateKey: keyof DisplayOptions }>
+    ): void {
+        this.bindCheckbox(id, (checked) => {
+            storage.set(id, checked);
+            const update: Partial<DisplayOptions> = { [stateKey]: checked } as Partial<DisplayOptions>;
+            for (const sub of subOptions) {
+                storage.set(sub.id, checked);
+                this.setChecked(sub.id, checked);
+                (update as Record<string, unknown>)[sub.stateKey] = checked;
+            }
+            this.toggleSubOptionContainers(subOptions.map(sub => `${sub.id}-container`), checked);
+            this.stateManager?.updateDisplayOptions(update);
+        });
+    }
+
+    /**
+     * Wire a select that persists to storage under its own key and mirrors
+     * into a DisplayOptions field.
+     */
+    private bindSelectOption(id: string, storageKey: string, stateKey: keyof DisplayOptions): void {
+        this.bindChange(id, (value) => {
+            if (this.stateManager) {
+                this.stateManager.updateDisplayOptions({ [stateKey]: value } as Partial<DisplayOptions>);
+                storage.set(storageKey, value);
+            }
+        });
     }
 
     /**
@@ -233,102 +281,47 @@ export class DisplayOptionsPanel extends BasePanel {
         this.updateTextSizeUI('panel-font-size', 'panel-font-size-value', panelFontSize);
 
         // Update dropdown values
-        const speedTypeSelect = document.getElementById('aircraft-speed-type-select') as HTMLSelectElement;
-        if (speedTypeSelect) speedTypeSelect.value = speedType;
+        this.setInputValue('aircraft-speed-type-select', speedType);
+        this.setInputValue('speed-unit-select', speedUnit);
+        this.setInputValue('altitude-unit-select', altitudeUnit);
+        this.setInputValue('vertical-speed-unit-select', verticalSpeedUnit);
+        this.setInputValue('aircraft-shape-select', aircraftShape);
 
-        const speedUnitSelect = document.getElementById('speed-unit-select') as HTMLSelectElement;
-        if (speedUnitSelect) speedUnitSelect.value = speedUnit;
-
-        const altitudeUnitSelect = document.getElementById('altitude-unit-select') as HTMLSelectElement;
-        if (altitudeUnitSelect) altitudeUnitSelect.value = altitudeUnit;
-
-        const verticalSpeedUnitSelect = document.getElementById('vertical-speed-unit-select') as HTMLSelectElement;
-        if (verticalSpeedUnitSelect) verticalSpeedUnitSelect.value = verticalSpeedUnit;
-
-        const aircraftShapeSelect = document.getElementById('aircraft-shape-select') as HTMLSelectElement;
-        if (aircraftShapeSelect) aircraftShapeSelect.value = aircraftShape;
-
-        const show3DOverlayCheckbox = document.getElementById('show-3d-overlay') as HTMLInputElement;
-        if (show3DOverlayCheckbox) {
-            show3DOverlayCheckbox.checked = show3DOverlay;
-        }
-
-        const aircraft3DScaleInput = document.getElementById('aircraft-3d-scale') as HTMLInputElement;
-        if (aircraft3DScaleInput) {
-            aircraft3DScaleInput.value = aircraft3DScale.toString();
-        }
+        this.setChecked('show-3d-overlay', show3DOverlay);
+        this.setInputValue('aircraft-3d-scale', aircraft3DScale);
 
         // Update aircraft icon size UI
-        const iconSizeInput = document.getElementById('aircraft-icon-size') as HTMLInputElement;
-        if (iconSizeInput) iconSizeInput.value = aircraftIconSize.toString();
-        const iconSizeValue = document.getElementById('icon-size-value');
-        if (iconSizeValue) iconSizeValue.textContent = aircraftIconSize.toFixed(1);
+        this.setInputValue('aircraft-icon-size', aircraftIconSize);
+        this.setText('icon-size-value', aircraftIconSize.toFixed(1));
 
         // Update map labels text size UI
-        const labelsSizeInput = document.getElementById('map-labels-text-size') as HTMLInputElement;
-        if (labelsSizeInput) labelsSizeInput.value = mapLabelsTextSize.toString();
-        const labelsSizeValue = document.getElementById('labels-size-value');
-        if (labelsSizeValue) labelsSizeValue.textContent = mapLabelsTextSize.toString();
+        this.setInputValue('map-labels-text-size', mapLabelsTextSize);
+        this.setText('labels-size-value', mapLabelsTextSize.toString());
 
         // Update aircraft display checkboxes to reflect loaded values
-        const showAircraftCheckbox = document.getElementById('show-aircraft') as HTMLInputElement;
-        if (showAircraftCheckbox) showAircraftCheckbox.checked = showAircraft;
-
-        const showAircraftLabelsCheckbox = document.getElementById('show-aircraft-labels') as HTMLInputElement;
-        if (showAircraftLabelsCheckbox) showAircraftLabelsCheckbox.checked = showAircraftLabels;
-
-        const showAircraftIdCheckbox = document.getElementById('show-aircraft-id') as HTMLInputElement;
-        if (showAircraftIdCheckbox) showAircraftIdCheckbox.checked = showAircraftId;
-
-        const showAircraftSpeedCheckbox = document.getElementById('show-aircraft-speed') as HTMLInputElement;
-        if (showAircraftSpeedCheckbox) showAircraftSpeedCheckbox.checked = showAircraftSpeed;
-
-        const showAircraftAltitudeCheckbox = document.getElementById('show-aircraft-altitude') as HTMLInputElement;
-        if (showAircraftAltitudeCheckbox) showAircraftAltitudeCheckbox.checked = showAircraftAltitude;
-
-        const showAircraftTypeCheckbox = document.getElementById('show-aircraft-type') as HTMLInputElement;
-        if (showAircraftTypeCheckbox) showAircraftTypeCheckbox.checked = showAircraftType;
-
-        const showAircraftTrailsCheckbox = document.getElementById('show-aircraft-trails') as HTMLInputElement;
-        if (showAircraftTrailsCheckbox) showAircraftTrailsCheckbox.checked = showAircraftTrails;
-
-        const showProtectedZonesCheckbox = document.getElementById('show-protected-zones') as HTMLInputElement;
-        if (showProtectedZonesCheckbox) showProtectedZonesCheckbox.checked = showProtectedZones;
+        this.setChecked('show-aircraft', showAircraft);
+        this.setChecked('show-aircraft-labels', showAircraftLabels);
+        this.setChecked('show-aircraft-id', showAircraftId);
+        this.setChecked('show-aircraft-speed', showAircraftSpeed);
+        this.setChecked('show-aircraft-altitude', showAircraftAltitude);
+        this.setChecked('show-aircraft-type', showAircraftType);
+        this.setChecked('show-aircraft-trails', showAircraftTrails);
+        this.setChecked('show-protected-zones', showProtectedZones);
 
         // Update shape display checkboxes to reflect loaded values
-        const showShapesCheckbox = document.getElementById('show-shapes') as HTMLInputElement;
-        if (showShapesCheckbox) showShapesCheckbox.checked = showShapes;
-
-        const showShapeFillCheckbox = document.getElementById('show-shape-fill') as HTMLInputElement;
-        if (showShapeFillCheckbox) showShapeFillCheckbox.checked = showShapeFill;
-
-        const showShapeLinesCheckbox = document.getElementById('show-shape-lines') as HTMLInputElement;
-        if (showShapeLinesCheckbox) showShapeLinesCheckbox.checked = showShapeLines;
-
-        const showShapeLabelsCheckbox = document.getElementById('show-shape-labels') as HTMLInputElement;
-        if (showShapeLabelsCheckbox) showShapeLabelsCheckbox.checked = showShapeLabels;
+        this.setChecked('show-shapes', showShapes);
+        this.setChecked('show-shape-fill', showShapeFill);
+        this.setChecked('show-shape-lines', showShapeLines);
+        this.setChecked('show-shape-labels', showShapeLabels);
 
         // Update navdata (airports/waypoints) checkboxes to reflect loaded values
-        const showAirportsCheckbox = document.getElementById('show-airports') as HTMLInputElement;
-        if (showAirportsCheckbox) showAirportsCheckbox.checked = showAirports;
-
-        const showAirportIconsCheckbox = document.getElementById('show-airport-icons') as HTMLInputElement;
-        if (showAirportIconsCheckbox) showAirportIconsCheckbox.checked = showAirportIcons;
-
-        const showAirportLabelsCheckbox = document.getElementById('show-airport-labels') as HTMLInputElement;
-        if (showAirportLabelsCheckbox) showAirportLabelsCheckbox.checked = showAirportLabels;
-
-        const showHeliportsCheckbox = document.getElementById('show-heliports') as HTMLInputElement;
-        if (showHeliportsCheckbox) showHeliportsCheckbox.checked = showHeliports;
-
-        const showWaypointsCheckbox = document.getElementById('show-waypoints') as HTMLInputElement;
-        if (showWaypointsCheckbox) showWaypointsCheckbox.checked = showWaypoints;
-
-        const showWaypointIconsCheckbox = document.getElementById('show-waypoint-icons') as HTMLInputElement;
-        if (showWaypointIconsCheckbox) showWaypointIconsCheckbox.checked = showWaypointIcons;
-
-        const showWaypointLabelsCheckbox = document.getElementById('show-waypoint-labels') as HTMLInputElement;
-        if (showWaypointLabelsCheckbox) showWaypointLabelsCheckbox.checked = showWaypointLabels;
+        this.setChecked('show-airports', showAirports);
+        this.setChecked('show-airport-icons', showAirportIcons);
+        this.setChecked('show-airport-labels', showAirportLabels);
+        this.setChecked('show-heliports', showHeliports);
+        this.setChecked('show-waypoints', showWaypoints);
+        this.setChecked('show-waypoint-icons', showWaypointIcons);
+        this.setChecked('show-waypoint-labels', showWaypointLabels);
 
         // Reflect master-toggle collapse state for the airport/waypoint groups
         this.toggleSubOptionContainers([
@@ -344,70 +337,31 @@ export class DisplayOptionsPanel extends BasePanel {
             'show-waypoint-labels-container'
         ], showWaypoints);
 
-        const showRunwaysCheckbox = document.getElementById('show-runways') as HTMLInputElement;
-        if (showRunwaysCheckbox) showRunwaysCheckbox.checked = showRunways;
-
-        const showRunwayLabelsCheckbox = document.getElementById('show-runway-labels') as HTMLInputElement;
-        if (showRunwayLabelsCheckbox) showRunwayLabelsCheckbox.checked = showRunwayLabels;
-
-        const showPavementCheckbox = document.getElementById('show-pavement') as HTMLInputElement;
-        if (showPavementCheckbox) showPavementCheckbox.checked = showPavement;
-
-        const snapToNavaidsCheckbox = document.getElementById('snap-to-navaids') as HTMLInputElement;
-        if (snapToNavaidsCheckbox) snapToNavaidsCheckbox.checked = snapToNavaids;
+        this.setChecked('show-runways', showRunways);
+        this.setChecked('show-runway-labels', showRunwayLabels);
+        this.setChecked('show-pavement', showPavement);
+        this.setChecked('snap-to-navaids', snapToNavaids);
 
         // Update route display checkboxes to reflect loaded values
-        const showRoutesCheckbox = document.getElementById('show-routes') as HTMLInputElement;
-        if (showRoutesCheckbox) showRoutesCheckbox.checked = showRoutes;
-
-        const showRouteLinesCheckbox = document.getElementById('show-route-lines') as HTMLInputElement;
-        if (showRouteLinesCheckbox) showRouteLinesCheckbox.checked = showRouteLines;
-
-        const showRouteLabelsCheckbox = document.getElementById('show-route-labels') as HTMLInputElement;
-        if (showRouteLabelsCheckbox) showRouteLabelsCheckbox.checked = showRouteLabels;
-
-        const showRoutePointsCheckbox = document.getElementById('show-route-points') as HTMLInputElement;
-        if (showRoutePointsCheckbox) showRoutePointsCheckbox.checked = showRoutePoints;
+        this.setChecked('show-routes', showRoutes);
+        this.setChecked('show-route-lines', showRouteLines);
+        this.setChecked('show-route-labels', showRouteLabels);
+        this.setChecked('show-route-points', showRoutePoints);
 
         // Update color picker values to reflect loaded colors
-        const aircraftIconColorInput = document.getElementById('aircraft-icon-color') as HTMLInputElement;
-        if (aircraftIconColorInput) aircraftIconColorInput.value = aircraftIconColor;
-
-        const aircraftLabelsColorInput = document.getElementById('aircraft-labels-color') as HTMLInputElement;
-        if (aircraftLabelsColorInput) aircraftLabelsColorInput.value = aircraftLabelColor;
-
-        const aircraftSelectedColorInput = document.getElementById('aircraft-selected-color') as HTMLInputElement;
-        if (aircraftSelectedColorInput) aircraftSelectedColorInput.value = aircraftSelectedColor;
-
-        const aircraftConflictColorInput = document.getElementById('aircraft-conflict-color') as HTMLInputElement;
-        if (aircraftConflictColorInput) aircraftConflictColorInput.value = aircraftConflictColor;
-
-        const aircraftTrailsColorInput = document.getElementById('aircraft-trails-color') as HTMLInputElement;
-        if (aircraftTrailsColorInput) aircraftTrailsColorInput.value = aircraftTrailColor;
-
-        const trailConflictColorInput = document.getElementById('trail-conflict-color') as HTMLInputElement;
-        if (trailConflictColorInput) trailConflictColorInput.value = trailConflictColor;
-
-        const protectedZonesColorInput = document.getElementById('protected-zones-color') as HTMLInputElement;
-        if (protectedZonesColorInput) protectedZonesColorInput.value = protectedZonesColor;
-
-        const routeLabelsColorInput = document.getElementById('route-labels-color') as HTMLInputElement;
-        if (routeLabelsColorInput) routeLabelsColorInput.value = routeLabelsColor;
-
-        const routePointsColorInput = document.getElementById('route-points-color') as HTMLInputElement;
-        if (routePointsColorInput) routePointsColorInput.value = routePointsColor;
-
-        const routeLinesColorInput = document.getElementById('route-lines-color') as HTMLInputElement;
-        if (routeLinesColorInput) routeLinesColorInput.value = routeLinesColor;
-
-        const shapeFillColorInput = document.getElementById('shape-fill-color') as HTMLInputElement;
-        if (shapeFillColorInput) shapeFillColorInput.value = shapeFillColor;
-
-        const shapeLinesColorInput = document.getElementById('shape-lines-color') as HTMLInputElement;
-        if (shapeLinesColorInput) shapeLinesColorInput.value = shapeLinesColor;
-
-        const shapeLabelsColorInput = document.getElementById('shape-labels-color') as HTMLInputElement;
-        if (shapeLabelsColorInput) shapeLabelsColorInput.value = shapeLabelsColor;
+        this.setInputValue('aircraft-icon-color', aircraftIconColor);
+        this.setInputValue('aircraft-labels-color', aircraftLabelColor);
+        this.setInputValue('aircraft-selected-color', aircraftSelectedColor);
+        this.setInputValue('aircraft-conflict-color', aircraftConflictColor);
+        this.setInputValue('aircraft-trails-color', aircraftTrailColor);
+        this.setInputValue('trail-conflict-color', trailConflictColor);
+        this.setInputValue('protected-zones-color', protectedZonesColor);
+        this.setInputValue('route-labels-color', routeLabelsColor);
+        this.setInputValue('route-points-color', routePointsColor);
+        this.setInputValue('route-lines-color', routeLinesColor);
+        this.setInputValue('shape-fill-color', shapeFillColor);
+        this.setInputValue('shape-lines-color', shapeLinesColor);
+        this.setInputValue('shape-labels-color', shapeLabelsColor);
 
         // Apply collapsible section states
         this.applyCollapsibleState('sizes-controls', sizesVisible);
@@ -420,34 +374,20 @@ export class DisplayOptionsPanel extends BasePanel {
      * Setup text size controls (header, console & echo, panel)
      */
     private setupTextSizeControls(): void {
-        // Header font size
-        const headerSizeInput = document.getElementById('header-font-size') as HTMLInputElement;
-        if (headerSizeInput) {
-            headerSizeInput.addEventListener('input', (e) => {
-                const size = parseInt((e.target as HTMLInputElement).value);
-                this.updateTextSize('header', size);
-            });
-        }
+        this.bindInput('header-font-size', (value) => {
+            this.updateTextSize('header', parseInt(value));
+        });
 
         // Console & Echo font size (single control for both)
-        const consoleSizeInput = document.getElementById('console-font-size') as HTMLInputElement;
-        if (consoleSizeInput) {
-            consoleSizeInput.addEventListener('input', (e) => {
-                const size = parseInt((e.target as HTMLInputElement).value);
-                this.updateTextSize('console', size);
-                // Also apply to echo since they now share the same size
-                this.applyTextSize('echo', size);
-            });
-        }
+        this.bindInput('console-font-size', (value) => {
+            const size = parseInt(value);
+            this.updateTextSize('console', size);
+            this.applyTextSize('echo', size);
+        });
 
-        // Panel font size
-        const panelSizeInput = document.getElementById('panel-font-size') as HTMLInputElement;
-        if (panelSizeInput) {
-            panelSizeInput.addEventListener('input', (e) => {
-                const size = parseInt((e.target as HTMLInputElement).value);
-                this.updateTextSize('panel', size);
-            });
-        }
+        this.bindInput('panel-font-size', (value) => {
+            this.updateTextSize('panel', parseInt(value));
+        });
     }
 
     /**
@@ -465,10 +405,11 @@ export class DisplayOptionsPanel extends BasePanel {
         // Save to storage
         storage.set(`${type}-font-size`, size);
 
-        // Update state manager
-        const updateKey = `${type}FontSize` as keyof typeof update;
-        const update: any = {};
-        update[updateKey] = size;
+        // Update state manager. Note `${type}FontSize` can be 'echoFontSize',
+        // which is not a DisplayOptions key (echo follows the console size in
+        // state); the record type keeps that historical write explicit.
+        const update: Partial<Record<`${typeof type}FontSize`, number>> = {};
+        update[`${type}FontSize`] = size;
         this.stateManager.updateDisplayOptions(update);
     }
 
@@ -489,54 +430,26 @@ export class DisplayOptionsPanel extends BasePanel {
      * Update text size UI elements
      */
     private updateTextSizeUI(inputId: string, valueId: string, size: number): void {
-        const input = document.getElementById(inputId) as HTMLInputElement;
-        if (input) input.value = size.toString();
-
-        const valueSpan = document.getElementById(valueId);
-        if (valueSpan) valueSpan.textContent = size.toString();
+        this.setInputValue(inputId, size);
+        this.setText(valueId, size.toString());
     }
 
     /**
      * Setup speed type control (CAS/TAS/GS)
      */
     private setupSpeedTypeControl(): void {
-        const speedTypeSelect = document.getElementById('aircraft-speed-type-select') as HTMLSelectElement;
-        if (!speedTypeSelect) return;
-
-        speedTypeSelect.addEventListener('change', (e) => {
-            const speedType = (e.target as HTMLSelectElement).value as SpeedType;
-
-            if (this.stateManager) {
-                this.stateManager.updateDisplayOptions({ speedType });
-                storage.set('speed-type', speedType);
-            }
-        });
+        this.bindSelectOption('aircraft-speed-type-select', 'speed-type', 'speedType');
     }
 
     /**
      * Setup aircraft shape control
      */
     private setupAircraftShapeControl(): void {
-        const aircraftShapeSelect = document.getElementById('aircraft-shape-select') as HTMLSelectElement;
-        if (!aircraftShapeSelect) return;
-
-        aircraftShapeSelect.addEventListener('change', (e) => {
-            const aircraftShape = (e.target as HTMLSelectElement).value as AircraftShapeType;
-
-            if (this.stateManager) {
-                this.stateManager.updateDisplayOptions({ aircraftShape });
-                storage.set('aircraft-shape', aircraftShape);
-            }
-        });
+        this.bindSelectOption('aircraft-shape-select', 'aircraft-shape', 'aircraftShape');
     }
 
     private setupRenderModeControl(): void {
-        const show3DOverlayCheckbox = document.getElementById('show-3d-overlay') as HTMLInputElement;
-        if (!show3DOverlayCheckbox) return;
-
-        show3DOverlayCheckbox.addEventListener('change', async (e) => {
-            const checked = (e.target as HTMLInputElement).checked;
-
+        this.bindCheckbox('show-3d-overlay', async (checked) => {
             storage.set('show-3d-overlay', checked);
 
             if (this.stateManager) {
@@ -552,7 +465,7 @@ export class DisplayOptionsPanel extends BasePanel {
                         logger.info('DisplayOptionsPanel', `3D overlay ${checked ? 'enabled' : 'disabled'} successfully`);
                     } catch (error) {
                         logger.error('DisplayOptionsPanel', `Failed to toggle 3D overlay: ${error}`);
-                        show3DOverlayCheckbox.checked = !checked;
+                        this.setChecked('show-3d-overlay', !checked);
                         if (this.stateManager) {
                             this.stateManager.updateDisplayOptions({ show3DOverlay: !checked });
                         }
@@ -570,22 +483,16 @@ export class DisplayOptionsPanel extends BasePanel {
     }
 
     private setup3DScaleControl(): void {
-        const aircraft3DScaleInput = document.getElementById('aircraft-3d-scale') as HTMLInputElement;
-        if (!aircraft3DScaleInput) return;
-
-        // Handle Enter key to apply changes
-        aircraft3DScaleInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+        // Apply on Enter (then drop focus) and on blur
+        this.bindEvent('aircraft-3d-scale', 'keydown', (e) => {
+            if ((e as KeyboardEvent).key === 'Enter') {
                 const inputElement = e.target as HTMLInputElement;
                 this.apply3DScaleValue(inputElement);
-                inputElement.blur(); // Remove focus after applying
+                inputElement.blur();
             }
         });
-
-        // Validate and apply on blur (when user clicks away)
-        aircraft3DScaleInput.addEventListener('blur', (e) => {
-            const inputElement = e.target as HTMLInputElement;
-            this.apply3DScaleValue(inputElement);
+        this.bindEvent('aircraft-3d-scale', 'blur', (e) => {
+            this.apply3DScaleValue(e.target as HTMLInputElement);
         });
     }
 
@@ -625,14 +532,9 @@ export class DisplayOptionsPanel extends BasePanel {
     }
 
     private setupAircraftModelControl(): void {
-        const aircraftModelSelect = document.getElementById('aircraft-model-select') as HTMLSelectElement;
-        if (!aircraftModelSelect) return;
-
         this.loadAvailableAircraftModels();
 
-        aircraftModelSelect.addEventListener('change', (e) => {
-            const selectedModel = (e.target as HTMLSelectElement).value;
-
+        this.bindChange('aircraft-model-select', (selectedModel) => {
             if (this.stateManager) {
                 storage.set('selected-aircraft-model', selectedModel);
                 this.stateManager.updateDisplayOptions({ selectedAircraftModel: selectedModel });
@@ -642,153 +544,35 @@ export class DisplayOptionsPanel extends BasePanel {
     }
 
     private async loadAvailableAircraftModels(): Promise<void> {
-        try {
-            const response = await fetch('/api/aircraft/models');
-            if (!response.ok) {
-                logger.warn('DisplayOptionsPanel', 'Failed to fetch aircraft models - using default');
-                return;
-            }
+        const models = await fetchAircraftModels();
+        if (models.length === 0) return;
 
-            const data = await response.json();
-            if (data.success && data.models) {
-                this.populateAircraftModelDropdown(data.models);
-                logger.debug('DisplayOptionsPanel', `Loaded ${data.models.length} aircraft models`);
-            }
-        } catch (error) {
-            logger.error('DisplayOptionsPanel', `Error loading aircraft models: ${error}`);
-        }
-    }
-
-    /**
-     * Populate aircraft model dropdown with available models
-     */
-    private populateAircraftModelDropdown(models: any[]): void {
-        const aircraftModelSelect = document.getElementById('aircraft-model-select') as HTMLSelectElement;
+        const aircraftModelSelect = document.getElementById('aircraft-model-select') as HTMLSelectElement | null;
         if (!aircraftModelSelect) return;
 
+        // Selects the saved model, falling back to Auto when it's unknown
         const savedModel = this.stateManager?.getDisplayOptions().selectedAircraftModel || AUTO_MODEL_SENTINEL;
-
-        aircraftModelSelect.innerHTML = '';
-
-        // "Auto" sentinel: use per-type category-based model selection
-        const autoOption = document.createElement('option');
-        autoOption.value = AUTO_MODEL_SENTINEL;
-        autoOption.textContent = 'Auto (by aircraft type)';
-        if (savedModel === AUTO_MODEL_SENTINEL) {
-            autoOption.selected = true;
-        }
-        aircraftModelSelect.appendChild(autoOption);
-
-        // Fixed-model options — force every aircraft to render with the chosen file
-        models.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model.filename;
-            option.textContent = model.displayName;
-
-            if (model.filename === savedModel) {
-                option.selected = true;
-            }
-
-            aircraftModelSelect.appendChild(option);
-        });
-
-        // If the saved model is neither "auto" nor a known file, fall back to auto
-        const hasSavedOption = savedModel === AUTO_MODEL_SENTINEL
-            || models.some(m => m.filename === savedModel);
-        aircraftModelSelect.value = hasSavedOption ? savedModel : AUTO_MODEL_SENTINEL;
-    }
-
-    /**
-     * Update aircraft model dropdown selection
-     */
-    private updateAircraftModelDropdown(selectedModel: string): void {
-        const aircraftModelSelect = document.getElementById('aircraft-model-select') as HTMLSelectElement;
-        if (!aircraftModelSelect) return;
-
-        const optionExists = Array.from(aircraftModelSelect.options).some(option => option.value === selectedModel);
-        if (optionExists) {
-            aircraftModelSelect.value = selectedModel;
-            logger.debug('DisplayOptionsPanel', `Aircraft model dropdown set to: ${selectedModel}`);
-        } else {
-            logger.warn('DisplayOptionsPanel', `Saved aircraft model "${selectedModel}" not found in dropdown options`);
-        }
+        populateModelSelect(aircraftModelSelect, models, savedModel);
+        logger.debug('DisplayOptionsPanel', `Loaded ${models.length} aircraft models`);
     }
 
     /**
      * Setup unit controls (speed, altitude, vertical speed)
      */
     private setupUnitControls(): void {
-        // Speed unit
-        const speedUnitSelect = document.getElementById('speed-unit-select') as HTMLSelectElement;
-        if (speedUnitSelect) {
-            speedUnitSelect.addEventListener('change', (e) => {
-                const speedUnit = (e.target as HTMLSelectElement).value as SpeedUnit;
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ speedUnit });
-                    storage.set('speed-unit', speedUnit);
-                }
-            });
-        }
-
-        // Altitude unit
-        const altitudeUnitSelect = document.getElementById('altitude-unit-select') as HTMLSelectElement;
-        if (altitudeUnitSelect) {
-            altitudeUnitSelect.addEventListener('change', (e) => {
-                const altitudeUnit = (e.target as HTMLSelectElement).value as AltitudeUnit;
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ altitudeUnit });
-                    storage.set('altitude-unit', altitudeUnit);
-                }
-            });
-        }
-
-        // Vertical speed unit
-        const verticalSpeedUnitSelect = document.getElementById('vertical-speed-unit-select') as HTMLSelectElement;
-        if (verticalSpeedUnitSelect) {
-            verticalSpeedUnitSelect.addEventListener('change', (e) => {
-                const verticalSpeedUnit = (e.target as HTMLSelectElement).value as VerticalSpeedUnit;
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ verticalSpeedUnit });
-                    storage.set('vertical-speed-unit', verticalSpeedUnit);
-                }
-            });
-        }
+        this.bindSelectOption('speed-unit-select', 'speed-unit', 'speedUnit');
+        this.bindSelectOption('altitude-unit-select', 'altitude-unit', 'altitudeUnit');
+        this.bindSelectOption('vertical-speed-unit-select', 'vertical-speed-unit', 'verticalSpeedUnit');
     }
 
     /**
      * Setup collapsible sections (Text Sizes, Colors, Units)
      */
     private setupCollapsibleSections(): void {
-        // Text Sizes toggle
-        const sizesToggle = document.getElementById('sizes-toggle');
-        if (sizesToggle) {
-            sizesToggle.addEventListener('click', () => {
-                this.toggleCollapsibleSection('sizes-controls', 'sizes-visible');
-            });
-        }
-
-        // Colors toggle
-        const colorsToggle = document.getElementById('colors-toggle');
-        if (colorsToggle) {
-            colorsToggle.addEventListener('click', () => {
-                this.toggleCollapsibleSection('colors-controls', 'colors-visible');
-            });
-        }
-
-        // Units toggle
-        const unitsToggle = document.getElementById('units-toggle');
-        if (unitsToggle) {
-            unitsToggle.addEventListener('click', () => {
-                this.toggleCollapsibleSection('units-controls', 'units-visible');
-            });
-        }
-
-        const threeDToggle = document.getElementById('threeD-toggle');
-        if (threeDToggle) {
-            threeDToggle.addEventListener('click', () => {
-                this.toggleCollapsibleSection('threeD-controls', 'threeD-visible');
-            });
-        }
+        this.bindClick('sizes-toggle', () => this.toggleCollapsibleSection('sizes-controls', 'sizes-visible'));
+        this.bindClick('colors-toggle', () => this.toggleCollapsibleSection('colors-controls', 'colors-visible'));
+        this.bindClick('units-toggle', () => this.toggleCollapsibleSection('units-controls', 'units-visible'));
+        this.bindClick('threeD-toggle', () => this.toggleCollapsibleSection('threeD-controls', 'threeD-visible'));
     }
 
     /**
@@ -798,16 +582,24 @@ export class DisplayOptionsPanel extends BasePanel {
         const section = document.getElementById(sectionId);
         if (!section || !this.stateManager) return;
 
-        const isVisible = section.style.display === 'block';
+        const isVisible = section.classList.contains('open');
         const newVisibility = !isVisible;
 
         this.applyCollapsibleState(sectionId, newVisibility);
+
+        if (newVisibility) {
+            // Once the expand animation has finished, make sure the section
+            // is visible within the scrollable panel
+            window.setTimeout(() => {
+                section.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }, 240);
+        }
 
         // Save to storage
         storage.set(storageKey, newVisibility);
 
         // Update state manager
-        const update: any = {};
+        const update: Partial<DisplayOptions> = {};
         if (storageKey === 'sizes-visible') update.sizesVisible = newVisibility;
         if (storageKey === 'colors-visible') update.colorsVisible = newVisibility;
         if (storageKey === 'units-visible') update.unitsVisible = newVisibility;
@@ -821,57 +613,54 @@ export class DisplayOptionsPanel extends BasePanel {
      */
     private applyCollapsibleState(sectionId: string, isVisible: boolean): void {
         const section = document.getElementById(sectionId);
-        if (section) {
-            section.style.display = isVisible ? 'block' : 'none';
-        }
+        if (!section) return;
+
+        // Take over from the pre-paint script in index.html, which may have
+        // opened this section at the html level before the bundle loaded
+        document.documentElement.classList.remove(`wa-open-${sectionId}`);
+
+        section.classList.toggle('open', isVisible);
+
+        const toggleBtn = document.getElementById(sectionId.replace(/-controls$/, '-toggle'));
+        toggleBtn?.classList.toggle('open', isVisible);
     }
+
+    /**
+     * Color pickers: element ID doubles as the storage key. Defaults match
+     * the StateManager defaults.
+     */
+    private static readonly COLOR_OPTIONS: ReadonlyArray<{
+        id: string;
+        stateKey: keyof DisplayOptions;
+        defaultColor: string;
+    }> = [
+        { id: 'aircraft-icon-color', stateKey: 'aircraftIconColor', defaultColor: '#00ff00' },
+        { id: 'aircraft-labels-color', stateKey: 'aircraftLabelColor', defaultColor: '#0066cc' },
+        { id: 'aircraft-selected-color', stateKey: 'aircraftSelectedColor', defaultColor: '#ff6600' },
+        { id: 'aircraft-conflict-color', stateKey: 'aircraftConflictColor', defaultColor: '#ffa000' },
+        { id: 'aircraft-trails-color', stateKey: 'aircraftTrailColor', defaultColor: '#0066cc' },
+        { id: 'trail-conflict-color', stateKey: 'trailConflictColor', defaultColor: '#ffa000' },
+        { id: 'protected-zones-color', stateKey: 'protectedZonesColor', defaultColor: '#00ff00' },
+        { id: 'route-labels-color', stateKey: 'routeLabelsColor', defaultColor: '#ff00ff' },
+        { id: 'route-points-color', stateKey: 'routePointsColor', defaultColor: '#ff00ff' },
+        { id: 'route-lines-color', stateKey: 'routeLinesColor', defaultColor: '#ff00ff' },
+        { id: 'shape-fill-color', stateKey: 'shapeFillColor', defaultColor: '#ff00ff' },
+        { id: 'shape-lines-color', stateKey: 'shapeLinesColor', defaultColor: '#ff00ff' },
+        { id: 'shape-labels-color', stateKey: 'shapeLabelsColor', defaultColor: '#ff00ff' }
+    ];
 
     /**
      * Setup color controls
      */
     private setupColorControls(): void {
-        // Helper function to setup a color input
-        const setupColorInput = (inputId: string, storageKey: string, stateKey: string) => {
-            const input = document.getElementById(inputId) as HTMLInputElement;
-            if (input) {
-                input.addEventListener('input', (e) => {
-                    const color = (e.target as HTMLInputElement).value;
-
-                    // Save to storage
-                    storage.set(storageKey, color);
-
-                    // Update state manager
-                    if (this.stateManager) {
-                        const update: any = {};
-                        update[stateKey] = color;
-                        this.stateManager.updateDisplayOptions(update);
-                    }
-                });
-            }
-        };
-
-        // Setup all color inputs
-        setupColorInput('aircraft-icon-color', 'aircraft-icon-color', 'aircraftIconColor');
-        setupColorInput('aircraft-labels-color', 'aircraft-labels-color', 'aircraftLabelColor');
-        setupColorInput('aircraft-selected-color', 'aircraft-selected-color', 'aircraftSelectedColor');
-        setupColorInput('aircraft-conflict-color', 'aircraft-conflict-color', 'aircraftConflictColor');
-        setupColorInput('aircraft-trails-color', 'aircraft-trails-color', 'aircraftTrailColor');
-        setupColorInput('trail-conflict-color', 'trail-conflict-color', 'trailConflictColor');
-        setupColorInput('protected-zones-color', 'protected-zones-color', 'protectedZonesColor');
-        setupColorInput('route-labels-color', 'route-labels-color', 'routeLabelsColor');
-        setupColorInput('route-points-color', 'route-points-color', 'routePointsColor');
-        setupColorInput('route-lines-color', 'route-lines-color', 'routeLinesColor');
-        setupColorInput('shape-fill-color', 'shape-fill-color', 'shapeFillColor');
-        setupColorInput('shape-lines-color', 'shape-lines-color', 'shapeLinesColor');
-        setupColorInput('shape-labels-color', 'shape-labels-color', 'shapeLabelsColor');
-
-        // Setup reset to defaults button
-        const resetColorsBtn = document.getElementById('reset-colors-btn');
-        if (resetColorsBtn) {
-            resetColorsBtn.addEventListener('click', () => {
-                this.resetColorsToDefaults();
+        for (const { id, stateKey } of DisplayOptionsPanel.COLOR_OPTIONS) {
+            this.bindInput(id, (color) => {
+                storage.set(id, color);
+                this.stateManager?.updateDisplayOptions({ [stateKey]: color } as Partial<DisplayOptions>);
             });
         }
+
+        this.bindClick('reset-colors-btn', () => this.resetColorsToDefaults());
     }
 
     /**
@@ -880,80 +669,13 @@ export class DisplayOptionsPanel extends BasePanel {
     private resetColorsToDefaults(): void {
         if (!this.stateManager) return;
 
-        // Default colors (matching StateManager defaults)
-        const defaultColors = {
-            aircraftIconColor: '#00ff00',
-            aircraftLabelColor: '#0066cc',
-            aircraftSelectedColor: '#ff6600',
-            aircraftConflictColor: '#ffa000',
-            aircraftTrailColor: '#0066cc',
-            trailConflictColor: '#ffa000',
-            protectedZonesColor: '#00ff00',
-            routeLabelsColor: '#ff00ff',
-            routePointsColor: '#ff00ff',
-            routeLinesColor: '#ff00ff',
-            shapeFillColor: '#ff00ff',
-            shapeLinesColor: '#ff00ff',
-            shapeLabelsColor: '#ff00ff'
-        };
-
-        // Update storage with defaults
-        storage.set('aircraft-icon-color', defaultColors.aircraftIconColor);
-        storage.set('aircraft-labels-color', defaultColors.aircraftLabelColor);
-        storage.set('aircraft-selected-color', defaultColors.aircraftSelectedColor);
-        storage.set('aircraft-conflict-color', defaultColors.aircraftConflictColor);
-        storage.set('aircraft-trails-color', defaultColors.aircraftTrailColor);
-        storage.set('trail-conflict-color', defaultColors.trailConflictColor);
-        storage.set('protected-zones-color', defaultColors.protectedZonesColor);
-        storage.set('route-labels-color', defaultColors.routeLabelsColor);
-        storage.set('route-points-color', defaultColors.routePointsColor);
-        storage.set('route-lines-color', defaultColors.routeLinesColor);
-        storage.set('shape-fill-color', defaultColors.shapeFillColor);
-        storage.set('shape-lines-color', defaultColors.shapeLinesColor);
-        storage.set('shape-labels-color', defaultColors.shapeLabelsColor);
-
-        // Update state manager
-        this.stateManager.updateDisplayOptions(defaultColors);
-
-        // Update UI color pickers
-        const aircraftIconColorInput = document.getElementById('aircraft-icon-color') as HTMLInputElement;
-        if (aircraftIconColorInput) aircraftIconColorInput.value = defaultColors.aircraftIconColor;
-
-        const aircraftLabelsColorInput = document.getElementById('aircraft-labels-color') as HTMLInputElement;
-        if (aircraftLabelsColorInput) aircraftLabelsColorInput.value = defaultColors.aircraftLabelColor;
-
-        const aircraftSelectedColorInput = document.getElementById('aircraft-selected-color') as HTMLInputElement;
-        if (aircraftSelectedColorInput) aircraftSelectedColorInput.value = defaultColors.aircraftSelectedColor;
-
-        const aircraftConflictColorInput = document.getElementById('aircraft-conflict-color') as HTMLInputElement;
-        if (aircraftConflictColorInput) aircraftConflictColorInput.value = defaultColors.aircraftConflictColor;
-
-        const aircraftTrailsColorInput = document.getElementById('aircraft-trails-color') as HTMLInputElement;
-        if (aircraftTrailsColorInput) aircraftTrailsColorInput.value = defaultColors.aircraftTrailColor;
-
-        const trailConflictColorInput = document.getElementById('trail-conflict-color') as HTMLInputElement;
-        if (trailConflictColorInput) trailConflictColorInput.value = defaultColors.trailConflictColor;
-
-        const protectedZonesColorInput = document.getElementById('protected-zones-color') as HTMLInputElement;
-        if (protectedZonesColorInput) protectedZonesColorInput.value = defaultColors.protectedZonesColor;
-
-        const routeLabelsColorInput = document.getElementById('route-labels-color') as HTMLInputElement;
-        if (routeLabelsColorInput) routeLabelsColorInput.value = defaultColors.routeLabelsColor;
-
-        const routePointsColorInput = document.getElementById('route-points-color') as HTMLInputElement;
-        if (routePointsColorInput) routePointsColorInput.value = defaultColors.routePointsColor;
-
-        const routeLinesColorInput = document.getElementById('route-lines-color') as HTMLInputElement;
-        if (routeLinesColorInput) routeLinesColorInput.value = defaultColors.routeLinesColor;
-
-        const shapeFillColorInput = document.getElementById('shape-fill-color') as HTMLInputElement;
-        if (shapeFillColorInput) shapeFillColorInput.value = defaultColors.shapeFillColor;
-
-        const shapeLinesColorInput = document.getElementById('shape-lines-color') as HTMLInputElement;
-        if (shapeLinesColorInput) shapeLinesColorInput.value = defaultColors.shapeLinesColor;
-
-        const shapeLabelsColorInput = document.getElementById('shape-labels-color') as HTMLInputElement;
-        if (shapeLabelsColorInput) shapeLabelsColorInput.value = defaultColors.shapeLabelsColor;
+        const update: Partial<DisplayOptions> = {};
+        for (const { id, stateKey, defaultColor } of DisplayOptionsPanel.COLOR_OPTIONS) {
+            storage.set(id, defaultColor);
+            this.setInputValue(id, defaultColor);
+            (update as Record<string, unknown>)[stateKey] = defaultColor;
+        }
+        this.stateManager.updateDisplayOptions(update);
 
         logger.debug('DisplayOptionsPanel', 'Colors reset to defaults');
     }
@@ -975,486 +697,76 @@ export class DisplayOptionsPanel extends BasePanel {
      * Setup map display options (aircraft, labels, routes, shapes, etc.)
      */
     private setupFutureMapOptions(): void {
-        // Setup listeners to save values and update state manager
+        // Master toggles drive their sub-option checkboxes and containers
+        this.bindMasterToggle('show-aircraft-labels', 'showAircraftLabels', [
+            { id: 'show-aircraft-id', stateKey: 'showAircraftId' },
+            { id: 'show-aircraft-speed', stateKey: 'showAircraftSpeed' },
+            { id: 'show-aircraft-altitude', stateKey: 'showAircraftAltitude' },
+            { id: 'show-aircraft-type', stateKey: 'showAircraftType' }
+        ]);
+        this.bindMasterToggle('show-shapes', 'showShapes', [
+            { id: 'show-shape-fill', stateKey: 'showShapeFill' },
+            { id: 'show-shape-lines', stateKey: 'showShapeLines' },
+            { id: 'show-shape-labels', stateKey: 'showShapeLabels' }
+        ]);
+        this.bindMasterToggle('show-airports', 'showAirports', [
+            { id: 'show-airport-icons', stateKey: 'showAirportIcons' },
+            { id: 'show-airport-labels', stateKey: 'showAirportLabels' },
+            { id: 'show-heliports', stateKey: 'showHeliports' },
+            { id: 'show-runways', stateKey: 'showRunways' },
+            { id: 'show-runway-labels', stateKey: 'showRunwayLabels' },
+            { id: 'show-pavement', stateKey: 'showPavement' }
+        ]);
+        this.bindMasterToggle('show-waypoints', 'showWaypoints', [
+            { id: 'show-waypoint-icons', stateKey: 'showWaypointIcons' },
+            { id: 'show-waypoint-labels', stateKey: 'showWaypointLabels' }
+        ]);
 
-        // Aircraft icon visibility
-        const showAircraftCheckbox = document.getElementById('show-aircraft') as HTMLInputElement;
-        if (showAircraftCheckbox) {
-            showAircraftCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-aircraft', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showAircraft: checked });
-                }
-            });
-        }
-
-        // Aircraft labels visibility - acts as global toggle for ID, Speed, and Altitude
-        const showAircraftLabelsCheckbox = document.getElementById('show-aircraft-labels') as HTMLInputElement;
-        if (showAircraftLabelsCheckbox) {
-            showAircraftLabelsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-
-                // Save the main labels toggle state
-                storage.set('show-aircraft-labels', checked);
-
-                // Update all four label sub-options to match
-                storage.set('show-aircraft-id', checked);
-                storage.set('show-aircraft-speed', checked);
-                storage.set('show-aircraft-altitude', checked);
-                storage.set('show-aircraft-type', checked);
-
-                // Update the UI checkboxes for ID, Speed, Altitude, and Type
-                const showAircraftIdCheckbox = document.getElementById('show-aircraft-id') as HTMLInputElement;
-                if (showAircraftIdCheckbox) showAircraftIdCheckbox.checked = checked;
-
-                const showAircraftSpeedCheckbox = document.getElementById('show-aircraft-speed') as HTMLInputElement;
-                if (showAircraftSpeedCheckbox) showAircraftSpeedCheckbox.checked = checked;
-
-                const showAircraftAltitudeCheckbox = document.getElementById('show-aircraft-altitude') as HTMLInputElement;
-                if (showAircraftAltitudeCheckbox) showAircraftAltitudeCheckbox.checked = checked;
-
-                const showAircraftTypeCheckbox = document.getElementById('show-aircraft-type') as HTMLInputElement;
-                if (showAircraftTypeCheckbox) showAircraftTypeCheckbox.checked = checked;
-
-                // Toggle visibility of sub-option containers
-                this.toggleSubOptionContainers([
-                    'show-aircraft-id-container',
-                    'show-aircraft-speed-container',
-                    'show-aircraft-altitude-container',
-                    'show-aircraft-type-container'
-                ], checked);
-
-                // Update state manager with all five values
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({
-                        showAircraftLabels: checked,
-                        showAircraftId: checked,
-                        showAircraftSpeed: checked,
-                        showAircraftAltitude: checked,
-                        showAircraftType: checked
-                    });
-                }
-            });
-        }
-
-        // Aircraft ID visibility
-        const showAircraftIdCheckbox = document.getElementById('show-aircraft-id') as HTMLInputElement;
-        if (showAircraftIdCheckbox) {
-            showAircraftIdCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-aircraft-id', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showAircraftId: checked });
-                }
-            });
-        }
-
-        // Aircraft speed visibility
-        const showAircraftSpeedCheckbox = document.getElementById('show-aircraft-speed') as HTMLInputElement;
-        if (showAircraftSpeedCheckbox) {
-            showAircraftSpeedCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-aircraft-speed', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showAircraftSpeed: checked });
-                }
-            });
-        }
-
-        // Aircraft altitude visibility
-        const showAircraftAltitudeCheckbox = document.getElementById('show-aircraft-altitude') as HTMLInputElement;
-        if (showAircraftAltitudeCheckbox) {
-            showAircraftAltitudeCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-aircraft-altitude', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showAircraftAltitude: checked });
-                }
-            });
-        }
-
-        // Aircraft type visibility
-        const showAircraftTypeCheckbox = document.getElementById('show-aircraft-type') as HTMLInputElement;
-        if (showAircraftTypeCheckbox) {
-            showAircraftTypeCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-aircraft-type', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showAircraftType: checked });
-                }
-            });
-        }
-
-        // Shape display options - master toggle controls all sub-options
-        const showShapesCheckbox = document.getElementById('show-shapes') as HTMLInputElement;
-        if (showShapesCheckbox) {
-            showShapesCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-
-                // Save the main shapes toggle state
-                storage.set('show-shapes', checked);
-
-                // Update all three shape sub-options to match
-                storage.set('show-shape-fill', checked);
-                storage.set('show-shape-lines', checked);
-                storage.set('show-shape-labels', checked);
-
-                // Update the UI checkboxes for Fill, Lines, and Labels
-                const showShapeFillCheckbox = document.getElementById('show-shape-fill') as HTMLInputElement;
-                if (showShapeFillCheckbox) showShapeFillCheckbox.checked = checked;
-
-                const showShapeLinesCheckbox = document.getElementById('show-shape-lines') as HTMLInputElement;
-                if (showShapeLinesCheckbox) showShapeLinesCheckbox.checked = checked;
-
-                const showShapeLabelsCheckbox = document.getElementById('show-shape-labels') as HTMLInputElement;
-                if (showShapeLabelsCheckbox) showShapeLabelsCheckbox.checked = checked;
-
-                // Toggle visibility of sub-option containers
-                this.toggleSubOptionContainers([
-                    'show-shape-fill-container',
-                    'show-shape-lines-container',
-                    'show-shape-labels-container'
-                ], checked);
-
-                // Update state manager with all four values
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({
-                        showShapes: checked,
-                        showShapeFill: checked,
-                        showShapeLines: checked,
-                        showShapeLabels: checked
-                    });
-                }
-            });
-        }
-
-        const showShapeFillCheckbox = document.getElementById('show-shape-fill') as HTMLInputElement;
-        if (showShapeFillCheckbox) {
-            showShapeFillCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-shape-fill', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showShapeFill: checked });
-                }
-            });
-        }
-
-        const showShapeLinesCheckbox = document.getElementById('show-shape-lines') as HTMLInputElement;
-        if (showShapeLinesCheckbox) {
-            showShapeLinesCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-shape-lines', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showShapeLines: checked });
-                }
-            });
-        }
-
-        const showShapeLabelsCheckbox = document.getElementById('show-shape-labels') as HTMLInputElement;
-        if (showShapeLabelsCheckbox) {
-            showShapeLabelsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-shape-labels', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showShapeLabels: checked });
-                }
-            });
-        }
-
-        // Navdata (airports / waypoints) display options
-        // Airports master toggle controls all airport sub-options
-        const showAirportsCheckbox = document.getElementById('show-airports') as HTMLInputElement;
-        if (showAirportsCheckbox) {
-            showAirportsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-
-                // Save the main airports toggle state
-                storage.set('show-airports', checked);
-
-                // Update all airport sub-options to match
-                storage.set('show-airport-icons', checked);
-                storage.set('show-airport-labels', checked);
-                storage.set('show-heliports', checked);
-                storage.set('show-runways', checked);
-                storage.set('show-runway-labels', checked);
-                storage.set('show-pavement', checked);
-
-                // Update the UI checkboxes for each sub-option
-                const subCheckboxIds = [
-                    'show-airport-icons',
-                    'show-airport-labels',
-                    'show-heliports',
-                    'show-runways',
-                    'show-runway-labels',
-                    'show-pavement'
-                ];
-                subCheckboxIds.forEach(id => {
-                    const cb = document.getElementById(id) as HTMLInputElement;
-                    if (cb) cb.checked = checked;
-                });
-
-                // Toggle visibility of sub-option containers
-                this.toggleSubOptionContainers([
-                    'show-airport-icons-container',
-                    'show-airport-labels-container',
-                    'show-heliports-container',
-                    'show-runways-container',
-                    'show-runway-labels-container',
-                    'show-pavement-container'
-                ], checked);
-
-                // Update state manager with all values
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({
-                        showAirports: checked,
-                        showAirportIcons: checked,
-                        showAirportLabels: checked,
-                        showHeliports: checked,
-                        showRunways: checked,
-                        showRunwayLabels: checked,
-                        showPavement: checked
-                    });
-                }
-            });
-        }
-
-        const showAirportIconsCheckbox = document.getElementById('show-airport-icons') as HTMLInputElement;
-        if (showAirportIconsCheckbox) {
-            showAirportIconsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-airport-icons', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showAirportIcons: checked });
-                }
-            });
-        }
-
-        const showAirportLabelsCheckbox = document.getElementById('show-airport-labels') as HTMLInputElement;
-        if (showAirportLabelsCheckbox) {
-            showAirportLabelsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-airport-labels', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showAirportLabels: checked });
-                }
-            });
-        }
-
-        const showHeliportsCheckbox = document.getElementById('show-heliports') as HTMLInputElement;
-        if (showHeliportsCheckbox) {
-            showHeliportsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-heliports', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showHeliports: checked });
-                }
-            });
-        }
-
-        // Waypoints master toggle controls all waypoint sub-options
-        const showWaypointsCheckbox = document.getElementById('show-waypoints') as HTMLInputElement;
-        if (showWaypointsCheckbox) {
-            showWaypointsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-
-                // Save the main waypoints toggle state
-                storage.set('show-waypoints', checked);
-
-                // Update all waypoint sub-options to match
-                storage.set('show-waypoint-icons', checked);
-                storage.set('show-waypoint-labels', checked);
-
-                // Update the UI checkboxes for each sub-option
-                const showWaypointIconsCb = document.getElementById('show-waypoint-icons') as HTMLInputElement;
-                if (showWaypointIconsCb) showWaypointIconsCb.checked = checked;
-
-                const showWaypointLabelsCb = document.getElementById('show-waypoint-labels') as HTMLInputElement;
-                if (showWaypointLabelsCb) showWaypointLabelsCb.checked = checked;
-
-                // Toggle visibility of sub-option containers
-                this.toggleSubOptionContainers([
-                    'show-waypoint-icons-container',
-                    'show-waypoint-labels-container'
-                ], checked);
-
-                // Update state manager with all values
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({
-                        showWaypoints: checked,
-                        showWaypointIcons: checked,
-                        showWaypointLabels: checked
-                    });
-                }
-            });
-        }
-
-        const showWaypointIconsCheckbox = document.getElementById('show-waypoint-icons') as HTMLInputElement;
-        if (showWaypointIconsCheckbox) {
-            showWaypointIconsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-waypoint-icons', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showWaypointIcons: checked });
-                }
-            });
-        }
-
-        const showWaypointLabelsCheckbox = document.getElementById('show-waypoint-labels') as HTMLInputElement;
-        if (showWaypointLabelsCheckbox) {
-            showWaypointLabelsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-waypoint-labels', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showWaypointLabels: checked });
-                }
-            });
-        }
-
-        const showRunwaysCheckbox = document.getElementById('show-runways') as HTMLInputElement;
-        if (showRunwaysCheckbox) {
-            showRunwaysCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-runways', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showRunways: checked });
-                }
-            });
-        }
-
-        const showRunwayLabelsCheckbox = document.getElementById('show-runway-labels') as HTMLInputElement;
-        if (showRunwayLabelsCheckbox) {
-            showRunwayLabelsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-runway-labels', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showRunwayLabels: checked });
-                }
-            });
-        }
-
-        const showPavementCheckbox = document.getElementById('show-pavement') as HTMLInputElement;
-        if (showPavementCheckbox) {
-            showPavementCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-pavement', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showPavement: checked });
-                }
-            });
-        }
-
-        const snapToNavaidsCheckbox = document.getElementById('snap-to-navaids') as HTMLInputElement;
-        if (snapToNavaidsCheckbox) {
-            snapToNavaidsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('snap-to-navaids', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ snapToNavaids: checked });
-                }
-            });
-        }
-
-        // Route display options
-        const showRoutesCheckbox = document.getElementById('show-routes') as HTMLInputElement;
-        if (showRoutesCheckbox) {
-            showRoutesCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-routes', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showRoutes: checked });
-                }
-            });
-        }
-
-        const showRouteLinesCheckbox = document.getElementById('show-route-lines') as HTMLInputElement;
-        if (showRouteLinesCheckbox) {
-            showRouteLinesCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-route-lines', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showRouteLines: checked });
-                }
-            });
-        }
-
-        const showRouteLabelsCheckbox = document.getElementById('show-route-labels') as HTMLInputElement;
-        if (showRouteLabelsCheckbox) {
-            showRouteLabelsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-route-labels', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showRouteLabels: checked });
-                }
-            });
-        }
-
-        const showRoutePointsCheckbox = document.getElementById('show-route-points') as HTMLInputElement;
-        if (showRoutePointsCheckbox) {
-            showRoutePointsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-route-points', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showRoutePoints: checked });
-                }
-            });
-        }
-
-        // Protected Zones toggle
-        const showProtectedZonesCheckbox = document.getElementById('show-protected-zones') as HTMLInputElement;
-        if (showProtectedZonesCheckbox) {
-            showProtectedZonesCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-protected-zones', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showProtectedZones: checked });
-                }
-            });
-        }
-
-        // Aircraft Trails toggle
-        const showAircraftTrailsCheckbox = document.getElementById('show-aircraft-trails') as HTMLInputElement;
-        if (showAircraftTrailsCheckbox) {
-            showAircraftTrailsCheckbox.addEventListener('change', (e) => {
-                const checked = (e.target as HTMLInputElement).checked;
-                storage.set('show-aircraft-trails', checked);
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ showAircraftTrails: checked });
-                }
-            });
+        // Independent boolean options (storage key = element ID)
+        const booleanOptions: Array<[string, keyof DisplayOptions]> = [
+            ['show-aircraft', 'showAircraft'],
+            ['show-aircraft-id', 'showAircraftId'],
+            ['show-aircraft-speed', 'showAircraftSpeed'],
+            ['show-aircraft-altitude', 'showAircraftAltitude'],
+            ['show-aircraft-type', 'showAircraftType'],
+            ['show-aircraft-trails', 'showAircraftTrails'],
+            ['show-protected-zones', 'showProtectedZones'],
+            ['show-shape-fill', 'showShapeFill'],
+            ['show-shape-lines', 'showShapeLines'],
+            ['show-shape-labels', 'showShapeLabels'],
+            ['show-airport-icons', 'showAirportIcons'],
+            ['show-airport-labels', 'showAirportLabels'],
+            ['show-heliports', 'showHeliports'],
+            ['show-waypoint-icons', 'showWaypointIcons'],
+            ['show-waypoint-labels', 'showWaypointLabels'],
+            ['show-runways', 'showRunways'],
+            ['show-runway-labels', 'showRunwayLabels'],
+            ['show-pavement', 'showPavement'],
+            ['snap-to-navaids', 'snapToNavaids'],
+            ['show-routes', 'showRoutes'],
+            ['show-route-lines', 'showRouteLines'],
+            ['show-route-labels', 'showRouteLabels'],
+            ['show-route-points', 'showRoutePoints']
+        ];
+        for (const [id, stateKey] of booleanOptions) {
+            this.bindBooleanOption(id, stateKey);
         }
 
         // Aircraft icon size
-        const iconSizeInput = document.getElementById('aircraft-icon-size') as HTMLInputElement;
-        if (iconSizeInput) {
-            iconSizeInput.addEventListener('input', (e) => {
-                const size = parseFloat((e.target as HTMLInputElement).value);
-                const valueSpan = document.getElementById('icon-size-value');
-                if (valueSpan) valueSpan.textContent = size.toFixed(1);
-                storage.set('aircraft-icon-size', size);
-
-                // Update state manager to notify all components
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ aircraftIconSize: size });
-                }
-            });
-        }
+        this.bindInput('aircraft-icon-size', (value) => {
+            const size = parseFloat(value);
+            this.setText('icon-size-value', size.toFixed(1));
+            storage.set('aircraft-icon-size', size);
+            this.stateManager?.updateDisplayOptions({ aircraftIconSize: size });
+        });
 
         // Map labels text size
-        const labelsSizeInput = document.getElementById('map-labels-text-size') as HTMLInputElement;
-        if (labelsSizeInput) {
-            labelsSizeInput.addEventListener('input', (e) => {
-                const size = parseInt((e.target as HTMLInputElement).value);
-                const valueSpan = document.getElementById('labels-size-value');
-                if (valueSpan) valueSpan.textContent = size.toString();
-                storage.set('map-labels-text-size', size);
-
-                // Update state manager to notify all components
-                if (this.stateManager) {
-                    this.stateManager.updateDisplayOptions({ mapLabelsTextSize: size });
-                }
-            });
-        }
+        this.bindInput('map-labels-text-size', (value) => {
+            const size = parseInt(value);
+            this.setText('labels-size-value', size.toString());
+            storage.set('map-labels-text-size', size);
+            this.stateManager?.updateDisplayOptions({ mapLabelsTextSize: size });
+        });
     }
 
     public update(): void {

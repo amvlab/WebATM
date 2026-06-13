@@ -10,9 +10,11 @@
  */
 
 import { BasePanel } from '../BasePanel';
+import { AircraftClickSelector } from '../AircraftClickSelector';
 import { AircraftData } from '../../../data/types';
 import { StateManager } from '../../../core/StateManager';
 import { logger } from '../../../utils/Logger';
+import { escapeHtml } from '../../../utils/dom';
 
 export class ConflictsPanel extends BasePanel {
     private conflictsInfoElement: HTMLElement | null = null;
@@ -20,7 +22,7 @@ export class ConflictsPanel extends BasePanel {
     private currentAircraftData: AircraftData | null = null;
     private selectedAircraft: string | null = null;
     private lastConflictIds: string[] = [];
-    private clickTimeouts: Map<string, number> = new Map();
+    private clickSelector = new AircraftClickSelector('ConflictsPanel', () => this.stateManager);
 
     constructor() {
         super('.conflicts-panel', 'conflicts-content');
@@ -139,10 +141,11 @@ export class ConflictsPanel extends BasePanel {
         let html = '<div class="conflicts-list">';
         conflictAircraft.forEach(conflict => {
             const tcpaStr = conflict.tcpa !== null ? `TCPA: ${conflict.tcpa.toFixed(1)}s` : '';
+            const safeId = escapeHtml(conflict.id);
 
             html += `
-                <div class="conflict-item" data-aircraft-id="${conflict.id}" data-index="${conflict.index}">
-                    <div class="conflict-pair"><strong>${conflict.id}</strong></div>
+                <div class="conflict-item" data-aircraft-id="${safeId}" data-index="${conflict.index}">
+                    <div class="conflict-pair"><strong>${safeId}</strong></div>
                     <div class="conflict-tcpa">${tcpaStr}</div>
                 </div>
             `;
@@ -160,89 +163,12 @@ export class ConflictsPanel extends BasePanel {
 
             if (aircraftId && indexAttr) {
                 const index = parseInt(indexAttr);
-                this.addConflictClickHandlers(htmlItem, aircraftId, index);
+                this.clickSelector.attach(htmlItem, aircraftId, index);
             }
         });
 
         // Update selection state after rebuilding
         this.updateSelectionVisuals();
-    }
-
-    /**
-     * Add click handlers for conflict items (single and double click)
-     */
-    private addConflictClickHandlers(element: HTMLElement, aircraftId: string, index: number): void {
-        let clickCount = 0;
-
-        element.addEventListener('click', () => {
-            clickCount++;
-
-            // Clear any existing timeout for this aircraft
-            const existingTimeout = this.clickTimeouts.get(aircraftId);
-            if (existingTimeout) {
-                clearTimeout(existingTimeout);
-                this.clickTimeouts.delete(aircraftId);
-            }
-
-            if (clickCount === 2) {
-                // Double click detected - select and zoom/follow aircraft
-                clickCount = 0;
-                this.handleConflictDoubleClick(aircraftId, index);
-            } else {
-                // Single click - wait to see if there's a second click
-                const timeout = window.setTimeout(() => {
-                    clickCount = 0;
-                    this.clickTimeouts.delete(aircraftId);
-                    this.handleConflictSingleClick(aircraftId, index);
-                }, 300); // 300ms delay to detect double-click
-
-                this.clickTimeouts.set(aircraftId, timeout);
-            }
-        });
-    }
-
-    /**
-     * Handle single click on conflict item
-     */
-    private handleConflictSingleClick(aircraftId: string, index: number): void {
-        if (!this.stateManager) return;
-
-        // Check if clicking the same aircraft that's already selected
-        const isSameAircraft = this.selectedAircraft === aircraftId;
-
-        if (isSameAircraft) {
-            // Unselect aircraft
-            this.stateManager.setSelectedAircraft(null);
-            logger.debug('ConflictsPanel', `Unselected aircraft from conflicts: ${aircraftId}`);
-        } else {
-            // Select new aircraft
-            this.stateManager.setSelectedAircraft(aircraftId);
-            logger.debug('ConflictsPanel', `Selected aircraft from conflicts: ${aircraftId}`);
-
-            // Emit custom event for map to handle zoom/pan
-            const event = new CustomEvent('aircraft-single-click', {
-                detail: { aircraftId, index }
-            });
-            document.dispatchEvent(event);
-        }
-    }
-
-    /**
-     * Handle double click on conflict item (zoom/follow behavior)
-     */
-    private handleConflictDoubleClick(aircraftId: string, index: number): void {
-        if (!this.stateManager) return;
-
-        // Select aircraft
-        this.stateManager.setSelectedAircraft(aircraftId);
-
-        // Emit custom event for map to handle zoom/follow
-        const event = new CustomEvent('aircraft-double-click', {
-            detail: { aircraftId, index }
-        });
-        document.dispatchEvent(event);
-
-        logger.debug('ConflictsPanel', `Double-clicked conflict aircraft: ${aircraftId} - zooming/following`);
     }
 
     /**
@@ -274,10 +200,8 @@ export class ConflictsPanel extends BasePanel {
         }
     }
 
-    protected onDestroy(): void {
-        // Clear all click timeouts
-        this.clickTimeouts.forEach(timeout => clearTimeout(timeout));
-        this.clickTimeouts.clear();
+    protected override onDestroy(): void {
+        this.clickSelector.dispose();
         this.lastConflictIds = [];
     }
 }

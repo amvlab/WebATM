@@ -1,8 +1,8 @@
 import { SocketManager } from '../core/SocketManager';
 import { StateManager } from '../core/StateManager';
-import { settingsModal } from './SettingsModal';
-import { ServerStatus, ServerControlResponse } from '../data/types';
+import { ServerStatus } from '../data/types';
 import { logger } from '../utils/Logger';
+import { StatusDisplayManager } from './StatusDisplayManager';
 
 /**
  * Server response data structure
@@ -129,63 +129,8 @@ export class Controls {
         logger.debug('Controls', 'Server log handlers managed by ServerManager');
     }
 
-    // Simulation Control Methods
-
-    /**
-     * Play the simulation
-     */
-    private playSimulation(): void {
-        if (this.socketManager) {
-            this.socketManager.sendCommand('OP');
-            logger.info('Controls', 'Simulation started');
-        }
-    }
-
-    /**
-     * Toggle play/pause state
-     */
-    private togglePlayPause(): void {
-        const currentState = this.stateManager.getSimulationState();
-        if (currentState.state === 'INIT' || currentState.state === 'HOLD') {
-            this.playSimulation();
-        } else {
-            this.pauseSimulation();
-        }
-    }
-
-    /**
-     * Pause the simulation
-     */
-    private pauseSimulation(): void {
-        if (this.socketManager) {
-            this.socketManager.sendCommand('HOLD');
-            logger.info('Controls', 'Simulation paused');
-        }
-    }
-
-    /**
-     * Reset the simulation
-     */
-    private resetSimulation(): void {
-        if (this.socketManager) {
-            this.socketManager.sendCommand('RESET');
-            logger.info('Controls', 'Simulation reset');
-        }
-    }
-
-    /**
-     * Set simulation speed
-     */
-    private setSimulationSpeed(speed: number): void {
-        if (this.socketManager) {
-            if (speed === 0) {
-                this.socketManager.sendCommand('HOLD');
-            } else {
-                this.socketManager.sendCommand(`FF ${speed}`);
-            }
-            logger.info('Controls', `Simulation speed set to ${speed}x`);
-        }
-    }
+    // Simulation control commands (OP/HOLD/RESET/FF) are sent through the
+    // console and header controls; Controls only tracks server status here.
 
     // Server Control Methods - Removed duplicate server control logic
     // Server management is now handled by ServerManager class
@@ -195,28 +140,14 @@ export class Controls {
      * Update server status display
      */
     private updateStatus(message: string, status: ServerStatus): void {
-        // Track current server status
         this.currentServerStatus = status;
-        
-        // Update modal elements
-        const statusText = document.getElementById('server-status-text-modal');
-        const statusIndicator = document.getElementById('server-status-indicator-modal');
-        
-        if (statusText) {
-            statusText.textContent = message;
-        }
-        
-        if (statusIndicator) {
-            // Remove all status classes
-            statusIndicator.classList.remove('status-running', 'status-stopped', 'status-unknown', 'status-starting');
-            // Add the new status class
-            statusIndicator.classList.add(`status-${status}`);
-        }
-        
-        // Update button states based on server status
+
+        new StatusDisplayManager(
+            document.getElementById('server-status-text-modal'),
+            document.getElementById('server-status-indicator-modal')
+        ).update(message, status);
+
         this.updateButtonStates(status);
-        
-        // Notify state manager of server status change
         this.stateManager.updateServerStatus(status);
     }
 
@@ -243,15 +174,6 @@ export class Controls {
 
     // Server Log Methods - Removed duplicate log management logic
     // Log management is now handled by ServerManager class
-
-    // UI Control Methods
-
-    /**
-     * Open settings modal
-     */
-    private openSettings(): void {
-        settingsModal.open();
-    }
 
     // Public API Methods
 
