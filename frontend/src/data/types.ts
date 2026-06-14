@@ -532,6 +532,8 @@ export interface DisplayOptions {
   showPavement: boolean;
   // Snap drawing/creation clicks to the nearest navaid (airport/heliport/waypoint).
   snapToNavaids: boolean;
+  // Show the airport/waypoint "go to" search bar at the top of the map.
+  showSearchBar: boolean;
   airportColor: string;
   heliportColor: string;
   waypointColor: string;

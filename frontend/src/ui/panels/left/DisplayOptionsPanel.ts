@@ -201,6 +201,7 @@ export class DisplayOptionsPanel extends BasePanel {
         const showRunwayLabels = storage.get<boolean>('show-runway-labels') ?? displayOptions.showRunwayLabels;
         const showPavement = storage.get<boolean>('show-pavement') ?? displayOptions.showPavement;
         const snapToNavaids = storage.get<boolean>('snap-to-navaids') ?? displayOptions.snapToNavaids;
+        const showSearchBar = storage.get<boolean>('show-search-bar') ?? displayOptions.showSearchBar;
 
         // Load route display options from storage
         const showRoutes = storage.get<boolean>('show-routes') ?? displayOptions.showRoutes;
@@ -263,6 +264,7 @@ export class DisplayOptionsPanel extends BasePanel {
             showRunwayLabels,
             showPavement,
             snapToNavaids,
+            showSearchBar,
             showRoutes,
             showRouteLines,
             showRouteLabels,
@@ -341,6 +343,7 @@ export class DisplayOptionsPanel extends BasePanel {
         this.setChecked('show-runway-labels', showRunwayLabels);
         this.setChecked('show-pavement', showPavement);
         this.setChecked('snap-to-navaids', snapToNavaids);
+        this.setChecked('show-search-bar', showSearchBar);
 
         // Update route display checkboxes to reflect loaded values
         this.setChecked('show-routes', showRoutes);
@@ -743,6 +746,7 @@ export class DisplayOptionsPanel extends BasePanel {
             ['show-runway-labels', 'showRunwayLabels'],
             ['show-pavement', 'showPavement'],
             ['snap-to-navaids', 'snapToNavaids'],
+            ['show-search-bar', 'showSearchBar'],
             ['show-routes', 'showRoutes'],
             ['show-route-lines', 'showRouteLines'],
             ['show-route-labels', 'showRouteLabels'],

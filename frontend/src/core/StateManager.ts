@@ -96,6 +96,8 @@ export class StateManager {
                 showRunwayLabels: true,
                 showPavement: true,
                 snapToNavaids: true,
+                // Search bar is visible by default.
+                showSearchBar: true,
                 airportColor: '#4da3ff',
                 heliportColor: '#e0823c',
                 waypointColor: '#9aa7b4',

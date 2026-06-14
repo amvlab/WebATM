@@ -204,6 +204,10 @@ export class App {
                 // Update map overlay with new display options
                 this.mapOverlay.updateDisplayOptions(newOptions);
             }
+            // Toggle the airport/waypoint search bar visibility
+            if (newOptions) {
+                this.navSearchBox?.setVisible(newOptions.showSearchBar);
+            }
         });
 
         // Subscribe to selected aircraft changes
@@ -481,9 +485,11 @@ export class App {
         // This needs to happen after AircraftInteractionManager creation to check for explicit POS commands
         this.setupRouteDataHandler();
 
-        // Initialize the airport/waypoint "go to" search box.
+        // Initialize the airport/waypoint "go to" search box, applying the
+        // saved show/hide preference.
         this.navSearchBox = new NavSearchBox(this.mapDisplay);
         this.navSearchBox.init();
+        this.navSearchBox.setVisible(this.stateManager.getDisplayOptions().showSearchBar);
 
         // Connect managers to MapControlsPanel
         this.mapControlsPanel.setShapeDrawingManager(this.shapeDrawingManager);
