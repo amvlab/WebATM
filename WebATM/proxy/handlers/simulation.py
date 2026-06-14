@@ -67,9 +67,9 @@ def on_siminfo_received(
         "scenname": str(scenname) if scenname is not None else "",
         "sender_id": sender_id_str,  # Include sender ID for node identification
     }
-    proxy.sim_data = sim_data
 
-    # Update node information like web client does
+    # Update per-node tracking for EVERY node so the Simulation Nodes panel
+    # shows each node's own clock, regardless of which node is currently active.
     if sender_id_str and sender_id_str in proxy.tracked_nodes:
         simt_str = tim2txt(simt)[:-3] if simt is not None else "00:00:00"
         proxy.tracked_nodes[sender_id_str].update(
@@ -78,6 +78,21 @@ def on_siminfo_received(
         # Emit updated node info occasionally (not every frame to avoid spam)
         if int(simt or 0) % 5 == 0:  # Every 5 seconds
             proxy._emit_node_info()
+
+    # The header clock/rate/state must follow the ACTIVE node only, not
+    # whichever node sent the latest update. Otherwise, with two or more nodes
+    # running, the displayed time jumps between them. Cache and emit the sim
+    # info solely for the active node. When the active node can't be resolved
+    # yet (e.g. early in connection setup, before act_id is known), fall back to
+    # accepting any sender so a single-node display still works.
+    active_node = proxy._get_safe_active_node()
+    is_active_node = (
+        active_node is None or sender_id_str is None or sender_id_str == active_node
+    )
+    if not is_active_node:
+        return
+
+    proxy.sim_data = sim_data
 
     # Throttle sim info emissions
     current_time = time.time()
