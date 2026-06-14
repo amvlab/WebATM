@@ -96,6 +96,8 @@ export class ConsoleMapPicker {
             if (ctx.kind === 'hdg') {
                 this.ensureHeadingMouseMove(map);
                 this.ensurePositionMarker(map);
+                // Highlight the navaid the heading would aim at.
+                this.bindSnapHover(map);
             } else {
                 this.removeHeadingGuide(map);
                 this.removePositionMarker(map);
@@ -132,6 +134,8 @@ export class ConsoleMapPicker {
         if (ctx.kind === 'hdg') {
             this.ensureHeadingMouseMove(map);
             this.ensurePositionMarker(map);
+            // Highlight the navaid a heading click would aim at.
+            this.bindSnapHover(map);
         } else {
             // POLY/POLYALT/POLYLINE: render confirmed vertices, the line
             // through them, and a live preview segment from the last vertex
@@ -311,16 +315,17 @@ export class ConsoleMapPicker {
         // synchronously return focus to the console input.
         if (e.originalEvent) e.originalEvent.preventDefault();
 
-        // Snap coordinate picks to a nearby navaid when enabled. Heading picks
-        // set a bearing, not a place, so they are never snapped.
+        // Snap to a nearby navaid when enabled. Coordinate picks land on the
+        // navaid; heading picks aim the bearing at it, so the user can point
+        // the aircraft straight at a known airport/waypoint. Mirrors the
+        // Draw-Aircraft flow (AircraftCreationManager), which snaps both the
+        // position and the heading clicks.
         let clickLat = e.lngLat.lat;
         let clickLon = e.lngLat.lng;
-        if (ctx.kind === 'lat' || ctx.kind === 'lon') {
-            const snapped = this.navaidSnapper.snap(e);
-            if (snapped) {
-                clickLat = snapped.lat;
-                clickLon = snapped.lng;
-            }
+        const snapped = this.navaidSnapper.snap(e);
+        if (snapped) {
+            clickLat = snapped.lat;
+            clickLon = snapped.lng;
         }
 
         if (ctx.kind === 'lat' || ctx.kind === 'lon') {
@@ -393,6 +398,15 @@ export class ConsoleMapPicker {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
+        // Snap the heading endpoint to a nearby navaid so the previewed guide
+        // line and bearing match what a click commits - this lets the user aim
+        // the heading straight at a known airport/waypoint. The snap-hover
+        // handler draws the highlight ring; here we only consume the snapped
+        // coordinate. Falls back to the raw cursor when nothing is in range.
+        const snapped = this.navaidSnapper.snap(e);
+        const endLon = snapped ? snapped.lng : e.lngLat.lng;
+        const endLat = snapped ? snapped.lat : e.lngLat.lat;
+
         ensureGeoJSONSource(map, this.GUIDE_SOURCE_ID);
         ensureLayer(map, {
             id: this.GUIDE_LAYER_ID,
@@ -412,7 +426,7 @@ export class ConsoleMapPicker {
         updateSourceFeatures(map, this.GUIDE_SOURCE_ID, [
             lineStringFeature([
                 [originLon, originLat],
-                [e.lngLat.lng, e.lngLat.lat]
+                [endLon, endLat]
             ])
         ]);
 
@@ -420,8 +434,8 @@ export class ConsoleMapPicker {
         const brng = this.computeBearing(
             originLat,
             originLon,
-            e.lngLat.lat,
-            e.lngLat.lng
+            endLat,
+            endLon
         );
         this.updateHintText(`Heading: ${Math.round(brng)}°  (click to set)`);
     }
