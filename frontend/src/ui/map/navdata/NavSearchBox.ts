@@ -20,6 +20,7 @@ interface NavSearchResult {
  */
 export class NavSearchBox {
     private mapDisplay: MapDisplay;
+    private container: HTMLElement | null = null;
     private input: HTMLInputElement | null = null;
     private results: HTMLElement | null = null;
     private debounceTimer: number | null = null;
@@ -35,6 +36,7 @@ export class NavSearchBox {
     }
 
     public init(): void {
+        this.container = document.getElementById('nav-search');
         this.input = document.getElementById('nav-search-input') as HTMLInputElement | null;
         this.results = document.getElementById('nav-search-results');
         if (!this.input || !this.results) {
@@ -54,6 +56,16 @@ export class NavSearchBox {
         });
 
         logger.debug('NavSearchBox', 'Initialized');
+    }
+
+    /**
+     * Show or hide the search box. Hiding also closes any open results
+     * dropdown so it doesn't linger when the widget reappears.
+     */
+    public setVisible(visible: boolean): void {
+        if (!this.container) return;
+        this.container.style.display = visible ? '' : 'none';
+        if (!visible) this.hideResults();
     }
 
     private onInput(): void {
