@@ -1,6 +1,7 @@
 import type { MapDisplay } from './MapDisplay';
 import type { MapMouseEvent } from 'maplibre-gl';
 import type { NavaidSnapper } from './navdata/NavaidSnapper';
+import { DRAWING_CURSOR } from '../../utils/maplibre';
 
 /**
  * BaseDrawingManager - shared interactive point-drawing lifecycle for the
@@ -95,7 +96,7 @@ export abstract class BaseDrawingManager {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        map.getCanvas().style.cursor = 'crosshair';
+        map.getCanvas().style.cursor = DRAWING_CURSOR;
 
         this.onDrawingEnabled();
 

@@ -2,6 +2,7 @@ import type { GeoJSONSource, MapMouseEvent } from 'maplibre-gl';
 import { MapDisplay } from '../MapDisplay';
 import type { NavaidSnapper } from '../navdata/NavaidSnapper';
 import { logger } from '../../../utils/Logger';
+import { DRAWING_CURSOR } from '../../../utils/maplibre';
 import {
     AircraftCreationForm,
     AircraftCreationData,
@@ -99,6 +100,10 @@ export class AircraftCreationManager {
             return;
         }
 
+        // Match the crosshair cursor used by the console map picker and the
+        // shape/route drawing modes so every drawing mode looks the same.
+        map.getCanvas().style.cursor = DRAWING_CURSOR;
+
         // Add click handler for aircraft positioning
         this.aircraftMapClickHandler = (e: MapMouseEvent) => {
             this.handleAircraftMapClick(e);
@@ -131,6 +136,9 @@ export class AircraftCreationManager {
     private disableAircraftMapDrawing(): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
+
+        // Restore MapLibre's default cursor when leaving drawing mode.
+        map.getCanvas().style.cursor = '';
 
         if (this.aircraftMapClickHandler) {
             map.off('click', this.aircraftMapClickHandler);

@@ -11,6 +11,14 @@ const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
     features: []
 };
 
+/**
+ * Canvas cursor used by every interactive map-drawing mode (console map
+ * picker, shape/route drawing, aircraft creation). Centralised here so all
+ * drawing modes share one consistent pointer. Assign the empty string to
+ * restore MapLibre's default cursor when leaving a drawing mode.
+ */
+export const DRAWING_CURSOR = 'crosshair';
+
 export function ensureGeoJSONSource(
     map: MapLibreMap,
     sourceId: string,
