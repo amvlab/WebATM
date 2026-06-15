@@ -5,6 +5,7 @@ import type { NavaidSnapper } from './map/navdata/NavaidSnapper';
 import { lineStringFeature, pointFeature } from '../utils/geojson';
 import { logger } from '../utils/Logger';
 import {
+    DRAWING_CURSOR,
     ensureGeoJSONSource,
     ensureLayer,
     safeRemoveLayer,
@@ -122,7 +123,7 @@ export class ConsoleMapPicker {
 
         // Crosshair cursor to signal pick mode is live.
         const canvas = map.getCanvas();
-        if (canvas) canvas.style.cursor = 'crosshair';
+        if (canvas) canvas.style.cursor = DRAWING_CURSOR;
 
         // Show the hint text next to the console input.
         this.showHint(ctx.kind);
