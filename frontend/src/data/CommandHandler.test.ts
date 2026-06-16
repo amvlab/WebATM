@@ -3,16 +3,22 @@
  * preprocessed commands (MCRE/QUIT), and server pass-through. The App and
  * EchoManager are mocked so routing logic is tested in isolation.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CommandHandler } from './CommandHandler';
 import { echoManager } from '../ui/EchoManager';
+import { connectionStatus } from '../core/ConnectionStatusService';
 import type { App } from '../core/App';
 
 vi.mock('../ui/EchoManager', () => ({
     echoManager: { addMessage: vi.fn() },
 }));
 
+vi.mock('../core/ConnectionStatusService', () => ({
+    connectionStatus: { setBlueSkyConnected: vi.fn() },
+}));
+
 const addMessage = vi.mocked(echoManager.addMessage);
+const setBlueSkyConnected = vi.mocked(connectionStatus.setBlueSkyConnected);
 
 function createAppMock() {
     const mapDisplay = {
@@ -51,6 +57,10 @@ describe('CommandHandler', () => {
         vi.clearAllMocks();
         mocks = createAppMock();
         handler = new CommandHandler(mocks.app);
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     it('ignores empty input', () => {
@@ -134,9 +144,21 @@ describe('CommandHandler', () => {
     });
 
     describe('QUIT', () => {
-        it('disconnects the socket without sending to the server', () => {
+        it('disconnects the proxy from BlueSky (not the browser socket) without sending to the server', () => {
+            const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+            vi.stubGlobal('fetch', fetchMock);
+
             const result = handler.handleCommand('QUIT');
-            expect(mocks.socketManager.disconnect).toHaveBeenCalledTimes(1);
+
+            // Disconnects WebATM's proxy from BlueSky...
+            expect(fetchMock).toHaveBeenCalledWith(
+                '/api/server/disconnect',
+                expect.objectContaining({ method: 'POST' }),
+            );
+            // ...reflects it immediately in the shared connection status...
+            expect(setBlueSkyConnected).toHaveBeenCalledWith(false);
+            // ...and crucially does NOT drop the browser↔WebATM socket.
+            expect(mocks.socketManager.disconnect).not.toHaveBeenCalled();
             expect(result).toEqual({ handled: true, sendToServer: false });
         });
     });
