@@ -1,6 +1,8 @@
 import type { App } from '../core/App';
 import type { MapDisplay } from '../ui/map/MapDisplay';
+import { connectionStatus } from '../core/ConnectionStatusService';
 import { echoManager } from '../ui/EchoManager';
+import { logger } from '../utils/Logger';
 import { isOpenapAircraftType } from './aircraftTypes';
 
 /**
@@ -337,14 +339,41 @@ export class CommandHandler {
     }
 
     /**
-     * Handle QUIT command - disconnect from server
+     * Handle QUIT command - disconnect this client's session from BlueSky.
+     *
+     * BlueSky's real QUIT (see bluesky/network/server.py) is a *server-wide
+     * shutdown*: it stops the headless server's loop and terminates every node
+     * child process — there is no per-node quit. WebATM deliberately does NOT
+     * forward QUIT to BlueSky:
+     *   - The standalone build connects to a shared remote server, so forwarding
+     *     QUIT would tear it down for every other user.
+     *   - The integrated build bundles its own server, but its lifecycle is
+     *     owned by the explicit Start / Stop / Restart / Kill controls — use
+     *     those to actually shut it down.
+     *
+     * Instead, QUIT ends *this* client's BlueSky session: it disconnects
+     * WebATM's proxy from BlueSky (via /api/server/disconnect) and immediately
+     * reflects that in the shared connection status the header reads. Crucially
+     * it does NOT drop the browser↔WebATM socket (the previous behavior), so the
+     * page stays live and no manual refresh is needed to recover, and it leaves
+     * the BlueSky server itself running and untouched.
      */
     private handleQuitCommand(): CommandResult {
-        // Disconnect from server
-        const socketManager = this.app.getSocketManager();
-        socketManager.disconnect();
+        // Disconnect the proxy from BlueSky server-side. Fire-and-forget: the UI
+        // updates immediately from the explicit user intent below, and the page
+        // stays usable regardless of this request's outcome.
+        void fetch('/api/server/disconnect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).catch((err) => logger.error('CommandHandler', 'QUIT disconnect failed', err));
 
-        this.sendEcho('Disconnected from server', 'info');
+        // Reflect the explicit disconnect immediately in the single source of
+        // truth the header — and, in the integrated build, the server-control
+        // status — both read, so the indicators agree without waiting on the
+        // data-flow timeout.
+        connectionStatus.setBlueSkyConnected(false);
+
+        this.sendEcho('Disconnected from BlueSky server (the server itself is left running)', 'info');
 
         return {
             handled: true,

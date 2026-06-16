@@ -43,7 +43,9 @@ def register(app, socketio, *, session_manager=None, bluesky_proxy=None):
     # Imported lazily so `import webatm_integrated.process_manager` /
     # `.log_streamer` stay Flask-free (importable for unit tests). They are only
     # needed here, where the Flask app + socketio already exist. `bluesky_paths`
-    # imports the core `WebATM` package, so it is deferred for the same reason.
+    # and `auto_start` import the core `WebATM` package, so they are deferred for
+    # the same reason.
+    from .auto_start import auto_start_enabled, claim_first_boot, schedule_auto_start
     from .bluesky_paths import configure_file_management
     from .routes import register_integrated_routes
     from .socket_handlers import register_integrated_socket_handlers
@@ -71,5 +73,15 @@ def register(app, socketio, *, session_manager=None, bluesky_proxy=None):
 
     # Reap the whole bluesky process group if the worker process exits.
     atexit.register(manager.kill)
+
+    # On first boot only, auto-start the bundled BlueSky server and connect the
+    # WebATM proxy to it (BlueSky lives in this container, so its host is fixed)
+    # so the user lands on a live, connected map without opening Settings or
+    # clicking Start. claim_first_boot() guards it to once per boot so a replaced
+    # gunicorn worker re-running register() never resurrects a manually-stopped
+    # server. Backgrounded so app creation returns promptly; disable entirely
+    # with WEBATM_AUTO_START=0 to drive the lifecycle manually instead.
+    if auto_start_enabled() and claim_first_boot():
+        schedule_auto_start(socketio, manager, bluesky_proxy)
 
     return {"manager": manager, "streamer": streamer}
