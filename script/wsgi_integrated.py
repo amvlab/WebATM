@@ -32,11 +32,13 @@ web_host = os.environ.get("WEB_HOST", "0.0.0.0")
 # Create the Flask app and SocketIO instance (integrated extensions register here)
 app, socketio = create_app()
 
-# Set default server IP on the client but don't connect
+# Set the BlueSky host. The integrated build auto-starts the bundled BlueSky
+# server and connects the proxy on boot (see webatm_integrated.auto_start); set
+# WEBATM_AUTO_START=0 to instead start it manually from the web UI.
 app.bluesky_proxy.server_ip = bluesky_host
 logger.info("WebATM (integrated) initialized")
 logger.info(f"Default BlueSky server IP set to: {bluesky_host}")
-logger.info("Ready - Start the BlueSky server from the web UI")
+logger.info("Ready - BlueSky server auto-starting (WEBATM_AUTO_START=0 to disable)")
 
 if __name__ == "__main__":
     # Not used by gunicorn, but allows testing with `python wsgi_integrated.py`.

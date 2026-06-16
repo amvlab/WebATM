@@ -278,6 +278,16 @@ export class App {
      * Delegates to ConnectionStatusService for centralized logic
      */
     private checkInitialConnectionStatus(): void {
+        // The integrated build auto-starts BlueSky and auto-connects on boot, so
+        // on load there's nothing for the user to do in Settings — and its
+        // connect controls are hidden there anyway. Don't pop Settings open while
+        // the auto-connect is still settling. Only the standalone build, where
+        // the user must connect manually, prompts by opening Settings when it's
+        // disconnected from BlueSky on initial load.
+        if (INTEGRATED_BUILD) {
+            return;
+        }
+
         // Use ConnectionStatusService to handle initial connection checking
         connectionStatus.startInitialConnectionCheck(() => {
             // Callback when not connected after initial check
