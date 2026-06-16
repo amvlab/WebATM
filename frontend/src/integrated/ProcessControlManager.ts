@@ -11,6 +11,16 @@ import type { ServerLogStreamManager } from './ServerLogStreamManager';
 const ACTIONS = ['start', 'stop', 'restart', 'kill'] as const;
 type Action = (typeof ACTIONS)[number];
 
+/**
+ * Minimal view of ConnectionStatusService this manager needs: whether BlueSky is
+ * currently connected (the same data-flow truth the header uses) plus a way to
+ * be notified when it changes. Kept structural so it stays trivially mockable.
+ */
+export interface ConnectionStateSource {
+    isBlueSkyConnected(): boolean;
+    subscribe(listener: () => void): () => void;
+}
+
 export class ProcessControlManager {
     /**
      * Auto-connect attempts after a start/restart. Each connect call waits ~10s
@@ -18,6 +28,12 @@ export class ProcessControlManager {
      * extra attempts cover a slow cold start.
      */
     private static readonly AUTO_CONNECT_ATTEMPTS = 3;
+
+    /** Latest process state from the status probe, used to render combined status. */
+    private serverRunning = false;
+    private serverPid: number | null = null;
+    /** True while a lifecycle action owns the status text (suppresses reconcile). */
+    private busy = false;
 
     /**
      * @param logTab         live server-log tab to surface after a (re)start
@@ -28,13 +44,22 @@ export class ProcessControlManager {
      *   confirmed.
      * @param autoDisconnect optional hook that drops the proxy connection after
      *   the server is stopped/killed. Injected alongside autoConnect.
+     * @param connectionState optional live BlueSky connection status (the same
+     *   source the header reads). Injected in the integrated build so the
+     *   server-control status reconciles with it and the two indicators can
+     *   never contradict — e.g. after QUIT disconnects the proxy while the
+     *   bundled server keeps running. Omitted in the default build.
      */
     constructor(
         private logTab: ServerLogStreamManager,
         private autoConnect?: () => Promise<boolean>,
         private autoDisconnect?: () => Promise<void>,
+        private connectionState?: ConnectionStateSource,
     ) {
         this.bind();
+        // Re-reconcile the control status whenever the live BlueSky connection
+        // flips, so it tracks the header instead of only the last button press.
+        this.connectionState?.subscribe(() => this.onConnectionStateChanged());
         void this.refreshStatus();
     }
 
@@ -51,6 +76,9 @@ export class ProcessControlManager {
     }
 
     private async control(action: Action): Promise<void> {
+        // Mark busy so connection-status flips during the action don't clobber
+        // the transient lifecycle status text mid-flight.
+        this.busy = true;
         this.setStatus(`${action}…`);
         try {
             const res = await fetch(`/api/integrated/server/${action}`, { method: 'POST' });
@@ -73,6 +101,8 @@ export class ProcessControlManager {
         } catch (err) {
             logger.error('ProcessControlManager', `${action} failed`, err);
             this.setStatus(`${action} failed`);
+        } finally {
+            this.busy = false;
         }
     }
 
@@ -110,14 +140,49 @@ export class ProcessControlManager {
         }
     }
 
+    /**
+     * Re-render the status when the live BlueSky connection flips. A flip can
+     * mean the server went away or just stopped sending data, so re-probe the
+     * process to keep the combined status accurate (e.g. "running — not
+     * connected" after QUIT vs. "stopped" after a crash).
+     */
+    private onConnectionStateChanged(): void {
+        if (this.busy) return; // a lifecycle action owns the status right now
+        void this.refreshStatus();
+    }
+
     private async refreshStatus(): Promise<void> {
         try {
             const res = await fetch('/api/integrated/server/status');
             const data = await res.json();
-            this.setStatus(data.running ? `running (pid ${data.pid})` : 'stopped');
+            this.serverRunning = !!data.running;
+            this.serverPid = (data.pid ?? null) as number | null;
+            this.renderStatus();
         } catch {
             // Leave the status as-is if the probe fails.
         }
+    }
+
+    /**
+     * Render the settled status from the process state, folding in the live
+     * BlueSky connection when it's available so this indicator can never
+     * contradict the header. Without a connection source (default build) it
+     * falls back to the plain process state.
+     */
+    private renderStatus(): void {
+        if (!this.serverRunning) {
+            this.setStatus('stopped');
+            return;
+        }
+        if (!this.connectionState) {
+            this.setStatus(`running (pid ${this.serverPid})`);
+            return;
+        }
+        this.setStatus(
+            this.connectionState.isBlueSkyConnected()
+                ? 'running — connected'
+                : 'running — not connected',
+        );
     }
 
     private setStatus(text: string): void {

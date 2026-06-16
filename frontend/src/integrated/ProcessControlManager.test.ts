@@ -251,4 +251,73 @@ describe('ProcessControlManager', () => {
         );
         expect(fetchMock).toHaveBeenCalledWith('/api/integrated/server/start', { method: 'POST' });
     });
+
+    describe('connection-status reconciliation', () => {
+        function makeConnState(initial: boolean) {
+            let connected = initial;
+            let listener: (() => void) | null = null;
+            return {
+                source: {
+                    isBlueSkyConnected: () => connected,
+                    subscribe: (cb: () => void) => {
+                        listener = cb;
+                        return () => {
+                            listener = null;
+                        };
+                    },
+                },
+                flip(value: boolean) {
+                    connected = value;
+                    listener?.();
+                },
+            };
+        }
+
+        function makeManagerWithConn(conn: { source: unknown }): void {
+            new ProcessControlManager(
+                logTab as unknown as ServerLogStreamManager,
+                undefined,
+                undefined,
+                conn.source as never,
+            );
+        }
+
+        it('folds the live BlueSky connection into the status so it tracks the header', async () => {
+            const conn = makeConnState(true);
+            vi.stubGlobal(
+                'fetch',
+                vi.fn().mockResolvedValue({
+                    ok: true,
+                    json: async () => ({ success: true, running: true, pid: 42 }),
+                }),
+            );
+
+            makeManagerWithConn(conn);
+
+            // Process up AND connected -> combined status (not the bare pid form).
+            await vi.waitFor(() => expect(statusText()).toBe('running — connected'));
+
+            // Connection drops (e.g. after QUIT) while the process keeps running:
+            // re-probe -> "running — not connected", never "connected".
+            conn.flip(false);
+            await vi.waitFor(() => expect(statusText()).toBe('running — not connected'));
+        });
+
+        it('shows stopped when the process is gone regardless of connection flips', async () => {
+            const conn = makeConnState(false);
+            vi.stubGlobal(
+                'fetch',
+                vi.fn().mockResolvedValue({
+                    ok: true,
+                    json: async () => ({ success: true, running: false, pid: null }),
+                }),
+            );
+
+            makeManagerWithConn(conn);
+            await vi.waitFor(() => expect(statusText()).toBe('stopped'));
+
+            conn.flip(true); // a stray connect signal must not claim "connected"
+            await vi.waitFor(() => expect(statusText()).toBe('stopped'));
+        });
+    });
 });

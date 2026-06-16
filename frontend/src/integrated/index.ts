@@ -1,4 +1,5 @@
 import type { App } from '../core/App';
+import { connectionStatus } from '../core/ConnectionStatusService';
 import { blueSkyFileManager } from '../ui/BlueSkyFileManager';
 import { settingsModal } from '../ui/SettingsModal';
 import { logger } from '../utils/Logger';
@@ -31,6 +32,10 @@ export function registerIntegrated(app: App): void {
         logTab,
         () => settingsModal.connectToConfiguredServer(),
         () => settingsModal.disconnectFromConfiguredServer(),
+        // Reconcile the control status with the live BlueSky connection (the
+        // same source the header reads) so the two never contradict — notably
+        // after QUIT disconnects the proxy while the bundled server keeps running.
+        connectionStatus,
     );
 
     // BlueSky runs inside this container alongside the backend, so the host is
