@@ -134,11 +134,7 @@ class DataManager:
         self.proxy.sim_data = {}
         self.proxy.echo_data = {}
         self.proxy.last_update = 0
-
-        # Clear POLY data by node
         self.proxy.poly_data_by_node.clear()
-
-        # Clear POLYLINE data by node
         self.proxy.polyline_data_by_node.clear()
 
         # Reset emission timestamps
@@ -158,10 +154,9 @@ class DataManager:
         # Emit updated node info to show disconnection
         if self.proxy.socketio and self.proxy.connected_clients > 0:
             try:
-                # Import to avoid circular dependency
+                # Local import to avoid circular dependency
                 from .node_manager import NodeManager
 
-                # Create temporary instance just for emitting
                 node_mgr = NodeManager(self.proxy)
                 node_mgr._emit_node_info()
             except Exception:
@@ -176,10 +171,8 @@ class DataManager:
 
     def get_current_data(self) -> dict[str, Any]:
         """Get current simulation data for initial page load."""
-        # Import helper methods from node manager
         from .node_manager import NodeManager
 
-        # Create temporary instance to access helper method
         node_mgr = NodeManager(self.proxy)
         active_node_id = node_mgr._get_safe_active_node()
 
@@ -203,12 +196,7 @@ class DataManager:
         else:
             logger.debug(" No active node - not including any shapes in initial data")
 
-        # Import safe_decode helper
         from ...bluesky_client import safe_decode
-
-        def _safe_decode(data):
-            """Helper to safely decode bytes to string."""
-            return safe_decode(data)
 
         return {
             "traffic_data": self.proxy.traffic_data,
@@ -227,7 +215,7 @@ class DataManager:
             "node_info": {
                 "nodes": self.proxy.tracked_nodes.copy(),
                 "servers": {
-                    _safe_decode(k): v for k, v in self.proxy.tracked_servers.items()
+                    safe_decode(k): v for k, v in self.proxy.tracked_servers.items()
                 },
                 "active_node": active_node_id,
                 "total_nodes": len(self.proxy.tracked_nodes),

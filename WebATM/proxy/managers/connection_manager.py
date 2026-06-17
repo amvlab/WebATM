@@ -45,10 +45,8 @@ class ConnectionManager:
             return
 
         try:
-            # Import node manager for signal handlers
             from .node_manager import NodeManager
 
-            # Create a node manager instance for signal handling
             node_mgr = NodeManager(self.proxy)
 
             logger.debug("Connecting BlueSky client signals...")
@@ -105,7 +103,6 @@ class ConnectionManager:
         if self.proxy.bluesky_client is None:
             logger.debug(" Creating BlueSky network client...")
             try:
-                # Create the BlueSky network client
                 self.proxy.bluesky_client = BlueSkyClient()
                 self._connect_bluesky_client_signals()
                 logger.info(" BlueSky network client created successfully")
@@ -475,5 +472,4 @@ class ConnectionManager:
             logger.info(" Reconnection successful with fresh ZMQ resources")
         except Exception as e:
             logger.error(f" Reconnection failed: {e}")
-            raise
             raise
