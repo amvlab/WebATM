@@ -40,6 +40,7 @@ services:
     networks:
       - edge                    # internet-facing: published ports + ACME egress
       - internal                # to reach the backends (which have no egress)
+      - dockerproxy             # to reach the read-only Docker socket proxy
     ports:
       - "80:80"
       - "443:443"
@@ -51,11 +52,59 @@ services:
       - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
       # ACME account e-mail for Let's Encrypt (kept out of the committed config)
       - TRAEFIK_CERTIFICATESRESOLVERS_PRODUCTION_ACME_EMAIL=${ACME_EMAIL}
+    # NOTE: Traefik does NOT mount /var/run/docker.sock directly. It is the only
+    # internet-facing component, and a `:ro` socket mount does NOT make the
+    # Docker API read-only -- it would still be host-root-equivalent if Traefik
+    # were ever compromised. Instead it talks to `dockerproxy` (below), an
+    # haproxy that exposes ONLY the GET endpoints the provider needs and rejects
+    # every write/exec call. See traefik.yml `providers.docker.endpoint`.
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/dynamic:/etc/traefik/dynamic            # base.yml (static) + capacity.yml (controller)
       - ./traefik/certs:/var/traefik/certs:rw             # acme.json lives here
+    depends_on:
+      - dockerproxy
+
+  # Read-only Docker socket proxy. Holds the real /var/run/docker.sock and
+  # exposes a filtered HTTP API on tcp://dockerproxy:2375 reachable ONLY by
+  # Traefik (private `dockerproxy` network, no published ports, not on the
+  # internal net the sandboxes share). Only the endpoints Traefik's Docker
+  # provider reads are enabled; POST and everything else stay denied (the image
+  # blocks write methods by default), so even a full Traefik compromise cannot
+  # create/exec/stop containers or otherwise pivot to the host.
+  dockerproxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    container_name: dockerproxy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dockerproxy
+    environment:
+      # Allow-list: only what the Traefik Docker provider needs to discover
+      # routers/services and watch for changes. Everything not listed is denied.
+      - CONTAINERS=1            # list/inspect containers (provider discovery)
+      - NETWORKS=1             # resolve the `internal` network for backends
+      - TASKS=1                # container task state
+      - SERVICES=1            # swarm-style service labels (harmless if unused)
+      - EVENTS=1              # watch=true relies on the Docker event stream
+      - PING=1                # provider health/connectivity probe
+      - INFO=1
+      - VERSION=1
+      # Explicitly keep the dangerous surfaces off (these are the image
+      # defaults; pinned here so an image bump can't silently widen access).
+      - POST=0                # reject all write methods -> read-only API
+      - EXEC=0
+      - CONTAINERS_CREATE=0
+      - CONTAINERS_START=0
+      - CONTAINERS_STOP=0
+      - VOLUMES=0
+      - IMAGES=0
+      - SECRETS=0
+      - CONFIGS=0
+      - SWARM=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
   webatm:
     image: ${WEBATM_IMAGE:-ghcr.io/amvlab/webatm-integrated:0.4.2}
@@ -198,6 +247,12 @@ networks:
   # so containers here cannot reach the internet (only each other + Traefik).
   internal:
     name: webatm-internal
+    internal: true
+  # Private link between Traefik and the Docker socket proxy ONLY. `internal:
+  # true` (no gateway) and deliberately NOT shared with the webatm sandboxes, so
+  # a compromised replica cannot even reach the filtered Docker API.
+  dockerproxy:
+    name: webatm-dockerproxy
     internal: true
 
 volumes:

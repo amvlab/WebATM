@@ -123,7 +123,7 @@ it boring** — every visitor gets a disposable, contained sandbox.
 | **Bounded storage** | `~/bluesky` (uploads + sim output) is a **size-limited tmpfs** (`BLUESKY_TMPFS_SIZE`, default 256 MB). Uploading can't exhaust host disk — it's RAM-backed and capped, writes fail past the cap, and it's wiped per visitor. The app also rejects any single upload over 10 MB (plugins/settings) / 50 MB (scenarios). |
 | **Wiped per visitor** | The controller restarts a replica shortly after its session ends, so no state, uploaded plugin, or running process survives into the next visitor's session. |
 | **Least privilege** | Non-root user, `no-new-privileges`, `cap_drop: ALL`, `pids: 512`, `cpus: 0.75`, `memory: 1280 MB` (≈1 GB app + the upload tmpfs) per replica. |
-| **Protected control plane** | The Docker socket is only in Traefik (read-only) and the controller; replicas can't reach it (local socket, not networked). Traefik's dashboard is off. Rate limiting on the edge. |
+| **Protected control plane** | Traefik (the only internet-facing service) reaches Docker through a **read-only `docker-socket-proxy`** on a private network — it can only issue GET calls, so a Traefik compromise can't create/exec/stop containers or pivot to the host. (A bare `:ro` socket *mount* does **not** make the Docker API read-only, hence the proxy.) The controller holds the real socket because it must restart replicas, but it has no inbound listener and is internal-only. Replicas can reach neither. Traefik's dashboard is off; per-IP rate limiting on the edge. |
 
 ### Residual risks — know these
 
@@ -184,8 +184,8 @@ matplotlib may write to a few home-dir caches.
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.yml` | The whole stack (incl. the `runsc` runtime + internal network). |
-| `traefik/traefik.yml` | Traefik static config (entrypoints, providers, ACME). |
+| `docker-compose.yml` | The whole stack (incl. the `runsc` runtime, internal network, and read-only Docker socket proxy). |
+| `traefik/traefik.yml` | Traefik static config (entrypoints, providers via the socket proxy, ACME). |
 | `traefik/dynamic/base.yml` | Capacity-full service + rate-limit middleware. |
 | `traefik/dynamic/capacity.yml` | **Generated** by the controller; present only when full. |
 | `capacity_full/capacity-full.html` | The "all slots busy" page. |
@@ -198,8 +198,15 @@ matplotlib may write to a few home-dir caches.
   If you proxy through Cloudflare, consider restricting ingress to Cloudflare IP
   ranges and/or trusting `CF-Connecting-IP` so rate limits key off the real
   client.
-- **Docker socket**: the controller mounts `/var/run/docker.sock` read-write
-  (it must restart replicas) and is **not** sandboxed — treat it as privileged
-  and trusted. Only the `webatm` replicas run under gVisor.
+- **Docker socket**: Traefik (internet-facing) reaches Docker only via the
+  read-only `docker-socket-proxy` — it never touches the raw socket. The
+  **controller** still mounts `/var/run/docker.sock` read-write (it must restart
+  replicas) and is **not** sandboxed, so treat it as privileged and trusted; its
+  saving grace is that it has no inbound listener and lives only on the
+  no-egress `internal` network. To shrink even that surface, you can point the
+  controller at a *write-capable* socket proxy (`POST=1 CONTAINERS=1`, everything
+  else off) instead of the bare socket — that needs a small change to
+  `controller.py` to dial TCP rather than the Unix path. Only the `webatm`
+  replicas run under gVisor.
 - **Dashboard**: Traefik's dashboard is disabled; enable it deliberately if
   needed and keep `:8080` closed to the internet.

@@ -23,13 +23,21 @@ http:
           - url: "http://capacity-full:80"
 
   middlewares:
-    # Per-source-IP rate limiting (DDoS / abuse guard). depth: 1 trusts one
-    # proxy hop (e.g. Cloudflare) when extracting the client IP from
-    # X-Forwarded-For. Tune to taste; see README for Cloudflare hardening.
+    # Per-source-IP rate limiting (DDoS / abuse guard). `average` is requests
+    # per second per client IP (Traefik's default period is 1s); `burst` is the
+    # token-bucket depth that absorbs short spikes. The values below are sized
+    # for one real interactive session -- the initial page load pulls bundles,
+    # vendored assets, map glyphs and tiles in a quick burst, then steady-state
+    # traffic is just the Socket.IO stream plus occasional tile fetches on pan.
+    # `burst: 300` covers that opening spike; `average: 50/s` still throttles a
+    # sustained flood to ~1.5% of the old 4000/s. Raise `burst` if a heavy
+    # initial load ever trips the limit; lower `average` to clamp abuse harder.
+    # depth: 1 trusts one proxy hop (e.g. Cloudflare) when extracting the client
+    # IP from X-Forwarded-For. See README for Cloudflare hardening.
     ratelimit:
       rateLimit:
-        average: 4000
-        burst: 10000
+        average: 50
+        burst: 300
         sourceCriterion:
           ipStrategy:
             depth: 1

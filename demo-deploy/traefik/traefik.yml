@@ -24,7 +24,11 @@ entryPoints:
 
 providers:
   docker:
-    endpoint: "unix:///var/run/docker.sock"
+    # Talks to the read-only docker-socket-proxy, NOT the raw socket -- Traefik
+    # is internet-facing, so it never gets host-root-equivalent socket access.
+    # The proxy (see docker-compose.yml `dockerproxy`) exposes only GET
+    # endpoints and rejects writes/exec.
+    endpoint: "tcp://dockerproxy:2375"
     exposedByDefault: false       # only containers with traefik.enable=true
     network: internal             # reach backends on the no-egress internal net
     watch: true
