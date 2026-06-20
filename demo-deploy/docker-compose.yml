@@ -7,15 +7,20 @@
 #     └── capacity-full : nginx serving the "all slots busy" page. Only shown to
 #                   NEW visitors, and only while every replica is occupied.
 #     └── controller : watches each replica's /status, flips the capacity page
-#                   on/off, and recycles idle replicas hourly. No app changes.
+#                   on/off, and wipes a replica after its visitor leaves. No app changes.
 #
-# SECURITY MODEL (see README "Security"): visitors can upload BlueSky scenarios,
-# so the replicas run partially-untrusted input. Defenses here:
-#   * plugin (.py) uploads are blocked at the proxy (traefik/dynamic/base.yml);
+# SECURITY MODEL (see README "Security"): this is a DISPOSABLE SANDBOX PER
+# VISITOR. The full app -- console, scenario/plugin uploads -- is intentionally
+# open; in-container code execution is expected and contained:
+#   * each `webatm` replica runs under the gVisor runtime (runsc) -- a real
+#     user-space-kernel boundary, so syscalls never hit the host kernel;
 #   * replicas sit on an INTERNAL, no-egress network (no exfiltration / C2);
-#   * all Linux capabilities dropped, no-new-privileges, PID-limited, non-root;
-#   * containers are recycled hourly (ephemeral).
-# This is NOT a sandbox for fully arbitrary code -- for that add gVisor (README).
+#   * no host bind-mounts, all Linux capabilities dropped, no-new-privileges,
+#     PID-limited, non-root;
+#   * a replica is wiped (restarted) shortly after its visitor leaves, so the
+#     next visitor gets a pristine sandbox.
+# Requires gVisor installed on the host (see README). Set WEBATM_RUNTIME=runc
+# to run without it (NOT a sandbox -- testing only).
 #
 # Quick start:
 #   cp .env.example .env   # fill in Cloudflare token + your domain
@@ -53,8 +58,13 @@ services:
       - ./traefik/certs:/var/traefik/certs:rw             # acme.json lives here
 
   webatm:
-    image: ghcr.io/amvlab/webatm-integrated:latest
+    image: ${WEBATM_IMAGE:-ghcr.io/amvlab/webatm-integrated:latest}
     restart: unless-stopped
+    # gVisor sandbox: every visitor's container runs under runsc so in-container
+    # RCE (the console/uploads are open by design) cannot reach the host kernel.
+    # Requires gVisor on the host + the runsc runtime registered in Docker.
+    # Override with WEBATM_RUNTIME=runc to run un-sandboxed (testing only).
+    runtime: ${WEBATM_RUNTIME:-runsc}
     # No egress: `internal` has no gateway, so a malicious scenario/plugin can't
     # phone home, exfiltrate, or attack third parties. Map tiles load in the
     # user's BROWSER (not here), and BlueSky runs on localhost, so the container
@@ -156,8 +166,9 @@ services:
       - STICKY_COOKIE_NAME=webatm-session
       - CERT_RESOLVER=production
       - POLL_INTERVAL=${POLL_INTERVAL:-5}
-      - RECYCLE_INTERVAL=${RECYCLE_INTERVAL:-3600}   # "reboot every hour unless someone is using it"
       - RECYCLE_ENABLED=${RECYCLE_ENABLED:-1}
+      - RECYCLE_IDLE_GRACE=${RECYCLE_IDLE_GRACE:-120}    # wipe a used replica this long after the visitor leaves
+      - MAX_SESSION_TIME=${MAX_SESSION_TIME:-3600}       # hard per-session cap (0 = none)
       - DYNAMIC_DIR=/dynamic
       - CSV_FILE=${CSV_FILE:-/log/webatm-sessions.csv}   # session history (set empty to disable)
       - CSV_INTERVAL=${CSV_INTERVAL:-60}                 # seconds between CSV rows

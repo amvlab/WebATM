@@ -14,12 +14,14 @@ endpoint (which already reports ``session_info.active_sessions``):
    and are never bounced off their container.  When a slot frees up the file is
    removed and new visitors flow in again.
 
-2. Hourly idle recycle.  Each replica that has been up for at least
-   ``RECYCLE_INTERVAL`` seconds **and** currently has zero active sessions is
-   restarted, giving every new user a fresh BlueSky instance.  Busy replicas
-   are skipped and retried next cycle -- i.e. "reboot every hour unless someone
-   is using it".  This replaces the old ``smart-restart.sh`` cron, and the
-   optional CSV log replaces ``webatm-monitor.sh``.
+2. Disposable-per-visitor recycle.  A replica that has *served a session* and
+   then gone idle for ``RECYCLE_IDLE_GRACE`` seconds is restarted (wiped), so the
+   next visitor always lands on a pristine sandbox -- no leftover state, uploads,
+   or running plugins from the previous user. A replica that has never been used
+   is left ready (not churned). ``MAX_SESSION_TIME`` additionally caps a single
+   continuous session (force-recycle a camper). Together these replace the old
+   ``smart-restart.sh`` cron, and the optional CSV log replaces
+   ``webatm-monitor.sh``.
 
 It talks to the Docker Engine API over the bind-mounted ``/var/run/docker.sock``
 using only the Python standard library, so it runs on a stock ``python:slim``
@@ -49,7 +51,6 @@ import urllib.request
 # Configuration (all overridable via environment)
 # --------------------------------------------------------------------------- #
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "5"))
-RECYCLE_INTERVAL = float(os.environ.get("RECYCLE_INTERVAL", "3600"))
 COMPOSE_SERVICE = os.environ.get("WEBATM_SERVICE", "webatm")
 PROXY_NETWORK = os.environ.get("PROXY_NETWORK", "internal")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8082"))
@@ -64,6 +65,13 @@ CAPACITY_FILE = os.path.join(DYNAMIC_DIR, "capacity.yml")
 # page, so a momentary blip does not flap the router.
 FULL_DEBOUNCE = int(os.environ.get("FULL_DEBOUNCE", "2"))
 RECYCLE_ENABLED = os.environ.get("RECYCLE_ENABLED", "1") != "0"
+# Disposable-per-visitor recycling: once a replica that *served a session* has
+# been idle this many seconds, wipe it (restart) so the next visitor gets a
+# pristine sandbox. A replica that has never been used is left ready, not churned.
+RECYCLE_IDLE_GRACE = float(os.environ.get("RECYCLE_IDLE_GRACE", "120"))
+# Hard cap on a single continuous session: force-recycle a replica busy this
+# long (kicks a camper). 0 disables. Matches the "ends after 1 hour" copy.
+MAX_SESSION_TIME = float(os.environ.get("MAX_SESSION_TIME", "3600"))
 DOCKER_SOCK = os.environ.get("DOCKER_SOCK", "/var/run/docker.sock")
 STATUS_TIMEOUT = float(os.environ.get("STATUS_TIMEOUT", "3"))
 CSV_FILE = os.environ.get("CSV_FILE")  # optional; e.g. /log/webatm-sessions.csv
@@ -229,15 +237,31 @@ def _trim_csv() -> None:
 # --------------------------------------------------------------------------- #
 def main() -> None:
     os.makedirs(DYNAMIC_DIR, exist_ok=True)
-    # Uptime is measured from when we first observe a replica; on controller
-    # start nothing is recycled for at least RECYCLE_INTERVAL.
-    first_seen: dict[str, float] = {}
+    # Disposable-per-visitor state:
+    #   dirty       - replica has served a session since its last (re)start
+    #   idle_since  - when a *dirty* replica went idle (eligible to be wiped)
+    #   busy_since  - when the current continuous session began (max-session cap)
+    dirty: set[str] = set()
+    idle_since: dict[str, float] = {}
+    busy_since: dict[str, float] = {}
     full_streak = 0
     last_csv_write = 0.0
+
+    def recycle(cid: str, name: str, reason: str) -> None:
+        log(f"Recycling {name}: {reason}")
+        try:
+            restart_container(cid)
+        except Exception as e:
+            log(f"  restart of {name} failed: {e}")
+        dirty.discard(cid)
+        idle_since.pop(cid, None)
+        busy_since.pop(cid, None)
+
     log(
         f"WebATM capacity controller started "
         f"(service={COMPOSE_SERVICE} network={PROXY_NETWORK} domain={DOMAIN} "
-        f"poll={POLL_INTERVAL}s recycle={RECYCLE_INTERVAL}s recycle_enabled={RECYCLE_ENABLED})"
+        f"poll={POLL_INTERVAL}s idle_grace={RECYCLE_IDLE_GRACE}s "
+        f"max_session={MAX_SESSION_TIME}s recycle_enabled={RECYCLE_ENABLED})"
     )
 
     while True:
@@ -249,7 +273,7 @@ def main() -> None:
             active_sessions = 0  # total people on the server right now
 
             for r in replicas:
-                first_seen.setdefault(r["id"], now)
+                cid, name = r["id"], r["name"]
                 try:
                     active = get_active_sessions(r["ip"])
                 except Exception:
@@ -259,26 +283,34 @@ def main() -> None:
                     continue
 
                 active_sessions += active
-                if active == 0:
-                    free += 1
+                if active > 0:
+                    busy += 1
+                    dirty.add(cid)            # it has now served a visitor
+                    idle_since.pop(cid, None)
+                    busy_since.setdefault(cid, now)
+                    # Hard session cap: wipe a camper mid-session.
                     if (
                         RECYCLE_ENABLED
-                        and now - first_seen[r["id"]] >= RECYCLE_INTERVAL
+                        and MAX_SESSION_TIME > 0
+                        and now - busy_since[cid] >= MAX_SESSION_TIME
                     ):
-                        log(f"Recycling idle replica {r['name']} (idle, up >= {RECYCLE_INTERVAL/3600:.1f}h)")
-                        try:
-                            restart_container(r["id"])
-                            first_seen[r["id"]] = now
-                        except Exception as e:
-                            log(f"  restart of {r['name']} failed: {e}")
+                        recycle(cid, name, f"session exceeded the {MAX_SESSION_TIME:.0f}s cap")
                 else:
-                    busy += 1
+                    free += 1
+                    busy_since.pop(cid, None)
+                    if cid in dirty:
+                        # Used and now idle: wipe it after the grace period so the
+                        # next visitor lands on a pristine sandbox.
+                        idle_since.setdefault(cid, now)
+                        if RECYCLE_ENABLED and now - idle_since[cid] >= RECYCLE_IDLE_GRACE:
+                            recycle(cid, name, "visitor left -> wiping for next user")
+                    # A clean, never-used replica is left ready (not churned).
 
             # Forget replicas that no longer exist.
             live_ids = {r["id"] for r in replicas}
-            for cid in list(first_seen):
-                if cid not in live_ids:
-                    del first_seen[cid]
+            for state in (dirty, idle_since, busy_since):
+                for cid in [c for c in state if c not in live_ids]:
+                    state.discard(cid) if isinstance(state, set) else state.pop(cid, None)
 
             # Capacity = no reachable, idle replica left (unreachable counts as
             # unavailable). Debounced so a transient blip does not flap.

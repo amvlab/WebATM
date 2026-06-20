@@ -1,21 +1,27 @@
 # WebATM public demo stack
 
-A gated, multi-slot public demo of the **integrated** WebATM image
-(`ghcr.io/amvlab/webatm-integrated`) behind Traefik v3 — **with no changes to
-the WebATM app itself**. Everything here is deployment glue: Traefik, a
-capacity-full page, and a small controller sidecar.
+A **disposable-sandbox-per-visitor** public demo of the **integrated** WebATM
+image behind Traefik v3 — **with no changes to the WebATM app itself**.
+Everything here is deployment glue: Traefik, a capacity-full page, and a small
+controller sidecar.
+
+The full app is intentionally exposed — console, scenario *and* plugin uploads,
+server controls. That's only safe because each visitor runs in a throwaway,
+**gVisor-sandboxed, no-egress container that is wiped the moment they leave**.
+In-container code execution is expected and contained; the container is the
+blast radius. (See **Security** — this is the whole point of the design.)
 
 ```
                          ┌────────── Traefik v3.7 (TLS via Cloudflare DNS-01) ──────────┐
    webatm.amvlab.eu ───▶ │  router "app"  (priority 50, all traffic)                    │
-                         │      └─ service "webatm"  ── sticky cookie ──▶ 10 replicas   │
+                         │      └─ service "webatm" ─ sticky ─▶ 10 gVisor sandboxes     │
                          │  router "capacity" (priority 100, ONLY no-cookie requests)   │
                          │      └─ service "capacity-full" ─▶ nginx (the busy page)     │
                          │           ▲ this router exists only while every replica busy │
                          └───────────┼──────────────────────────────────────────────────┘
                                      │ writes/removes capacity.yml
-                              ┌──────┴───────┐   polls /status, restarts idle replicas
-                              │  controller  │──▶ Docker socket + each replica's /status
+                              ┌──────┴───────┐   polls /status; wipes a replica
+                              │  controller  │──▶ once its visitor leaves (+ Docker socket)
                               └──────────────┘
 ```
 
@@ -24,12 +30,13 @@ capacity-full page, and a small controller sidecar.
 | You asked for | How it works here |
 |---|---|
 | **Latest Traefik** | `traefik:v3.7` (3.7.5 is current as of June 2026). |
-| **Integrated image** | `ghcr.io/amvlab/webatm-integrated:latest`, BlueSky bundled per container. |
-| **10 sessions at once** | `deploy.replicas: 10`; each replica is one isolated demo instance. |
+| **Integrated image** | `ghcr.io/amvlab/webatm-integrated` (or your local build via `WEBATM_IMAGE`), BlueSky bundled per container. |
+| **10 sessions at once** | `deploy.replicas: 10`; each replica is one isolated, sandboxed instance. |
 | **One IP / one user per session** | Traefik **sticky cookie** (`webatm-session`) pins a browser to one replica; the controller only sends *new* visitors to *free* replicas (see caveats). |
 | **Capacity-full page** | When every replica reports `active_sessions > 0`, the controller adds a higher-priority router that serves the nginx page **to new visitors only**. In-session users keep their cookie and are never diverted. |
-| **Auto-reboot hourly unless in use** | The controller restarts any replica that has been up ≥ 1 h **and** has zero active sessions; busy replicas are skipped and retried next cycle. Replaces `smart-restart.sh`. |
-| **Usage tracking** | Baked into the controller — no cron. It logs the live headcount every poll and appends a CSV history (see below). Replaces `webatm-monitor.sh`. |
+| **Disposable per visitor** | The controller **wipes (restarts) a replica ~`RECYCLE_IDLE_GRACE`s after its visitor leaves**, so the next person gets a pristine sandbox. A `MAX_SESSION_TIME` cap also force-recycles a camper. Replaces `smart-restart.sh`. |
+| **Safe to expose the full app** | Each replica runs under **gVisor**, has **no internet egress** and **no host mounts**, drops all caps, and is ephemeral. See Security. |
+| **Usage tracking** | Baked into the controller — no cron. Live headcount every poll + a CSV history. Replaces `webatm-monitor.sh`. |
 
 ## Tracking who's using the demo
 
@@ -56,23 +63,39 @@ built in — there is **no cron job to run**:
 
 ## Why a controller instead of pure Traefik
 
-Traefik can’t see “this container is occupied”, and health-check-based capacity
+Traefik can't see "this container is occupied", and health-check-based capacity
 gating is a trap: in Traefik v3 a sticky backend that goes unhealthy gets
 **re-routed and its cookie rewritten**, which would bounce — or even kick — an
-*active* user. So the only signal for “busy” is the app’s own `/status`
+*active* user. So the only signal for "busy" is the app's own `/status`
 endpoint, and the only place to act on it without touching the app is a sidecar.
-The controller reads `/status` and toggles one Traefik router. Returning users
-are matched by their sticky cookie on the always-present `app` router, so they
-are never affected by the capacity page.
+The controller reads `/status`, toggles one Traefik router, and recycles
+replicas. Returning users are matched by their sticky cookie on the
+always-present `app` router, so they are never affected by the capacity page.
 
 ## Quick start
 
+**Prerequisite: install gVisor on the host** (the sandbox runtime). See
+<https://gvisor.dev/docs/user_guide/install/>, then register it with Docker
+(`/etc/docker/daemon.json` gets a `runtimes.runsc` entry, `systemctl restart
+docker`). Verify with `docker info | grep -i runtimes` → should list `runsc`.
+
 ```bash
 cd demo-deploy
-cp .env.example .env          # fill in CF_DNS_API_TOKEN, ACME_EMAIL, domain
+cp .env.example .env          # CF_DNS_API_TOKEN, ACME_EMAIL, domain, WEBATM_IMAGE
 docker compose up -d
-docker compose logs -f controller   # watch busy/free + capacity decisions
+docker compose logs -f controller   # watch busy/free + capacity + recycles
 ```
+
+Building the image yourself (recommended — you control what runs):
+
+```bash
+# from the repo root
+docker build -f Dockerfile.integrated -t webatm-integrated:local .
+# then set WEBATM_IMAGE=webatm-integrated:local in demo-deploy/.env
+```
+
+No gVisor yet? Set `WEBATM_RUNTIME=runc` in `.env` to boot **un-sandboxed for
+local testing only** — do **not** expose that to the internet.
 
 DNS: point `WEBATM_DOMAIN` (and the wildcard, for the cert) at the host. TLS is
 issued via the Cloudflare DNS-01 challenge, so the host does **not** need to be
@@ -82,98 +105,80 @@ To change the slot count: edit `deploy.replicas` and `docker compose up -d`.
 
 ## Security
 
-WebATM lets visitors upload files that BlueSky then reads, so a public demo is
-running **partially-untrusted input**. The biggest hazard is **plugins**: a
-BlueSky plugin is a `.py` file the server *imports and executes*, which is
-arbitrary code execution. There is no authentication, so without mitigation
-you'd be offering "run my Python" to anyone on the internet.
+This is the crux of the design, so read it. WebATM's value *is* the dangerous
+surface: the console forwards arbitrary commands to BlueSky, and scenarios are
+stack programs that can `PLUGIN LOAD`/`CALL`. You cannot feature-gate your way to
+safety for anonymous users without deleting the app. So instead of locking
+features, this stack **assumes in-container code execution will happen and makes
+it boring** — every visitor gets a disposable, contained sandbox.
 
-What this stack does about it (all at the deployment layer — **no app changes**):
-
-| Threat | Mitigation |
+| Layer | What it does |
 |---|---|
-| Upload arbitrary Python (RCE) | **Plugin upload endpoint is blocked at Traefik** (`/api/bluesky/upload/plugins` → 403, see `traefik/dynamic/base.yml`). Scenario/settings uploads still work; scenarios only drive BlueSky's own command set, not Python. |
-| Exfiltration / C2 / botnet / attacking others from your IP | Replicas run on an **internal, no-egress network** (`webatm-internal`, `internal: true`). They can't reach the internet — only each other and Traefik. Map tiles load in the user's browser, and BlueSky is on localhost, so nothing here needs outbound. |
-| Privilege escalation in-container | Non-root user (image default), `no-new-privileges`, **all Linux capabilities dropped** (`cap_drop: ALL`). |
-| Resource abuse (fork bomb, CPU/RAM hog) | `pids: 512`, `cpus: 0.75`, `memory: 1024M` per replica. |
-| Persistence of a compromise | Replicas are **recycled hourly** (and on idle) — state is ephemeral. |
-| Hijacking the control plane | The Docker socket is mounted only into Traefik (read-only) and the controller; the `webatm` replicas can't reach it (it's a local socket, not on the network), and Traefik's dashboard is off. |
+| **gVisor (`runsc`) runtime** | Each `webatm` replica runs on gVisor's user-space kernel, so container syscalls never hit the host kernel directly — a real isolation boundary for untrusted code (not just namespaces). |
+| **No internet egress** | Replicas sit on an `internal: true` network (`webatm-internal`) with no gateway. Even with full RCE there is no path to exfiltrate, reach a C2, join a botnet, or attack third parties. Map tiles load in the *browser*; BlueSky is on localhost; nothing here needs outbound. |
+| **No host mounts** | The `webatm` service bind-mounts nothing from the host. Uploads land in the container's own `~/bluesky` and vanish on recycle. |
+| **Wiped per visitor** | The controller restarts a replica shortly after its session ends, so no state, uploaded plugin, or running process survives into the next visitor's session. |
+| **Least privilege** | Non-root user, `no-new-privileges`, `cap_drop: ALL`, `pids: 512`, `cpus: 0.75`, `memory: 1024M` per replica. |
+| **Protected control plane** | The Docker socket is only in Traefik (read-only) and the controller; replicas can't reach it (local socket, not networked). Traefik's dashboard is off. Rate limiting on the edge. |
 
-### Residual risk — read this
+### Residual risks — know these
 
-This is **defense-in-depth, not a sandbox**. A container is not a hard security
-boundary: a Linux kernel exploit could let hostile code escape to the host, and
-scenarios still exercise BlueSky's full command surface. The no-egress network
-is what makes that acceptable for a low-stakes public demo — even on a container
-escape there's no outbound path — but if this is high-value, add a real sandbox:
+- **gVisor isn't perfect.** It's a very strong boundary but not a VM; treat it as
+  such. For hardware-virtualized isolation use **Kata Containers / Firecracker
+  microVMs** (heavier). Also test the app under `runsc` (below) — gVisor
+  implements most syscalls, but if BlueSky hits an unimplemented one you'll see
+  it in `runsc` logs.
+- **Sibling reachability.** All replicas share the `internal` network, so a
+  compromised container can reach *other* visitors' replicas (annoyance / info
+  disclosure between anonymous strangers) — but **not** the host or the internet.
+  Eliminating this needs a per-replica network (drop `deploy.replicas` for N
+  explicit one-network-each services), which is verbose; left as an option since
+  the impact is low given no egress + gVisor.
+- **DoS within limits.** Resource caps bound abuse but a visitor can still peg
+  their own replica; the per-visitor wipe recovers it.
 
-- **gVisor (recommended next step).** Install gVisor on the host and add
-  `runtime: runsc` to the `webatm` service. It interposes a user-space kernel so
-  container syscalls never hit the host kernel directly — the right tool for
-  running untrusted code. Standard Docker, no app changes.
-- **Kata Containers / Firecracker microVMs** for hardware-virtualized isolation
-  (heavier; overkill for most demos).
+### Verify before going live
 
-### Two things to verify before going live
-
-1. **BlueSky nav data.** The no-egress network assumes the bundled BlueSky ships
-   its navigation data and doesn't fetch it at runtime. Start the stack and
-   confirm the map/traffic work; if BlueSky errors about missing nav data, the
-   image expects a runtime download — pre-bake it into the image (best), or
-   briefly attach `webatm` to an egress network to populate a cached volume.
-2. **The plugin button still shows in the UI** and will now return 403 on use
-   (cosmetic). Hiding it cleanly is a job for the future app shim.
+1. **Run under gVisor.** Bring the stack up with `WEBATM_RUNTIME=runsc` and click
+   around — load a scenario, open the console, watch traffic. If something
+   misbehaves, check `runsc` logs for an unsupported syscall and report it.
+2. **BlueSky nav data.** The no-egress network assumes the bundled BlueSky ships
+   its navigation data and doesn't fetch it at runtime. If the map/traffic don't
+   populate, pre-bake nav data into the image (best), or briefly attach `webatm`
+   to an egress network once to populate a cached volume.
 
 ### Optional: read-only root filesystem
 
-For extra hardening you can set `read_only: true` on `webatm` plus tmpfs/volume
-mounts for the paths BlueSky writes (`~/bluesky`, `/tmp`, and any `~/.cache`).
-It's left **off** by default because it needs a quick test against the bundled
-image — BlueSky/matplotlib may write to a few home-dir caches.
+For extra hardening set `read_only: true` on `webatm` plus tmpfs/volume mounts
+for the paths BlueSky writes (`~/bluesky`, `/tmp`, any `~/.cache`). Left **off**
+by default because it needs a quick test against the bundled image — BlueSky /
+matplotlib may write to a few home-dir caches.
 
 ## Caveats (consequences of not touching the app)
-
-These are the gaps versus a fully app-aware version, and all of them close with
-the optional **tiny app shim** described below:
 
 1. **New-visitor assignment is poll-based.** Between a user landing on a free
    replica and the next poll (`POLL_INTERVAL`, default 5 s), a second
    simultaneous arrival can be load-balanced onto the same replica and share its
    BlueSky sim. Unlikely at demo traffic; lower `POLL_INTERVAL` to shrink the
-   window.
-2. **“Idle” means “no socket session”.** Abandoned tabs free their slot within
-   ~60 s on their own (Socket.IO ping timeout). Kicking a user who is *still
-   connected but inactive* at exactly 5 minutes is **not** done here — the app
-   never disconnects them and Traefik can’t kill an active WebSocket on a timer.
-3. **“One IP” is really “one browser”.** Sticky cookies pin per browser, not per
-   IP. A determined user with multiple browsers could hold more than one slot.
-
-### Optional upgrade: the tiny app shim (future)
-
-When you’re ready, an off-by-default, env-gated shim in the app makes all three
-exact:
-- returns **HTTP 503 when a replica is already occupied** (strict one-user-per-
-  container + instant, race-free capacity signal — the controller’s job shrinks
-  to just recycling);
-- a background **reaper** disconnects sessions idle past `SESSION_TIMEOUT`
-  (true 5-minute kick) and past `MAX_SESSION_TIME` (1-hour cap);
-- adds `available_slots` to `/status`.
-
-It stays disabled unless those env vars are set, so the standalone image is
-unaffected, and it ships in the published integrated image on the next version
-tag. This stack is forward-compatible: turn the shim on and the controller keeps
-working (it just never needs to show the page on a shared replica).
+   window. (A small app-side shim returning 503-when-occupied would make this
+   race-free, but that's an app change.)
+2. **"One IP" is really "one browser".** Sticky cookies pin per browser, not per
+   IP — a determined user with multiple browsers could hold more than one slot.
+3. **Idle-but-connected isn't force-kicked at 5 min.** Abandoned tabs free their
+   slot within ~60 s (Socket.IO timeout) and the replica is then wiped;
+   `MAX_SESSION_TIME` caps the maximum. A precise "kick after N minutes of no
+   interaction" would need the app to report activity.
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.yml` | The whole stack. |
+| `docker-compose.yml` | The whole stack (incl. the `runsc` runtime + internal network). |
 | `traefik/traefik.yml` | Traefik static config (entrypoints, providers, ACME). |
-| `traefik/dynamic/base.yml` | Capacity-full service, rate-limit middleware, and the plugin-upload block. |
+| `traefik/dynamic/base.yml` | Capacity-full service + rate-limit middleware. |
 | `traefik/dynamic/capacity.yml` | **Generated** by the controller; present only when full. |
-| `capacity_full/capacity-full.html` | The “all slots busy” page. |
-| `controller/controller.py` | Capacity toggling + hourly idle recycle (stdlib only). |
+| `capacity_full/capacity-full.html` | The "all slots busy" page. |
+| `controller/controller.py` | Capacity toggling + disposable-per-visitor recycle + usage log (stdlib only). |
 | `.env.example` | Copy to `.env` and fill in. |
 
 ## Hardening notes
@@ -183,7 +188,7 @@ working (it just never needs to show the page on a shared replica).
   ranges and/or trusting `CF-Connecting-IP` so rate limits key off the real
   client.
 - **Docker socket**: the controller mounts `/var/run/docker.sock` read-write
-  (it must restart replicas). Traefik mounts it read-only. Treat the controller
-  as privileged.
-- **Dashboard**: Traefik’s dashboard is disabled; enable it deliberately if
+  (it must restart replicas) and is **not** sandboxed — treat it as privileged
+  and trusted. Only the `webatm` replicas run under gVisor.
+- **Dashboard**: Traefik's dashboard is disabled; enable it deliberately if
   needed and keep `:8080` closed to the internet.
