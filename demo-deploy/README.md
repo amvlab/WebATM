@@ -117,8 +117,9 @@ it boring** — every visitor gets a disposable, contained sandbox.
 | **gVisor (`runsc`) runtime** | Each `webatm` replica runs on gVisor's user-space kernel, so container syscalls never hit the host kernel directly — a real isolation boundary for untrusted code (not just namespaces). |
 | **No internet egress** | Replicas sit on an `internal: true` network (`webatm-internal`) with no gateway. Even with full RCE there is no path to exfiltrate, reach a C2, join a botnet, or attack third parties. Map tiles load in the *browser*; BlueSky is on localhost; nothing here needs outbound. |
 | **No host mounts** | The `webatm` service bind-mounts nothing from the host. Uploads land in the container's own `~/bluesky` and vanish on recycle. |
+| **Bounded storage** | `~/bluesky` (uploads + sim output) is a **size-limited tmpfs** (`BLUESKY_TMPFS_SIZE`, default 256 MB). Uploading can't exhaust host disk — it's RAM-backed and capped, writes fail past the cap, and it's wiped per visitor. The app also rejects any single upload over 10 MB (plugins/settings) / 50 MB (scenarios). |
 | **Wiped per visitor** | The controller restarts a replica shortly after its session ends, so no state, uploaded plugin, or running process survives into the next visitor's session. |
-| **Least privilege** | Non-root user, `no-new-privileges`, `cap_drop: ALL`, `pids: 512`, `cpus: 0.75`, `memory: 1024M` per replica. |
+| **Least privilege** | Non-root user, `no-new-privileges`, `cap_drop: ALL`, `pids: 512`, `cpus: 0.75`, `memory: 1280 MB` (≈1 GB app + the upload tmpfs) per replica. |
 | **Protected control plane** | The Docker socket is only in Traefik (read-only) and the controller; replicas can't reach it (local socket, not networked). Traefik's dashboard is off. Rate limiting on the edge. |
 
 ### Residual risks — know these
@@ -146,6 +147,13 @@ it boring** — every visitor gets a disposable, contained sandbox.
    its navigation data and doesn't fetch it at runtime. If the map/traffic don't
    populate, pre-bake nav data into the image (best), or briefly attach `webatm`
    to an egress network once to populate a cached volume.
+3. **Example scenarios.** The `~/bluesky` tmpfs starts empty each boot. BlueSky
+   repopulates its working dir on start, so the bundled example scenarios should
+   reappear (consuming part of the cap) — confirm they list in the file manager.
+   If they don't and you want them, raise `BLUESKY_TMPFS_SIZE` or bake them in.
+   Hosts on xfs/overlay2 with project quotas can instead cap the whole writable
+   layer with `storage_opt: { size: ... }` (preserves baked-in content); it's
+   not portable, which is why the tmpfs is the default.
 
 ### Optional: read-only root filesystem
 

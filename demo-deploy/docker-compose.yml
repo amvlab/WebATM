@@ -77,6 +77,15 @@ services:
     cap_drop:
       - ALL                     # the app is non-root and needs no capabilities
     read_only: false            # see README for an optional read-only rootfs recipe
+    # Disk-DoS guard: BlueSky's working dir (where uploads land -- scenario/,
+    # plugins/ -- plus sim output/) is a SIZE-LIMITED tmpfs. No amount of
+    # uploading can exhaust host disk (it's RAM-backed and capped), and writes
+    # fail once the cap is hit. mode=1777 lets the non-root app user create its
+    # subdirs without us hardcoding its uid. The size counts toward the memory
+    # limit below, so we leave headroom there. (The app itself also rejects any
+    # single upload over 10MB for plugins/settings, 50MB for scenarios.)
+    tmpfs:
+      - /home/webatm/bluesky:size=${BLUESKY_TMPFS_SIZE:-256m},mode=1777
     environment:
       - FLASK_ENV=production
       # Integrated image already sets WEBATM_INTEGRATED=1 and runs BlueSky
@@ -129,7 +138,7 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: 1024M
+          memory: 1280M         # ~1GB app + up to 256M upload tmpfs (counts here)
           pids: 512             # stop fork bombs (server + node children + threads)
       restart_policy:
         condition: any
