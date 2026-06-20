@@ -173,13 +173,28 @@ def set_capacity(full: bool) -> None:
         log("Slot available -> capacity-full page removed")
 
 
-def append_csv(ts: float, total: int, busy: int, free: int, unreachable: int) -> None:
+def append_csv(
+    ts: float,
+    active_sessions: int,
+    total: int,
+    reachable: int,
+    busy: int,
+    free: int,
+    unreachable: int,
+) -> None:
+    # active_sessions = total people on the server right now (sum across
+    # replicas); the rest are container-level counts. Mirrors the columns of
+    # the old webatm-monitor.sh, plus the real headcount.
     new = not os.path.exists(CSV_FILE)
     with open(CSV_FILE, "a") as f:
         if new:
-            f.write("timestamp,total_replicas,busy,free,unreachable\n")
+            f.write(
+                "timestamp,active_sessions,total_replicas,reachable,busy,free,unreachable\n"
+            )
         stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
-        f.write(f"{stamp},{total},{busy},{free},{unreachable}\n")
+        f.write(
+            f"{stamp},{active_sessions},{total},{reachable},{busy},{free},{unreachable}\n"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -203,6 +218,7 @@ def main() -> None:
             replicas = list_replicas()
             total = len(replicas)
             busy = free = unreachable = 0
+            active_sessions = 0  # total people on the server right now
 
             for r in replicas:
                 first_seen.setdefault(r["id"], now)
@@ -214,6 +230,7 @@ def main() -> None:
                     unreachable += 1
                     continue
 
+                active_sessions += active
                 if active == 0:
                     free += 1
                     if (
@@ -241,9 +258,13 @@ def main() -> None:
             full_streak = full_streak + 1 if is_full else 0
             set_capacity(full_streak >= FULL_DEBOUNCE)
 
+            reachable = total - unreachable
             if CSV_FILE:
-                append_csv(now, total, busy, free, unreachable)
-            log(f"replicas={total} busy={busy} free={free} unreachable={unreachable} full={is_full}")
+                append_csv(now, active_sessions, total, reachable, busy, free, unreachable)
+            log(
+                f"people={active_sessions} replicas={total} busy={busy} "
+                f"free={free} unreachable={unreachable} full={is_full}"
+            )
 
         except Exception as e:
             log(f"loop error: {e}")

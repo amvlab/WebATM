@@ -29,7 +29,20 @@ capacity-full page, and a small controller sidecar.
 | **One IP / one user per session** | Traefik **sticky cookie** (`webatm-session`) pins a browser to one replica; the controller only sends *new* visitors to *free* replicas (see caveats). |
 | **Capacity-full page** | When every replica reports `active_sessions > 0`, the controller adds a higher-priority router that serves the nginx page **to new visitors only**. In-session users keep their cookie and are never diverted. |
 | **Auto-reboot hourly unless in use** | The controller restarts any replica that has been up ≥ 1 h **and** has zero active sessions; busy replicas are skipped and retried next cycle. Replaces `smart-restart.sh`. |
-| **Session monitoring** | Optional CSV log (`CSV_FILE`) replaces `webatm-monitor.sh`. |
+| **Usage tracking** | Baked into the controller — no cron. It logs the live headcount every poll and appends a CSV history (see below). Replaces `webatm-monitor.sh`. |
+
+## Tracking who's using the demo
+
+The controller already polls every replica's `/status`, so usage tracking is
+built in — there is **no cron job to run**:
+
+- **Live**: `docker compose logs -f controller` shows a line each poll, e.g.
+  `people=3 replicas=10 busy=3 free=7 unreachable=0 full=False`
+  (`people` = total active sessions across all replicas).
+- **History**: a CSV is written to `./controller/log/webatm-sessions.csv` (on by
+  default via `CSV_FILE`), with columns
+  `timestamp,active_sessions,total_replicas,reachable,busy,free,unreachable`.
+  Graph it however you like; set `CSV_FILE=` empty to turn it off.
 
 ## Why a controller instead of pure Traefik
 
