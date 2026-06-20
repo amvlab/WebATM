@@ -81,18 +81,21 @@ docker`). Verify with `docker info | grep -i runtimes` → should list `runsc`.
 
 ```bash
 cd demo-deploy
-cp .env.example .env          # CF_DNS_API_TOKEN, ACME_EMAIL, domain, WEBATM_IMAGE
+cp .env.example .env          # CF_DNS_API_TOKEN, ACME_EMAIL, domain
+docker compose pull           # pulls the pinned public image (WEBATM_IMAGE)
 docker compose up -d
 docker compose logs -f controller   # watch busy/free + capacity + recycles
 ```
 
-Building the image yourself (recommended — you control what runs):
+`.env` defaults `WEBATM_IMAGE` to the **published** image
+(`ghcr.io/amvlab/webatm-integrated:0.4.2`), which is the recommended path: CI
+bakes the offline tiles/glyphs/navdata into it. The package must be public to
+pull anonymously — otherwise `docker login ghcr.io` first.
 
-```bash
-# from the repo root
-docker build -f Dockerfile.integrated -t webatm-integrated:local .
-# then set WEBATM_IMAGE=webatm-integrated:local in demo-deploy/.env
-```
+Building the image yourself is possible but **not** the easy path: a plain
+`docker build -f Dockerfile.integrated` does **not** hydrate those static assets
+(they're gitignored and pulled from a separate assets release by CI), so the
+navdata search and offline tiles would be missing. Prefer the published image.
 
 No gVisor yet? Set `WEBATM_RUNTIME=runc` in `.env` to boot **un-sandboxed for
 local testing only** — do **not** expose that to the internet.
