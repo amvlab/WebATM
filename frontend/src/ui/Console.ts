@@ -237,6 +237,20 @@ export class Console {
                 this.clear();
             });
         }
+
+        // Handle the "Send" button as a click-driven mirror of the Enter key.
+        // Dismiss the autocomplete dropdown first so a visible suggestion can't
+        // swallow the submit, send whatever is currently typed via the shared
+        // submitCurrent() path, then return focus to the input so the user can
+        // keep typing the next command.
+        const sendButton = document.getElementById('send-command');
+        if (sendButton) {
+            sendButton.addEventListener('click', () => {
+                this.autocomplete.hideTransient();
+                this.submitCurrent();
+                input.focus();
+            });
+        }
     }
 
     /**
