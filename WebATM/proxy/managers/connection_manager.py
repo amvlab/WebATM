@@ -193,6 +193,14 @@ class ConnectionManager:
 
                     if has_active_nodes and not self.proxy.was_connected:
                         self.proxy.was_connected = True
+                        # Start the data-flow timeout clock from "first node
+                        # appeared", not from start_client(). Before this point
+                        # no sim/traffic data could arrive (no nodes existed),
+                        # so any wait between start_client() and the first node
+                        # spawning must not count against connection_timeout —
+                        # otherwise a slow cold-start (gVisor / capped CPU)
+                        # disconnects the moment nodes show up.
+                        self.proxy.last_successful_update = current_time
                         logger.info(
                             "Connection established to BlueSky remote server hosted by amvlab"
                         )
