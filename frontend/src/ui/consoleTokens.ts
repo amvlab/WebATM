@@ -121,9 +121,7 @@ export function findAcidContext(
     const command = parts[0].toUpperCase();
     const isCreCommand = command === 'CRE' || command === 'MCRE';
 
-    if (!cmddict || !cmddict[command]) return null;
-
-    const rawParamString = cmddict[command];
+    const rawParamString = cmddict?.[command];
     if (!rawParamString) return null;
 
     // Use the user-facing signature so MCRE (where CommandHandler
@@ -132,12 +130,9 @@ export function findAcidContext(
     const paramString = getDisplaySignature(command, rawParamString);
     const params = parseSignature(paramString).map(arg => arg.name);
 
-    // Find which parameter position we're at
     if (currentArgIndex < 0 || currentArgIndex >= params.length) return null;
 
     const currentParam = params[currentArgIndex];
-
-    // Check if this parameter is an acid-type parameter
     const acidParamNames = ['acid', 'acidx', 'id', 'idx'];
     if (!acidParamNames.includes(currentParam)) return null;
 

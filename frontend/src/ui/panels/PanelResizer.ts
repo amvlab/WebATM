@@ -33,7 +33,6 @@ interface PanelConfig {
     minRight?: number;
     maxRight?: number;
     minTop?: number;
-    maxTop?: number;
     minBottom?: number;
     maxBottom?: number;
 }
@@ -98,42 +97,6 @@ export class PanelResizer {
                 direction: 'horizontal',
                 minLeft: 200,
                 minRight: 150
-            },
-            'traffic-aircraft': {
-                topPanel: document.querySelector('.traffic-panel') as HTMLElement | null,
-                bottomPanel: document.querySelector('.aircraft-panel') as HTMLElement | null,
-                direction: 'vertical',
-                minTop: 120,
-                minBottom: 100,
-                maxTop: 400,
-                maxBottom: 300
-            },
-            'aircraft-conflicts': {
-                topPanel: document.querySelector('.aircraft-panel') as HTMLElement | null,
-                bottomPanel: document.querySelector('.conflicts-panel') as HTMLElement | null,
-                direction: 'vertical',
-                minTop: 100,
-                minBottom: 80,
-                maxTop: 300,
-                maxBottom: 250
-            },
-            'nodes-mapview': {
-                topPanel: document.querySelector('.node-panel') as HTMLElement | null,
-                bottomPanel: document.querySelector('.nav-panel') as HTMLElement | null,
-                direction: 'vertical',
-                minTop: 160,
-                minBottom: 120,
-                maxTop: 500,
-                maxBottom: 250
-            },
-            'mapview-display': {
-                topPanel: document.querySelector('.nav-panel') as HTMLElement | null,
-                bottomPanel: document.querySelector('.display-panel') as HTMLElement | null,
-                direction: 'vertical',
-                minTop: 120,
-                minBottom: 200,
-                maxTop: 250,
-                maxBottom: 500
             }
         };
     }
@@ -167,24 +130,21 @@ export class PanelResizer {
     private onMouseDown(e: MouseEvent): void {
         e.preventDefault();
 
+        // Resolve the config before committing to a drag, so an unknown
+        // data-target bails out cleanly instead of leaving isDragging stuck
+        // or dereferencing an undefined config below.
+        const handle = e.target as HTMLElement;
+        const target = handle.getAttribute('data-target');
+        const config = target ? this.panelConfigs[target] : undefined;
+        if (!config) return;
+
         this.isDragging = true;
-        this.currentHandle = e.target as HTMLElement;
+        this.currentHandle = handle;
         this.startPos = { x: e.clientX, y: e.clientY };
-
-        // Add resizing class for visual feedback
         this.currentHandle.classList.add('resizing');
+        this.startSizes = this.getCurrentSizes(config);
 
-        // Get the target configuration
-        const target = this.currentHandle.getAttribute('data-target');
-        if (!target) return;
-
-        const config = this.panelConfigs[target];
-
-        if (config) {
-            this.startSizes = this.getCurrentSizes(config);
-        }
-
-        // Change cursor globally and prevent text selection
+        // Match the cursor to the drag axis and suppress text selection
         document.body.style.cursor = config.direction === 'horizontal' ? 'col-resize' : 'row-resize';
         document.body.classList.add('no-select');
 
@@ -342,65 +302,26 @@ export class PanelResizer {
     }
 
     private handleVerticalResize(e: MouseEvent, config: PanelConfig): void {
+        // The only vertical handle is content-console: dragging down grows the
+        // console (bottom) and shrinks the content area (top).
         const deltaY = e.clientY - this.startPos.y;
-
         const totalHeight = this.startSizes.totalHeight || 0;
-        const startTopHeight = this.startSizes.topHeight || 0;
         const startBottomHeight = this.startSizes.bottomHeight || 0;
 
-        if (config.topPanel?.classList.contains('content-area')) {
-            // Main content-console resizer: moving down increases console, decreases content
-            const newBottomHeight = Math.max(
-                config.minBottom || 120,
-                Math.min(
-                    config.maxBottom || 400,
-                    startBottomHeight - deltaY
-                )
-            );
-            const newTopHeight = totalHeight - newBottomHeight;
+        const newBottomHeight = Math.max(
+            config.minBottom || 120,
+            Math.min(config.maxBottom || 400, startBottomHeight - deltaY)
+        );
+        const newTopHeight = totalHeight - newBottomHeight;
 
-            // Apply minimum constraints
-            if (config.minTop && newTopHeight < config.minTop) {
-                return; // Don't resize if it would violate minimum top height
-            }
+        // Don't resize if it would violate the minimum content height
+        if (config.minTop && newTopHeight < config.minTop) return;
 
-            // Update flex basis
-            if (config.bottomPanel) {
-                config.bottomPanel.style.flexBasis = `${newBottomHeight}px`;
-            }
-        } else {
-            // Right panel internal resizers: moving down increases bottom panel, decreases top panel
-            const newTopHeight = Math.max(
-                config.minTop || 80,
-                Math.min(
-                    config.maxTop || 400,
-                    startTopHeight + deltaY
-                )
-            );
-            const newBottomHeight = totalHeight - newTopHeight;
-
-            // Apply minimum constraints
-            if (config.minBottom && newBottomHeight < config.minBottom) {
-                return; // Don't resize if it would violate minimum bottom height
-            }
-
-            // Update flex basis for both panels
-            if (config.topPanel) {
-                config.topPanel.style.flexBasis = `${newTopHeight}px`;
-            }
-            if (
-                config.bottomPanel &&
-                (!config.bottomPanel.classList.contains('conflicts-panel') ||
-                    config.topPanel?.classList.contains('traffic-panel'))
-            ) {
-                config.bottomPanel.style.flexBasis = `${newBottomHeight}px`;
-            }
+        if (config.bottomPanel) {
+            config.bottomPanel.style.flexBasis = `${newBottomHeight}px`;
         }
     }
 
-    /**
-     * Save current panel sizes to localStorage
-     */
     private savePanelSizes(): void {
         try {
             const layoutState: PanelLayoutState = {
@@ -428,9 +349,6 @@ export class PanelResizer {
         }
     }
 
-    /**
-     * Load saved panel sizes from localStorage
-     */
     private loadPanelSizes(): void {
         try {
             const layoutState = storage.get<PanelLayoutState>(PanelResizer.STORAGE_KEY);
@@ -471,9 +389,6 @@ export class PanelResizer {
         }
     }
 
-    /**
-     * Clear saved panel sizes from localStorage
-     */
     private clearSavedSizes(): void {
         try {
             storage.remove(PanelResizer.STORAGE_KEY);
@@ -483,9 +398,6 @@ export class PanelResizer {
         }
     }
 
-    /**
-     * Get the current size of a panel element
-     */
     private getPanelSize(selector: string): string {
         const panel = document.querySelector(selector) as HTMLElement | null;
         if (!panel) {
@@ -494,9 +406,6 @@ export class PanelResizer {
         return panel.style.flexBasis || '';
     }
 
-    /**
-     * Set the size of a panel element
-     */
     private setPanelSize(selector: string, size: string): void {
         const panel = document.querySelector(selector) as HTMLElement | null;
         if (!panel || !size) {
@@ -505,22 +414,15 @@ export class PanelResizer {
         panel.style.flexBasis = size;
     }
 
-    /**
-     * Clean up event listeners
-     */
+    /** Remove every listener registered in setupEventListeners. */
     public destroy(): void {
         this.listenerAbort.abort();
     }
 }
 
-/**
- * Export singleton instance for global access
- */
+// Singleton instance, also exposed on window for debugging/external access.
 export const panelResizer = new PanelResizer();
 
-/**
- * Make panel resizer available globally for debugging and external access
- */
 if (typeof window !== 'undefined') {
     window.panelResizer = panelResizer;
 }

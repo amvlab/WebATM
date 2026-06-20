@@ -5,6 +5,28 @@ import { getArgAtCursor, findAcidContext, AcidContext } from './consoleTokens';
 import type { CommandDict } from '../data/types';
 
 /**
+ * Rank candidates for an autocomplete slot: case-insensitive prefix matches
+ * first, then substring matches. An empty query returns the full list.
+ */
+function rankByPrefixThenContains(items: string[], upperPartial: string): string[] {
+    if (upperPartial.length === 0) return [...items];
+    const startsWith = items.filter(x => x.toUpperCase().startsWith(upperPartial));
+    const contains = items.filter(
+        x => !x.toUpperCase().startsWith(upperPartial) && x.toUpperCase().includes(upperPartial)
+    );
+    return [...startsWith, ...contains];
+}
+
+/**
+ * True when `filtered` holds exactly the value already typed and the cursor
+ * sits at end-of-input — the slot is complete, so the dropdown should get out
+ * of the way. Stays open mid-input so an earlier slot can still be swapped.
+ */
+function isCompletedSlot(filtered: string[], upperPartial: string, isMidInput: boolean): boolean {
+    return !isMidInput && filtered.length === 1 && filtered[0].toUpperCase() === upperPartial;
+}
+
+/**
  * Dependencies the autocomplete needs from the console. Provided as
  * closures so the autocomplete stays decoupled from Console/StateManager
  * construction order.
@@ -180,38 +202,15 @@ export class ConsoleAutocomplete {
             return;
         }
 
-        // Filter aircraft IDs by partial match
         const upperPartial = partialAcid.toUpperCase();
-        let filtered: string[];
-        if (upperPartial.length === 0) {
-            filtered = [...allIds]; // Show all, dropdown scrolls
-        } else {
-            filtered = allIds.filter(id =>
-                id.toUpperCase().startsWith(upperPartial)
-            );
-            // Also include IDs that contain the search term (not just starts-with)
-            const containsMatches = allIds.filter(id =>
-                !id.toUpperCase().startsWith(upperPartial) &&
-                id.toUpperCase().includes(upperPartial)
-            );
-            filtered = [...filtered, ...containsMatches];
-        }
+        const filtered = rankByPrefixThenContains(allIds, upperPartial);
 
         if (filtered.length === 0) {
             this.hideAcidDropdown();
             return;
         }
 
-        // When typing at end-of-input, an exact single match means the user
-        // is done entering this slot - hide the dropdown to get out of the way.
-        // When the cursor sits on a token that's followed by more content, the
-        // user is editing an earlier slot, so we keep the dropdown visible so
-        // they can swap the value for a different one.
-        if (
-            !isMidInput &&
-            filtered.length === 1 &&
-            filtered[0].toUpperCase() === upperPartial
-        ) {
+        if (isCompletedSlot(filtered, upperPartial, isMidInput)) {
             this.hideAcidDropdown();
             return;
         }
@@ -294,10 +293,7 @@ export class ConsoleAutocomplete {
 
         // Look up the parameter list from cmddict so we follow whatever
         // argument order the server advertises.
-        const cmddict = this.deps.getCommandDict();
-        if (!cmddict || !cmddict[command]) return null;
-
-        const rawParamString = cmddict[command];
+        const rawParamString = this.deps.getCommandDict()?.[command];
         if (!rawParamString) return null;
 
         // Use the user-facing signature so MCRE's `type` arg lines up at
@@ -338,20 +334,7 @@ export class ConsoleAutocomplete {
         const { partialType, isMidInput } = context;
         const upperPartial = partialType.toUpperCase();
 
-        // Filter aircraft types by prefix, then by contains (so users can still
-        // find types by partial substring). Empty partial = show all types.
-        let filtered: string[];
-        if (upperPartial.length === 0) {
-            filtered = [...this.aircraftTypes];
-        } else {
-            const startsWith = this.aircraftTypes.filter(t =>
-                t.startsWith(upperPartial)
-            );
-            const contains = this.aircraftTypes.filter(t =>
-                !t.startsWith(upperPartial) && t.includes(upperPartial)
-            );
-            filtered = [...startsWith, ...contains];
-        }
+        const filtered = rankByPrefixThenContains(this.aircraftTypes, upperPartial);
 
         if (filtered.length === 0) {
             // Non-openap type being typed - hide the dropdown so the user
@@ -364,15 +347,7 @@ export class ConsoleAutocomplete {
             return;
         }
 
-        // When typing at end-of-input, an exact single match means the user is
-        // done entering this slot - hide the dropdown. When the cursor sits on
-        // a token followed by more content, the user is editing an earlier
-        // slot, so keep the dropdown visible so they can pick a different type.
-        if (
-            !isMidInput &&
-            filtered.length === 1 &&
-            filtered[0].toUpperCase() === upperPartial
-        ) {
+        if (isCompletedSlot(filtered, upperPartial, isMidInput)) {
             this.hideTypeDropdown();
             this.hideTypeWarning();
             return;
