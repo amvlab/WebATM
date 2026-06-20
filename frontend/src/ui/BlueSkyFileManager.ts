@@ -1,6 +1,6 @@
 import { logger } from '../utils/Logger';
 import { storage } from '../utils/StorageManager';
-import { onDOMReady, setVisible } from '../utils/dom';
+import { onDOMReady, setVisible, escapeHtml } from '../utils/dom';
 
 interface FileTypeConfig {
     extension: string;
@@ -127,6 +127,27 @@ export class BlueSkyFileManager {
         // Close button handlers
         const closeFooterBtn = document.getElementById('upload-files-close-footer');
         closeFooterBtn?.addEventListener('click', () => this.closeModal());
+
+        // Event delegation on the (persistent) file list container. Rows and
+        // buttons carry data-action / data-* attributes instead of inline
+        // onclick handlers, so untrusted filenames are never interpolated into
+        // executable strings (XSS risk).
+        const fileListDiv = document.getElementById('file-list');
+        fileListDiv?.addEventListener('click', (e) => {
+            const target = (e.target as HTMLElement)?.closest('[data-action]') as HTMLElement | null;
+            if (!target) return;
+            const action = target.dataset.action;
+            const fileType = target.dataset.fileType || '';
+            if (action === 'navigate-path') {
+                void this.navigateToPath(fileType, target.dataset.path || '');
+            } else if (action === 'navigate-folder') {
+                void this.navigateToFolder(fileType, target.dataset.name || '');
+            } else if (action === 'run-scenario') {
+                this.runScenario(target.dataset.name || '');
+            } else if (action === 'delete') {
+                void this.deleteFile(fileType, target.dataset.name || '');
+            }
+        });
 
         logger.debug('BlueSkyFileManager', 'Event handlers initialized');
     }
@@ -580,10 +601,10 @@ export class BlueSkyFileManager {
         if (breadcrumbs && breadcrumbs.length > 1) {
             const breadcrumbItems = breadcrumbs.map((crumb, index) => {
                 const isLast = index === breadcrumbs.length - 1;
-                const clickHandler = isLast ? '' : `onclick="blueSkyFileManager.navigateToPath('${fileType}', '${crumb.path}')"`;
+                const attrs = isLast ? '' : `data-action="navigate-path" data-file-type="${escapeHtml(fileType)}" data-path="${escapeHtml(crumb.path)}"`;
                 const style = isLast ? 'color: #fff; font-weight: bold;' : 'color: #4CAF50; cursor: pointer;';
-                
-                return `<span style="${style}" ${clickHandler}>${crumb.name}</span>`;
+
+                return `<span style="${style}" ${attrs}>${escapeHtml(crumb.name)}</span>`;
             }).join(' <span style="color: #666;">/</span> ');
 
             content += `
@@ -604,23 +625,24 @@ export class BlueSkyFileManager {
             const isFolder = file.type === 'folder';
             const icon = isFolder ? '📁' : '';
             const sizeText = isFolder ? 'Folder' : `${Math.round(file.size / 1024)} KB`;
-            const clickHandler = isFolder ? `onclick="blueSkyFileManager.navigateToFolder('${fileType}', '${file.filename}')"` : '';
+            const folderAttrs = isFolder ? `data-action="navigate-folder" data-file-type="${escapeHtml(fileType)}" data-name="${escapeHtml(file.filename)}"` : '';
             const cursorStyle = isFolder ? 'cursor: pointer;' : '';
-            
+            const safeName = escapeHtml(file.filename);
+
             return `
                 <div style="padding: 8px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center;">
-                    <div style="${cursorStyle}" ${clickHandler}>
-                        <div style="font-weight: bold; ${isFolder ? 'color: #4CAF50;' : ''}">${icon} ${file.filename}</div>
-                        <div style="font-size: 11px; color: #888;">${sizeText} • ${modifiedDate}</div>
+                    <div style="${cursorStyle}" ${folderAttrs}>
+                        <div style="font-weight: bold; ${isFolder ? 'color: #4CAF50;' : ''}">${icon} ${safeName}</div>
+                        <div style="font-size: 11px; color: #888;">${escapeHtml(sizeText)} • ${modifiedDate}</div>
                     </div>
                     ${isFolder ? '' : `
                     <div style="display: flex; gap: 4px;">
                         ${fileType === 'scenario' ? `
-                        <button class="btn-primary" onclick="blueSkyFileManager.runScenario('${file.filename}')" style="padding: 4px 8px; font-size: 11px;">
+                        <button class="btn-primary" data-action="run-scenario" data-name="${safeName}" style="padding: 4px 8px; font-size: 11px;">
                             ▶️ Run
                         </button>
                         ` : ''}
-                        <button class="btn-secondary" onclick="blueSkyFileManager.deleteFile('${fileType}', '${file.filename}')" style="padding: 4px 8px; font-size: 11px;">
+                        <button class="btn-secondary" data-action="delete" data-file-type="${escapeHtml(fileType)}" data-name="${safeName}" style="padding: 4px 8px; font-size: 11px;">
                             🗑️ Delete
                         </button>
                     </div>
