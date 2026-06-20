@@ -1,12 +1,19 @@
 import { MapDisplay } from '../MapDisplay';
 import { modalManager } from '../../ModalManager';
-import { GeoJSONSource } from 'maplibre-gl';
 import type { App } from '../../../core/App';
 import type { NavaidSnapper } from '../navdata/NavaidSnapper';
 import { BaseDrawingManager, DrawingPoint } from '../BaseDrawingManager';
-import { featureCollection, lineStringFeature, pointFeature, polygonFeature, toLngLatCoords } from '../../../utils/geojson';
+import { lineStringFeature, pointFeature, polygonFeature, toLngLatCoords } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
-import { safeRemoveLayer, safeRemoveSource } from '../../../utils/maplibre';
+import {
+    ensureGeoJSONSource,
+    ensureLayer,
+    safeRemoveLayer,
+    safeRemoveSource,
+    setLayerVisibility,
+    updateSourceFeatures
+} from '../../../utils/maplibre';
+import { buildShapeCommand } from './shapeCommand';
 
 /**
  * ShapeDrawingManager - Manages shape (polygon/polyline) drawing on the map
@@ -277,42 +284,24 @@ export class ShapeDrawingManager extends BaseDrawingManager {
             return;
         }
 
-        // Generate command based on shape type
         const command = this.generateCommand();
         logger.info('ShapeDrawingManager', `Generated command: ${command}`);
 
-        // Send command to server via App
+        // Send command to server via App, then echo it in the console.
         try {
-            logger.debug('ShapeDrawingManager', 'About to send command via app.sendCommand');
             const success = await this.app.sendCommand(command);
-            logger.debug('ShapeDrawingManager', 'sendCommand returned, success =', success);
-
             if (success) {
                 logger.info('ShapeDrawingManager', `Shape command sent successfully: ${command}`);
-
-                // Display the command in the console
-                logger.debug('ShapeDrawingManager', 'Getting console instance from app');
-                const consoleInstance = this.app.getConsole();
-                logger.debug('ShapeDrawingManager', 'Console instance:', consoleInstance);
-
-                if (consoleInstance) {
-                    logger.debug('ShapeDrawingManager', 'Calling displaySentCommand with:', command);
-                    consoleInstance.displaySentCommand(command);
-                } else {
-                    logger.warn('ShapeDrawingManager', 'Console instance is null');
-                }
+                this.app.getConsole()?.displaySentCommand(command);
             } else {
-                logger.error('ShapeDrawingManager', '🖊️ Failed to send shape command - success was false');
+                logger.error('ShapeDrawingManager', 'Failed to send shape command - success was false');
                 alert('Failed to send shape command. Please check your connection.');
             }
         } catch (error) {
-            logger.error('ShapeDrawingManager', '🖊️ Error sending shape command:', error);
+            logger.error('ShapeDrawingManager', 'Error sending shape command:', error);
             alert('Error sending shape command: ' + (error as Error).message);
         }
 
-        logger.debug('ShapeDrawingManager', 'After try-catch block');
-
-        // Stop drawing
         this.stopDrawing();
     }
 
@@ -325,22 +314,16 @@ export class ShapeDrawingManager extends BaseDrawingManager {
     }
 
     /**
-     * Generate command string based on shape type and points
+     * Generate the BlueSky command string for the current shape.
      */
     private generateCommand(): string {
-        // Convert points to coordinate string
-        const coords = this.drawingPoints.flatMap(p => [p.lat.toFixed(6), p.lng.toFixed(6)]);
-
-        if (this.currentShapeType === 'line') {
-            // POLYLINE format: POLYLINE name,lat,lon,lat,lon,...
-            return `POLYLINE ${this.currentShapeName},${coords.join(',')}`;
-        } else if (this.topAltitude !== null && this.bottomAltitude !== null) {
-            // POLYALT format: POLYALT name,top,bottom,lat,lon,lat,lon,...
-            return `POLYALT ${this.currentShapeName},${this.topAltitude},${this.bottomAltitude},${coords.join(',')}`;
-        } else {
-            // POLY format: POLY name,lat,lon,lat,lon,...
-            return `POLY ${this.currentShapeName},${coords.join(',')}`;
-        }
+        return buildShapeCommand({
+            name: this.currentShapeName ?? '',
+            type: this.currentShapeType,
+            points: this.drawingPoints,
+            topAltitude: this.topAltitude,
+            bottomAltitude: this.bottomAltitude
+        });
     }
 
     /**
@@ -350,80 +333,59 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        // Add sources if they don't exist
-        const sourceIds = ['temp-drawing-points', 'temp-drawing-polygon', 'temp-drawing-preview'];
-        for (const sourceId of sourceIds) {
-            if (!map.getSource(sourceId)) {
-                map.addSource(sourceId, { type: 'geojson', data: featureCollection() });
+        ensureGeoJSONSource(map, 'temp-drawing-points');
+        ensureGeoJSONSource(map, 'temp-drawing-polygon');
+        ensureGeoJSONSource(map, 'temp-drawing-preview');
+
+        ensureLayer(map, {
+            id: 'temp-drawing-points',
+            source: 'temp-drawing-points',
+            type: 'circle',
+            paint: {
+                'circle-radius': 6,
+                'circle-color': '#ff6b00',
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#ffffff'
             }
-        }
-
-        // Add layers for points
-        if (!map.getLayer('temp-drawing-points')) {
-            map.addLayer({
-                id: 'temp-drawing-points',
-                source: 'temp-drawing-points',
-                type: 'circle',
-                paint: {
-                    'circle-radius': 6,
-                    'circle-color': '#ff6b00',
-                    'circle-stroke-width': 2,
-                    'circle-stroke-color': '#ffffff'
-                }
-            });
-        }
-
-        // Add layers for polygon/line
-        if (!map.getLayer('temp-drawing-polygon-line')) {
-            map.addLayer({
-                id: 'temp-drawing-polygon-line',
-                source: 'temp-drawing-polygon',
-                type: 'line',
-                paint: {
-                    'line-color': '#ff6b00',
-                    'line-width': 2
-                }
-            });
-        }
-
-        if (!map.getLayer('temp-drawing-polygon-fill')) {
-            map.addLayer({
-                id: 'temp-drawing-polygon-fill',
-                source: 'temp-drawing-polygon',
-                type: 'fill',
-                paint: {
-                    'fill-color': '#ff6b00',
-                    'fill-opacity': 0.1
-                }
-            });
-        }
-
-        // Add layers for cursor preview
-        if (!map.getLayer('temp-drawing-preview-line')) {
-            map.addLayer({
-                id: 'temp-drawing-preview-line',
-                source: 'temp-drawing-preview',
-                type: 'line',
-                paint: {
-                    'line-color': '#ffaa00',
-                    'line-width': 1,
-                    'line-dasharray': [4, 4],
-                    'line-opacity': 0.8
-                }
-            });
-        }
-
-        if (!map.getLayer('temp-drawing-preview-fill')) {
-            map.addLayer({
-                id: 'temp-drawing-preview-fill',
-                source: 'temp-drawing-preview',
-                type: 'fill',
-                paint: {
-                    'fill-color': '#ffaa00',
-                    'fill-opacity': 0.05
-                }
-            });
-        }
+        });
+        ensureLayer(map, {
+            id: 'temp-drawing-polygon-line',
+            source: 'temp-drawing-polygon',
+            type: 'line',
+            paint: {
+                'line-color': '#ff6b00',
+                'line-width': 2
+            }
+        });
+        ensureLayer(map, {
+            id: 'temp-drawing-polygon-fill',
+            source: 'temp-drawing-polygon',
+            type: 'fill',
+            paint: {
+                'fill-color': '#ff6b00',
+                'fill-opacity': 0.1
+            }
+        });
+        ensureLayer(map, {
+            id: 'temp-drawing-preview-line',
+            source: 'temp-drawing-preview',
+            type: 'line',
+            paint: {
+                'line-color': '#ffaa00',
+                'line-width': 1,
+                'line-dasharray': [4, 4],
+                'line-opacity': 0.8
+            }
+        });
+        ensureLayer(map, {
+            id: 'temp-drawing-preview-fill',
+            source: 'temp-drawing-preview',
+            type: 'fill',
+            paint: {
+                'fill-color': '#ffaa00',
+                'fill-opacity': 0.05
+            }
+        });
     }
 
     /**
@@ -433,59 +395,32 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        // Update point markers
         const pointFeatures = this.drawingPoints.map((point, index) =>
             pointFeature([point.lng, point.lat], { index }));
-
-        const pointSource = map.getSource('temp-drawing-points') as GeoJSONSource;
-        if (pointSource) {
-            pointSource.setData(featureCollection(pointFeatures));
-        }
+        updateSourceFeatures(map, 'temp-drawing-points', pointFeatures);
 
         const coordinates = toLngLatCoords(this.drawingPoints);
-        const polygonSource = map.getSource('temp-drawing-polygon') as GeoJSONSource;
+        const name = this.currentShapeName;
 
-        // Update polygon/line visualization
         if (this.currentShapeType === 'line') {
-            // For lines, show simple line connections between points
+            // Lines: connect placed points directly, no fill.
             if (this.drawingPoints.length >= 2) {
-                if (polygonSource) {
-                    polygonSource.setData(featureCollection([
-                        lineStringFeature(coordinates, {
-                            name: this.currentShapeName,
-                            'drawing-type': 'line'
-                        })
-                    ]));
-                }
-
-                // Hide fill layer for lines
-                map.setLayoutProperty('temp-drawing-polygon-fill', 'visibility', 'none');
+                updateSourceFeatures(map, 'temp-drawing-polygon', [
+                    lineStringFeature(coordinates, { name, 'drawing-type': 'line' })
+                ]);
+                setLayerVisibility(map, 'temp-drawing-polygon-fill', false);
             }
-        } else {
-            // For areas/polygons
-            if (this.drawingPoints.length >= 3) {
-                if (polygonSource) {
-                    polygonSource.setData(featureCollection([
-                        polygonFeature(coordinates, {
-                            name: this.currentShapeName,
-                            'drawing-type': 'polygon'
-                        })
-                    ]));
-                }
-
-                // Show fill layer for polygons
-                map.setLayoutProperty('temp-drawing-polygon-fill', 'visibility', 'visible');
-            } else if (this.drawingPoints.length === 2) {
-                // Show line preview
-                if (polygonSource) {
-                    polygonSource.setData(featureCollection([
-                        lineStringFeature(coordinates, {
-                            name: this.currentShapeName,
-                            'drawing-type': 'polygon-preview'
-                        })
-                    ]));
-                }
-            }
+        } else if (this.drawingPoints.length >= 3) {
+            // Areas: closed polygon with fill once there are 3+ points.
+            updateSourceFeatures(map, 'temp-drawing-polygon', [
+                polygonFeature(coordinates, { name, 'drawing-type': 'polygon' })
+            ]);
+            setLayerVisibility(map, 'temp-drawing-polygon-fill', true);
+        } else if (this.drawingPoints.length === 2) {
+            // Two points: show a line until the area can be closed.
+            updateSourceFeatures(map, 'temp-drawing-polygon', [
+                lineStringFeature(coordinates, { name, 'drawing-type': 'polygon-preview' })
+            ]);
         }
 
         logger.debug('ShapeDrawingManager', `Drawing preview updated: ${this.drawingPoints.length} points`);
@@ -501,24 +436,20 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         const features: GeoJSON.Feature[] = [];
 
         if (this.drawingPoints.length >= 1) {
-            // Line from last point to cursor
+            // Line from last placed point to the cursor.
             const lastPoint = this.drawingPoints[this.drawingPoints.length - 1];
             features.push(lineStringFeature(
                 toLngLatCoords([lastPoint, cursorPoint]),
                 { preview: 'next-line' }
             ));
 
-            // For polygons with 2+ points, show closing line and fill preview
+            // For areas with 2+ points, also preview the closing line and fill.
             if (this.drawingPoints.length >= 2 && this.currentShapeType !== 'line') {
                 const firstPoint = this.drawingPoints[0];
-
-                // Closing line from cursor to first point
                 features.push(lineStringFeature(
                     toLngLatCoords([cursorPoint, firstPoint]),
                     { preview: 'closing-line' }
                 ));
-
-                // Polygon preview with fill (ring closed by polygonFeature)
                 features.push(polygonFeature(
                     toLngLatCoords([...this.drawingPoints, cursorPoint]),
                     { preview: 'polygon-fill' }
@@ -526,18 +457,8 @@ export class ShapeDrawingManager extends BaseDrawingManager {
             }
         }
 
-        // Update visibility for preview fill layer
-        if (this.currentShapeType === 'line') {
-            map.setLayoutProperty('temp-drawing-preview-fill', 'visibility', 'none');
-        } else {
-            map.setLayoutProperty('temp-drawing-preview-fill', 'visibility', 'visible');
-        }
-
-        // Update preview source
-        const previewSource = map.getSource('temp-drawing-preview') as GeoJSONSource;
-        if (previewSource) {
-            previewSource.setData(featureCollection(features));
-        }
+        setLayerVisibility(map, 'temp-drawing-preview-fill', this.currentShapeType !== 'line');
+        updateSourceFeatures(map, 'temp-drawing-preview', features);
     }
 
     /**
@@ -547,14 +468,8 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        // Clear all temporary drawing data
         const sources = ['temp-drawing-points', 'temp-drawing-polygon', 'temp-drawing-preview'];
-        sources.forEach(sourceId => {
-            const source = map.getSource(sourceId) as GeoJSONSource;
-            if (source) {
-                source.setData(featureCollection());
-            }
-        });
+        sources.forEach(sourceId => updateSourceFeatures(map, sourceId, []));
 
         logger.debug('ShapeDrawingManager', 'Cleared temporary drawing visualization');
     }
