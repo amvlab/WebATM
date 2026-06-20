@@ -70,8 +70,8 @@ RECYCLE_ENABLED = os.environ.get("RECYCLE_ENABLED", "1") != "0"
 # pristine sandbox. A replica that has never been used is left ready, not churned.
 RECYCLE_IDLE_GRACE = float(os.environ.get("RECYCLE_IDLE_GRACE", "120"))
 # Hard cap on a single continuous session: force-recycle a replica busy this
-# long (kicks a camper). 0 disables. Matches the "ends after 1 hour" copy.
-MAX_SESSION_TIME = float(os.environ.get("MAX_SESSION_TIME", "3600"))
+# long (kicks a camper). 0 disables. Matches the "ends after 20 minutes" copy.
+MAX_SESSION_TIME = float(os.environ.get("MAX_SESSION_TIME", "1200"))
 DOCKER_SOCK = os.environ.get("DOCKER_SOCK", "/var/run/docker.sock")
 STATUS_TIMEOUT = float(os.environ.get("STATUS_TIMEOUT", "3"))
 CSV_FILE = os.environ.get("CSV_FILE")  # optional; e.g. /log/webatm-sessions.csv
