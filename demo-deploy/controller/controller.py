@@ -51,7 +51,7 @@ import urllib.request
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "5"))
 RECYCLE_INTERVAL = float(os.environ.get("RECYCLE_INTERVAL", "3600"))
 COMPOSE_SERVICE = os.environ.get("WEBATM_SERVICE", "webatm")
-PROXY_NETWORK = os.environ.get("PROXY_NETWORK", "proxy")
+PROXY_NETWORK = os.environ.get("PROXY_NETWORK", "internal")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8082"))
 DOMAIN = os.environ.get("WEBATM_DOMAIN", "webatm.amvlab.eu")
 COOKIE_NAME = os.environ.get("STICKY_COOKIE_NAME", "webatm-session")

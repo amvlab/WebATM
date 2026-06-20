@@ -1,4 +1,4 @@
-# WebATM public demo stack (integrated image, gated, zero app changes).
+# WebATM public demo stack (integrated image, gated + hardened, zero app changes).
 #
 #   Traefik v3 (TLS via Cloudflare DNS-01)
 #     └── webatm  : 10 replicas of ghcr.io/amvlab/webatm-integrated, one sticky
@@ -9,11 +9,17 @@
 #     └── controller : watches each replica's /status, flips the capacity page
 #                   on/off, and recycles idle replicas hourly. No app changes.
 #
+# SECURITY MODEL (see README "Security"): visitors can upload BlueSky scenarios,
+# so the replicas run partially-untrusted input. Defenses here:
+#   * plugin (.py) uploads are blocked at the proxy (traefik/dynamic/base.yml);
+#   * replicas sit on an INTERNAL, no-egress network (no exfiltration / C2);
+#   * all Linux capabilities dropped, no-new-privileges, PID-limited, non-root;
+#   * containers are recycled hourly (ephemeral).
+# This is NOT a sandbox for fully arbitrary code -- for that add gVisor (README).
+#
 # Quick start:
 #   cp .env.example .env   # fill in Cloudflare token + your domain
 #   docker compose up -d
-#
-# See ./README.md for how it all fits together and the known caveats.
 
 services:
   traefik:
@@ -22,8 +28,13 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE        # needed to bind :80 / :443
     networks:
-      - proxy
+      - edge                    # internet-facing: published ports + ACME egress
+      - internal                # to reach the backends (which have no egress)
     ports:
       - "80:80"
       - "443:443"
@@ -44,22 +55,22 @@ services:
   webatm:
     image: ghcr.io/amvlab/webatm-integrated:latest
     restart: unless-stopped
+    # No egress: `internal` has no gateway, so a malicious scenario/plugin can't
+    # phone home, exfiltrate, or attack third parties. Map tiles load in the
+    # user's BROWSER (not here), and BlueSky runs on localhost, so the container
+    # needs no outbound internet. (Verify the bundled BlueSky ships its nav data
+    # and doesn't fetch it at runtime -- see README.)
     networks:
-      - proxy
+      - internal
     security_opt:
       - no-new-privileges:true
     cap_drop:
-      - SETUID
-      - SETGID
-      - SYS_ADMIN
-      - SYS_PTRACE
+      - ALL                     # the app is non-root and needs no capabilities
+    read_only: false            # see README for an optional read-only rootfs recipe
     environment:
       - FLASK_ENV=production
       # Integrated image already sets WEBATM_INTEGRATED=1 and runs BlueSky
       # locally; nothing else is required for the app itself.
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
     sysctls:
       - net.ipv4.ip_local_port_range=32768 65535
       - net.core.somaxconn=1024
@@ -72,7 +83,7 @@ services:
       start_period: 60s
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=proxy"
+      - "traefik.docker.network=internal"
 
       # --- main router: ALL traffic; in-session users (sticky cookie) always
       #     match here and reach their own container.
@@ -109,6 +120,7 @@ services:
         limits:
           cpus: "0.75"
           memory: 1024M
+          pids: 512             # stop fork bombs (server + node children + threads)
       restart_policy:
         condition: any
         delay: 2s
@@ -118,7 +130,7 @@ services:
     container_name: capacity-full
     restart: unless-stopped
     networks:
-      - proxy           # reachable by Traefik as http://capacity-full:80 (see traefik/dynamic/base.yml)
+      - internal        # reachable by Traefik as http://capacity-full:80 (see traefik/dynamic/base.yml)
     security_opt:
       - no-new-privileges:true
     volumes:
@@ -131,13 +143,15 @@ services:
     container_name: webatm-controller
     restart: unless-stopped
     networks:
-      - proxy           # must share the network to reach replica IPs on :8082
+      - internal        # must share the network to reach replica IPs on :8082
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL             # talks to the docker socket (as root) + the net; no caps needed
     command: ["python", "/app/controller.py"]
     environment:
       - WEBATM_SERVICE=webatm
-      - PROXY_NETWORK=proxy
+      - PROXY_NETWORK=internal
       - WEBATM_DOMAIN=${WEBATM_DOMAIN:-webatm.amvlab.eu}
       - STICKY_COOKIE_NAME=webatm-session
       - CERT_RESOLVER=production
@@ -157,8 +171,14 @@ services:
       - traefik
 
 networks:
-  proxy:
-    name: proxy
+  # Internet-facing network for Traefik only (published ports + ACME egress).
+  edge:
+    name: webatm-edge
+  # No-egress network for the backends. `internal: true` removes the gateway,
+  # so containers here cannot reach the internet (only each other + Traefik).
+  internal:
+    name: webatm-internal
+    internal: true
 
 volumes:
   webatm-logs:

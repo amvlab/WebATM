@@ -80,6 +80,57 @@ publicly reachable for cert issuance — only your Cloudflare token matters.
 
 To change the slot count: edit `deploy.replicas` and `docker compose up -d`.
 
+## Security
+
+WebATM lets visitors upload files that BlueSky then reads, so a public demo is
+running **partially-untrusted input**. The biggest hazard is **plugins**: a
+BlueSky plugin is a `.py` file the server *imports and executes*, which is
+arbitrary code execution. There is no authentication, so without mitigation
+you'd be offering "run my Python" to anyone on the internet.
+
+What this stack does about it (all at the deployment layer — **no app changes**):
+
+| Threat | Mitigation |
+|---|---|
+| Upload arbitrary Python (RCE) | **Plugin upload endpoint is blocked at Traefik** (`/api/bluesky/upload/plugins` → 403, see `traefik/dynamic/base.yml`). Scenario/settings uploads still work; scenarios only drive BlueSky's own command set, not Python. |
+| Exfiltration / C2 / botnet / attacking others from your IP | Replicas run on an **internal, no-egress network** (`webatm-internal`, `internal: true`). They can't reach the internet — only each other and Traefik. Map tiles load in the user's browser, and BlueSky is on localhost, so nothing here needs outbound. |
+| Privilege escalation in-container | Non-root user (image default), `no-new-privileges`, **all Linux capabilities dropped** (`cap_drop: ALL`). |
+| Resource abuse (fork bomb, CPU/RAM hog) | `pids: 512`, `cpus: 0.75`, `memory: 1024M` per replica. |
+| Persistence of a compromise | Replicas are **recycled hourly** (and on idle) — state is ephemeral. |
+| Hijacking the control plane | The Docker socket is mounted only into Traefik (read-only) and the controller; the `webatm` replicas can't reach it (it's a local socket, not on the network), and Traefik's dashboard is off. |
+
+### Residual risk — read this
+
+This is **defense-in-depth, not a sandbox**. A container is not a hard security
+boundary: a Linux kernel exploit could let hostile code escape to the host, and
+scenarios still exercise BlueSky's full command surface. The no-egress network
+is what makes that acceptable for a low-stakes public demo — even on a container
+escape there's no outbound path — but if this is high-value, add a real sandbox:
+
+- **gVisor (recommended next step).** Install gVisor on the host and add
+  `runtime: runsc` to the `webatm` service. It interposes a user-space kernel so
+  container syscalls never hit the host kernel directly — the right tool for
+  running untrusted code. Standard Docker, no app changes.
+- **Kata Containers / Firecracker microVMs** for hardware-virtualized isolation
+  (heavier; overkill for most demos).
+
+### Two things to verify before going live
+
+1. **BlueSky nav data.** The no-egress network assumes the bundled BlueSky ships
+   its navigation data and doesn't fetch it at runtime. Start the stack and
+   confirm the map/traffic work; if BlueSky errors about missing nav data, the
+   image expects a runtime download — pre-bake it into the image (best), or
+   briefly attach `webatm` to an egress network to populate a cached volume.
+2. **The plugin button still shows in the UI** and will now return 403 on use
+   (cosmetic). Hiding it cleanly is a job for the future app shim.
+
+### Optional: read-only root filesystem
+
+For extra hardening you can set `read_only: true` on `webatm` plus tmpfs/volume
+mounts for the paths BlueSky writes (`~/bluesky`, `/tmp`, and any `~/.cache`).
+It's left **off** by default because it needs a quick test against the bundled
+image — BlueSky/matplotlib may write to a few home-dir caches.
+
 ## Caveats (consequences of not touching the app)
 
 These are the gaps versus a fully app-aware version, and all of them close with
@@ -119,7 +170,7 @@ working (it just never needs to show the page on a shared replica).
 |---|---|
 | `docker-compose.yml` | The whole stack. |
 | `traefik/traefik.yml` | Traefik static config (entrypoints, providers, ACME). |
-| `traefik/dynamic/base.yml` | Capacity-full service + rate-limit middleware. |
+| `traefik/dynamic/base.yml` | Capacity-full service, rate-limit middleware, and the plugin-upload block. |
 | `traefik/dynamic/capacity.yml` | **Generated** by the controller; present only when full. |
 | `capacity_full/capacity-full.html` | The “all slots busy” page. |
 | `controller/controller.py` | Capacity toggling + hourly idle recycle (stdlib only). |

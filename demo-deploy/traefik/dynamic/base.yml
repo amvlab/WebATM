@@ -6,9 +6,25 @@
 # file freely without risk of clobbering these definitions.
 
 http:
+  routers:
+    # SECURITY: hard-block the BlueSky *plugin* upload endpoint at the proxy.
+    # Plugins are .py files that BlueSky imports and executes -- i.e. arbitrary
+    # code execution -- so on a public demo we refuse them outright. Scenario
+    # (.scn) and settings uploads still work. Highest priority so it wins for
+    # this path regardless of session cookie or capacity state. No app changes.
+    deny-plugin-upload:
+      rule: "PathPrefix(`/api/bluesky/upload/plugins`)"
+      priority: 200
+      entryPoints:
+        - websecure
+      service: webatm@docker        # nominal target; deny-all returns 403 first
+      middlewares:
+        - deny-all
+      tls: {}                       # reuse the wildcard cert the app router obtains
+
   services:
     # The capacity-full nginx page. Reached by its compose service name over the
-    # shared `proxy` network (Traefik's embedded Docker DNS resolves it), so we
+    # shared internal network (Traefik's embedded Docker DNS resolves it), so we
     # do not need a static IP or Traefik labels on the nginx container.
     capacity-full:
       loadBalancer:
@@ -26,3 +42,10 @@ http:
         sourceCriterion:
           ipStrategy:
             depth: 1
+
+    # Denies every client (impossible source range) so Traefik returns 403.
+    # Used to switch off the plugin-upload endpoint above.
+    deny-all:
+      ipAllowList:
+        sourceRange:
+          - "255.255.255.255/32"
