@@ -2,7 +2,5 @@
 .env
 traefik/certs/*
 !traefik/certs/.gitkeep
-controller/log/*
-!controller/log/.gitkeep
 # Generated at runtime by the controller when all replicas are busy.
 traefik/dynamic/capacity.yml

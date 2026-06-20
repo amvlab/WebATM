@@ -67,6 +67,12 @@ RECYCLE_ENABLED = os.environ.get("RECYCLE_ENABLED", "1") != "0"
 DOCKER_SOCK = os.environ.get("DOCKER_SOCK", "/var/run/docker.sock")
 STATUS_TIMEOUT = float(os.environ.get("STATUS_TIMEOUT", "3"))
 CSV_FILE = os.environ.get("CSV_FILE")  # optional; e.g. /log/webatm-sessions.csv
+# Append at most one CSV row per CSV_INTERVAL seconds (decoupled from the much
+# faster poll cadence) so the history stays compact and covers a long window.
+CSV_INTERVAL = float(os.environ.get("CSV_INTERVAL", "60"))
+# Retention cap: keep at most this many data rows (oldest trimmed). 0 = no cap.
+# At the 60s default cadence, 100k rows is ~70 days.
+CSV_MAX_ROWS = int(os.environ.get("CSV_MAX_ROWS", "100000"))
 
 
 def log(msg: str) -> None:
@@ -195,6 +201,27 @@ def append_csv(
         f.write(
             f"{stamp},{active_sessions},{total},{reachable},{busy},{free},{unreachable}\n"
         )
+    _trim_csv()
+
+
+def _trim_csv() -> None:
+    """Cap the CSV at CSV_MAX_ROWS data rows, trimming oldest. Hysteresis keeps
+    the rewrite infrequent: we let it grow a little past the cap, then trim back."""
+    if CSV_MAX_ROWS <= 0:
+        return
+    margin = max(64, CSV_MAX_ROWS // 50)
+    with open(CSV_FILE) as f:
+        lines = f.readlines()
+    if len(lines) - 1 <= CSV_MAX_ROWS + margin:  # -1 for the header
+        return
+    header, data = lines[0], lines[1:]
+    kept = data[-CSV_MAX_ROWS:]
+    tmp = CSV_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(header)
+        f.writelines(kept)
+    os.replace(tmp, CSV_FILE)  # atomic
+    log(f"Trimmed {CSV_FILE} to last {CSV_MAX_ROWS} rows")
 
 
 # --------------------------------------------------------------------------- #
@@ -206,6 +233,7 @@ def main() -> None:
     # start nothing is recycled for at least RECYCLE_INTERVAL.
     first_seen: dict[str, float] = {}
     full_streak = 0
+    last_csv_write = 0.0
     log(
         f"WebATM capacity controller started "
         f"(service={COMPOSE_SERVICE} network={PROXY_NETWORK} domain={DOMAIN} "
@@ -259,8 +287,9 @@ def main() -> None:
             set_capacity(full_streak >= FULL_DEBOUNCE)
 
             reachable = total - unreachable
-            if CSV_FILE:
+            if CSV_FILE and now - last_csv_write >= CSV_INTERVAL:
                 append_csv(now, active_sessions, total, reachable, busy, free, unreachable)
+                last_csv_write = now
             log(
                 f"people={active_sessions} replicas={total} busy={busy} "
                 f"free={free} unreachable={unreachable} full={is_full}"

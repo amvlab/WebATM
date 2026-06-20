@@ -145,15 +145,21 @@ services:
       - RECYCLE_INTERVAL=${RECYCLE_INTERVAL:-3600}   # "reboot every hour unless someone is using it"
       - RECYCLE_ENABLED=${RECYCLE_ENABLED:-1}
       - DYNAMIC_DIR=/dynamic
-      - CSV_FILE=${CSV_FILE:-/log/webatm-sessions.csv}   # session history -> ./controller/log/ (set empty to disable)
+      - CSV_FILE=${CSV_FILE:-/log/webatm-sessions.csv}   # session history (set empty to disable)
+      - CSV_INTERVAL=${CSV_INTERVAL:-60}                 # seconds between CSV rows
+      - CSV_MAX_ROWS=${CSV_MAX_ROWS:-100000}             # retention cap; oldest rows trimmed
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock     # rw: needs to restart idle replicas
       - ./controller:/app:ro
       - ./traefik/dynamic:/dynamic                     # writes capacity.yml here (Traefik watches it)
-      - ./controller/log:/log                          # session-history CSV (on by default)
+      - webatm-logs:/log                               # named volume: session history persists across down/up
     depends_on:
       - traefik
 
 networks:
   proxy:
     name: proxy
+
+volumes:
+  webatm-logs:
+    name: webatm-logs

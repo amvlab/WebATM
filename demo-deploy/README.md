@@ -39,10 +39,20 @@ built in — there is **no cron job to run**:
 - **Live**: `docker compose logs -f controller` shows a line each poll, e.g.
   `people=3 replicas=10 busy=3 free=7 unreachable=0 full=False`
   (`people` = total active sessions across all replicas).
-- **History**: a CSV is written to `./controller/log/webatm-sessions.csv` (on by
-  default via `CSV_FILE`), with columns
-  `timestamp,active_sessions,total_replicas,reachable,busy,free,unreachable`.
-  Graph it however you like; set `CSV_FILE=` empty to turn it off.
+- **History**: a CSV with columns
+  `timestamp,active_sessions,total_replicas,reachable,busy,free,unreachable`,
+  on by default. It's written to the named **`webatm-logs`** Docker volume so it
+  **persists across `docker compose down`** (a `down -v` or explicit
+  `docker volume rm webatm-logs` wipes it). A new row is appended every
+  `CSV_INTERVAL` seconds (default 60) and the file is capped at `CSV_MAX_ROWS`
+  rows (default 100 000 ≈ 70 days; oldest trimmed). Set `CSV_FILE=` empty to
+  disable.
+
+  Read or export it any time:
+  ```bash
+  docker compose exec controller tail -n 20 /log/webatm-sessions.csv
+  docker cp webatm-controller:/log/webatm-sessions.csv ./webatm-sessions.csv
+  ```
 
 ## Why a controller instead of pure Traefik
 
