@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo Capacity Full - AMV Lab</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: white;
+        }
+
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 3rem 2rem;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            margin: 20px;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 1rem;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .emoji {
+            font-size: 4em;
+            margin-bottom: 1rem;
+        }
+
+        p {
+            font-size: 1.2em;
+            line-height: 1.6;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+        }
+
+        .refresh-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 12px 30px;
+            font-size: 1.1em;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .refresh-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.5);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .stats {
+            margin-top: 2rem;
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .auto-refresh {
+            margin-top: 1rem;
+            font-size: 0.8em;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="emoji">🚀</div>
+        <h1>All Demo Slots Busy</h1>
+        <p>All WebATM demo instances are currently in use. Sessions automatically end when users leave or after 1 hour.</p>
+        <p>Please try again in a few moments!</p>
+
+        <button class="refresh-btn" onclick="window.location.reload()">
+            🔄 Try Again
+        </button>
+
+        <div class="stats">
+            <strong>Current Status:</strong> All sessions occupied<br>
+            <strong>Max Session:</strong> 1 hour
+        </div>
+
+        <div class="auto-refresh">
+            <span id="countdown">Checking for available slots in <span id="timer">30</span> seconds...</span>
+        </div>
+    </div>
+
+    <script>
+        // Auto-refresh every 30 seconds to check for available slots
+        let countdown = 30;
+        const timerElement = document.getElementById('timer');
+        const countdownElement = document.getElementById('countdown');
+
+        function updateTimer() {
+            timerElement.textContent = countdown;
+            countdown--;
+
+            if (countdown < 0) {
+                countdownElement.textContent = 'Refreshing...';
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+                return;
+            }
+
+            setTimeout(updateTimer, 1000);
+        }
+
+        updateTimer();
+
+        // Add some visual feedback
+        document.querySelector('.refresh-btn').addEventListener('click', function() {
+            this.textContent = '🔄 Checking...';
+            this.style.opacity = '0.7';
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# Traefik v3 dynamic configuration (file provider) -- hand-written, static bits.
+#
+# The controller writes a sibling `capacity.yml` in this same directory to add
+# the capacity-full router when every replica is busy; it never touches THIS
+# file. Keeping the two separate means the controller can create/delete its
+# file freely without risk of clobbering these definitions.
+
+http:
+  services:
+    # The capacity-full nginx page. Reached by its compose service name over the
+    # shared `proxy` network (Traefik's embedded Docker DNS resolves it), so we
+    # do not need a static IP or Traefik labels on the nginx container.
+    capacity-full:
+      loadBalancer:
+        servers:
+          - url: "http://capacity-full:80"
+
+  middlewares:
+    # Per-source-IP rate limiting (DDoS / abuse guard). depth: 1 trusts one
+    # proxy hop (e.g. Cloudflare) when extracting the client IP from
+    # X-Forwarded-For. Tune to taste; see README for Cloudflare hardening.
+    ratelimit:
+      rateLimit:
+        average: 4000
+        burst: 10000
+        sourceCriterion:
+          ipStrategy:
+            depth: 1

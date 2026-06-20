@@ -1,0 +1,159 @@
+# WebATM public demo stack (integrated image, gated, zero app changes).
+#
+#   Traefik v3 (TLS via Cloudflare DNS-01)
+#     └── webatm  : 10 replicas of ghcr.io/amvlab/webatm-integrated, one sticky
+#                   service. Returning users keep their `webatm-session` cookie
+#                   and are never bounced off their container.
+#     └── capacity-full : nginx serving the "all slots busy" page. Only shown to
+#                   NEW visitors, and only while every replica is occupied.
+#     └── controller : watches each replica's /status, flips the capacity page
+#                   on/off, and recycles idle replicas hourly. No app changes.
+#
+# Quick start:
+#   cp .env.example .env   # fill in Cloudflare token + your domain
+#   docker compose up -d
+#
+# See ./README.md for how it all fits together and the known caveats.
+
+services:
+  traefik:
+    image: traefik:v3.7
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxy
+    ports:
+      - "80:80"
+      - "443:443"
+      # - "8080:8080"   # dashboard (keep closed in production)
+    environment:
+      - TZ=${TZ:-Europe/Amsterdam}
+      # Cloudflare DNS-01 challenge credentials (read by Traefik's ACME provider)
+      - CF_API_EMAIL=${CF_API_EMAIL}
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+      # ACME account e-mail for Let's Encrypt (kept out of the committed config)
+      - TRAEFIK_CERTIFICATESRESOLVERS_PRODUCTION_ACME_EMAIL=${ACME_EMAIL}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic            # base.yml (static) + capacity.yml (controller)
+      - ./traefik/certs:/var/traefik/certs:rw             # acme.json lives here
+
+  webatm:
+    image: ghcr.io/amvlab/webatm-integrated:latest
+    restart: unless-stopped
+    networks:
+      - proxy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - SETUID
+      - SETGID
+      - SYS_ADMIN
+      - SYS_PTRACE
+    environment:
+      - FLASK_ENV=production
+      # Integrated image already sets WEBATM_INTEGRATED=1 and runs BlueSky
+      # locally; nothing else is required for the app itself.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    sysctls:
+      - net.ipv4.ip_local_port_range=32768 65535
+      - net.core.somaxconn=1024
+    healthcheck:
+      # Docker-level liveness (Traefik does its own /health check too).
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+
+      # --- main router: ALL traffic; in-session users (sticky cookie) always
+      #     match here and reach their own container.
+      - "traefik.http.routers.app.rule=Host(`${WEBATM_DOMAIN:-webatm.amvlab.eu}`)"
+      - "traefik.http.routers.app.priority=50"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls=true"
+      - "traefik.http.routers.app.tls.certresolver=production"
+      - "traefik.http.routers.app.tls.domains[0].main=${CERT_DOMAIN:-amvlab.eu}"
+      - "traefik.http.routers.app.tls.domains[0].sans=${CERT_WILDCARD:-*.amvlab.eu}"
+      - "traefik.http.routers.app.service=webatm"
+      - "traefik.http.routers.app.middlewares=ratelimit@file"
+
+      # --- service: one logical service, all 10 replicas as servers, pinned
+      #     per-browser with a sticky cookie. passHostHeader keeps Socket.IO /
+      #     WebSocket upgrades working through the proxy.
+      - "traefik.http.services.webatm.loadbalancer.server.port=8082"
+      - "traefik.http.services.webatm.loadbalancer.passhostheader=true"
+      - "traefik.http.services.webatm.loadbalancer.sticky.cookie=true"
+      - "traefik.http.services.webatm.loadbalancer.sticky.cookie.name=webatm-session"
+      - "traefik.http.services.webatm.loadbalancer.sticky.cookie.secure=true"
+      - "traefik.http.services.webatm.loadbalancer.sticky.cookie.httponly=true"
+      - "traefik.http.services.webatm.loadbalancer.sticky.cookie.samesite=strict"
+
+      # --- liveness health check (NOT occupancy): /health returns 200 whenever
+      #     Flask is up, so Traefik simply avoids a replica that is still
+      #     (re)starting. This is safe and never bounces an active user.
+      - "traefik.http.services.webatm.loadbalancer.healthcheck.path=/health"
+      - "traefik.http.services.webatm.loadbalancer.healthcheck.interval=10s"
+      - "traefik.http.services.webatm.loadbalancer.healthcheck.timeout=5s"
+    deploy:
+      replicas: 10
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 1024M
+      restart_policy:
+        condition: any
+        delay: 2s
+
+  capacity-full:
+    image: nginx:alpine
+    container_name: capacity-full
+    restart: unless-stopped
+    networks:
+      - proxy           # reachable by Traefik as http://capacity-full:80 (see traefik/dynamic/base.yml)
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./capacity_full/capacity-full.html:/usr/share/nginx/html/index.html:ro
+    # No Traefik labels: the capacity-full service + (conditional) router are
+    # defined in the file provider so the controller can switch it in and out.
+
+  controller:
+    image: python:3.13-slim
+    container_name: webatm-controller
+    restart: unless-stopped
+    networks:
+      - proxy           # must share the network to reach replica IPs on :8082
+    security_opt:
+      - no-new-privileges:true
+    command: ["python", "/app/controller.py"]
+    environment:
+      - WEBATM_SERVICE=webatm
+      - PROXY_NETWORK=proxy
+      - WEBATM_DOMAIN=${WEBATM_DOMAIN:-webatm.amvlab.eu}
+      - STICKY_COOKIE_NAME=webatm-session
+      - CERT_RESOLVER=production
+      - POLL_INTERVAL=${POLL_INTERVAL:-5}
+      - RECYCLE_INTERVAL=${RECYCLE_INTERVAL:-3600}   # "reboot every hour unless someone is using it"
+      - RECYCLE_ENABLED=${RECYCLE_ENABLED:-1}
+      - DYNAMIC_DIR=/dynamic
+      - CSV_FILE=${CSV_FILE:-}                        # set e.g. /log/webatm-sessions.csv to log
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock     # rw: needs to restart idle replicas
+      - ./controller:/app:ro
+      - ./traefik/dynamic:/dynamic                     # writes capacity.yml here (Traefik watches it)
+      - ./controller/log:/log                          # optional CSV output
+    depends_on:
+      - traefik
+
+networks:
+  proxy:
+    name: proxy

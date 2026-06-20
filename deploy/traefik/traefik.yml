@@ -1,0 +1,50 @@
+# Traefik v3 static configuration for the WebATM demo.
+#
+# Secrets are NOT stored here:
+#   * Cloudflare DNS-01 token  -> CF_DNS_API_TOKEN / CF_API_EMAIL (env)
+#   * ACME account e-mail      -> TRAEFIK_CERTIFICATESRESOLVERS_PRODUCTION_ACME_EMAIL (env)
+# Both are injected by docker-compose from your .env file.
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+    # If you sit behind Cloudflare, forwarded client IPs are only trustworthy
+    # when they come from Cloudflare's ranges. See README for hardening notes.
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false       # only containers with traefik.enable=true
+    network: proxy
+    watch: true
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true                   # picks up the controller's capacity.yml live
+
+certificatesResolvers:
+  production:
+    acme:
+      # email is supplied via TRAEFIK_CERTIFICATESRESOLVERS_PRODUCTION_ACME_EMAIL
+      storage: /var/traefik/certs/acme.json
+      dnsChallenge:
+        provider: cloudflare
+        resolvers:
+          - "1.1.1.1:53"
+          - "8.8.8.8:53"
+
+log:
+  level: INFO
+
+api:
+  dashboard: false                # flip to true + expose :8080 only if you need it
