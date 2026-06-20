@@ -102,21 +102,16 @@ export function currentArgIndex(input: string, cursor: number): number {
     let argIndex = -1;
     let inSep = true; // we start right after the command, on a separator run
     for (let i = 0; i < after.length; i++) {
-        const isSep = /[\s,]/.test(after[i]);
-        if (isSep) {
-            if (!inSep) {
-                inSep = true;
-            }
-        } else {
-            if (inSep) {
-                argIndex++;
-                inSep = false;
-            }
+        if (/[\s,]/.test(after[i])) {
+            inSep = true;
+        } else if (inSep) {
+            // First non-separator after a run begins a new argument.
+            argIndex++;
+            inSep = false;
         }
     }
-    // If the cursor is on a separator (or at end-of-separator-run), we're
-    // poised to type the *next* arg, so bump the index.
-    if (inSep && argIndex >= -1 && /[\s,]$/.test(upTo)) {
+    // A cursor on a trailing separator is poised to type the next arg.
+    if (inSep && /[\s,]$/.test(upTo)) {
         argIndex++;
     }
     return argIndex;
