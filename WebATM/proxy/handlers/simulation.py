@@ -49,12 +49,6 @@ def on_siminfo_received(
 
     # Mark successful data reception
     current_time = time.time()
-    time_since_last = current_time - proxy.last_successful_update
-
-    # Log first data reception after connection
-    if not proxy.was_connected and time_since_last > 1.0:
-        pass  # Connection fully active
-
     proxy.last_successful_update = current_time
 
     sim_data = {
@@ -95,7 +89,6 @@ def on_siminfo_received(
     proxy.sim_data = sim_data
 
     # Throttle sim info emissions
-    current_time = time.time()
     if (
         proxy.socketio
         and proxy.connected_clients > 0
@@ -157,8 +150,6 @@ def on_acdata_received(data):
                         logger.error(f"Error emitting cleared ACDATA: {e}")
                 return
 
-        # Remove all ACDATA debug logging per user request
-
         # Mark successful data reception
         proxy.last_successful_update = time.time()
 
@@ -176,13 +167,11 @@ def on_acdata_received(data):
             try:
                 proxy.socketio.emit("acdata", serializable_data)
                 proxy.last_acdata_emit = current_time
-                # Remove ACDATA emission logging per user request
             except Exception as e:
                 logger.error(f"Error emitting ACDATA: {e}")
                 import traceback
 
                 traceback.print_exc()
-        # Remove noisy debug messages for empty data
 
     except Exception as e:
         logger.error(f"ACDATA Handler: Detailed error in on_acdata_received: {e}")

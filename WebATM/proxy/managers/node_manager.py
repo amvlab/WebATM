@@ -61,61 +61,32 @@ class NodeManager:
         """Emit POLY and POLYLINE data for the currently active node."""
         try:
             active_node_id = self._get_safe_active_node()
-            logger.debug(
-                f"_emit_active_node_poly_data called: active_node={active_node_id}, connected_clients={self.proxy.connected_clients}"
+            self._emit_shapes(active_node_id, self.proxy.poly_data_by_node, "poly")
+            self._emit_shapes(
+                active_node_id, self.proxy.polyline_data_by_node, "polyline"
             )
-
-            # Handle POLY data
-            if active_node_id and active_node_id in self.proxy.poly_data_by_node:
-                poly_data = self.proxy.poly_data_by_node[active_node_id]
-                poly_count = len(poly_data.get("polys", {}))
-                logger.debug(
-                    f"Found {poly_count} polygons for active node {active_node_id}"
-                )
-                if self.proxy.socketio and self.proxy.connected_clients > 0:
-                    self.proxy.socketio.emit("poly", poly_data)
-                    logger.info(
-                        f"Emitted {poly_count} polygons to {self.proxy.connected_clients} clients"
-                    )
-                else:
-                    logger.warning(
-                        f"Cannot emit polygons: socketio={self.proxy.socketio is not None}, connected_clients={self.proxy.connected_clients}"
-                    )
-            else:
-                # No POLY data for active node - emit empty to clear any existing polygons
-                logger.debug(f" No polygon data for active node {active_node_id}")
-                if self.proxy.socketio and self.proxy.connected_clients > 0:
-                    self.proxy.socketio.emit("poly", {})
-                    logger.debug(" Emitted empty polygon data to clear")
-
-            # Handle POLYLINE data
-            if active_node_id and active_node_id in self.proxy.polyline_data_by_node:
-                polyline_data = self.proxy.polyline_data_by_node[active_node_id]
-                polyline_count = len(polyline_data.get("polys", {}))
-                logger.debug(
-                    f"Found {polyline_count} polylines for active node {active_node_id}"
-                )
-                if self.proxy.socketio and self.proxy.connected_clients > 0:
-                    self.proxy.socketio.emit("polyline", polyline_data)
-                    logger.info(
-                        f"Emitted {polyline_count} polylines to {self.proxy.connected_clients} clients"
-                    )
-                else:
-                    logger.warning(
-                        f"Cannot emit polylines: socketio={self.proxy.socketio is not None}, connected_clients={self.proxy.connected_clients}"
-                    )
-            else:
-                # No POLYLINE data for active node - emit empty to clear any existing polylines
-                logger.debug(f" No polyline data for active node {active_node_id}")
-                if self.proxy.socketio and self.proxy.connected_clients > 0:
-                    self.proxy.socketio.emit("polyline", {})
-                    logger.debug(" Emitted empty polyline data to clear")
-
         except Exception as e:
             logger.error(f" Error emitting active node POLY/POLYLINE data: {e}")
             import traceback
 
             traceback.print_exc()
+
+    def _emit_shapes(self, active_node_id, data_by_node, event):
+        """Emit the active node's shapes for one event, or empty data to clear stale ones."""
+        if not (self.proxy.socketio and self.proxy.connected_clients > 0):
+            return
+
+        if active_node_id and active_node_id in data_by_node:
+            data = data_by_node[active_node_id]
+            count = len(data.get("polys", {}))
+            self.proxy.socketio.emit(event, data)
+            logger.info(
+                f"Emitted {count} {event} shapes to {self.proxy.connected_clients} clients"
+            )
+        else:
+            # Nothing for the active node: emit empty to clear any existing shapes
+            self.proxy.socketio.emit(event, {})
+            logger.debug(f"Emitted empty {event} data to clear")
 
     def _on_node_added(self, node_id):
         """Callback when a new node is discovered."""
