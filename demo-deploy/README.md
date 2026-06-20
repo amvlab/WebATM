@@ -45,7 +45,7 @@ are never affected by the capacity page.
 ## Quick start
 
 ```bash
-cd deploy
+cd demo-deploy
 cp .env.example .env          # fill in CF_DNS_API_TOKEN, ACME_EMAIL, domain
 docker compose up -d
 docker compose logs -f controller   # watch busy/free + capacity decisions
