@@ -270,40 +270,47 @@ export class Aircraft3DFleet {
      * still complete and rebuild queued aircraft).
      */
     removeAllForReload(): void {
-        this.aircraft.forEach((aircraftMesh, id) => {
-            const group = aircraftMesh.currentGroup === 'globe'
-                ? this.deps.getGlobeGroup()
-                : this.deps.getMercatorGroup();
-            if (group) {
-                group.remove(aircraftMesh.mesh);
-            }
-            this.disposeMeshResources(aircraftMesh.mesh);
-            logger.verbose('Aircraft3DFleet', `Removed aircraft mesh for model reload: ${id}`);
-        });
-        this.aircraft.clear();
+        this.removeAllMeshes();
     }
 
     /**
      * Full teardown: remove and dispose every mesh and forget the queue.
      */
     clear(): void {
-        this.aircraft.forEach((_, id) => {
-            this.remove(id);
-        });
-        this.aircraft.clear();
+        this.removeAllMeshes();
         this.pendingAircraft.clear();
     }
 
     /**
+     * Detach every live mesh from its group, dispose its resources, and
+     * empty the registry. Shared by reload and full-teardown paths.
+     */
+    private removeAllMeshes(): void {
+        this.aircraft.forEach((aircraftMesh, id) => {
+            const group = aircraftMesh.currentGroup === 'globe'
+                ? this.deps.getGlobeGroup()
+                : this.deps.getMercatorGroup();
+            group?.remove(aircraftMesh.mesh);
+            this.disposeMeshResources(aircraftMesh.mesh);
+            logger.verbose('Aircraft3DFleet', `Removed 3D mesh for aircraft ${id}`);
+        });
+        this.aircraft.clear();
+    }
+
+    /**
      * Dispose of Three.js geometry + material resources inside a mesh
-     * hierarchy. Used when removing an aircraft or reloading its model.
+     * hierarchy. Materials may be a single instance or an array (multi-
+     * material meshes), so handle both.
      */
     private disposeMeshResources(mesh: THREE.Object3D): void {
         mesh.traverse((child) => {
             if (child instanceof THREE.Mesh) {
                 child.geometry.dispose();
-                if (child.material instanceof THREE.Material) {
-                    child.material.dispose();
+                const material = child.material;
+                if (Array.isArray(material)) {
+                    material.forEach((m) => m.dispose());
+                } else if (material instanceof THREE.Material) {
+                    material.dispose();
                 }
             }
         });

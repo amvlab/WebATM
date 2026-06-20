@@ -236,8 +236,6 @@ export class Aircraft3DTransforms {
         const altitudeMeters = data.alt;
         const headingRad = THREE.MathUtils.degToRad(data.hdg);
         const realScale = this.getMeshRealScale(mesh);
-        // Respect per-aircraft scale override if set; otherwise fall back to
-        // the global aircraft3DScale setting.
         const userMultiplier = this.getUserScaleMultiplier(mesh);
         const finalScale = realScale * userMultiplier * this.baseScaleFactor;
         return { altitudeMeters, headingRad, finalScale };

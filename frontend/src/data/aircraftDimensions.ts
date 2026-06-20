@@ -1,14 +1,11 @@
 /**
- * Real-world aircraft dimensions for 3D model sizing.
- *
- * Values are generated from openap.prop.aircraft(icao):
- *   length  = fuselage.length (m)
- *   wingspan = wing.span (m)
+ * Real-world aircraft dimensions (meters) for 3D model sizing, generated
+ * from openap.prop.aircraft(icao): length = fuselage.length, wingspan =
+ * wing.span.
  *
  * The renderer scales each GLB so its largest bounding-box axis equals
- * max(length, wingspan) in meters. This makes relative sizes between
- * types physically correct (e.g. A380 ≈ 2.2× A320 wingspan) regardless
- * of the units the GLB was authored in.
+ * max(length, wingspan), making relative sizes between types physically
+ * correct (e.g. A380 ≈ 2.2× A320 wingspan) regardless of GLB units.
  */
 
 import { getAircraftCategory, type AircraftCategory } from './aircraftCategories';
