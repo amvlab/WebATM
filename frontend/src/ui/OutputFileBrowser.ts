@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { escapeHtml } from '../utils/dom';
 
 interface OutputFile {
     filename: string;
@@ -75,6 +76,27 @@ export class OutputFileBrowser {
             });
         }
 
+        // Event delegation: a single listener on the (persistent) list element
+        // handles clicks on dynamically-rendered rows/buttons via data-action
+        // attributes. This avoids inline onclick handlers, which required
+        // interpolating untrusted filenames into JS strings (XSS risk).
+        if (this.fileListElement) {
+            this.fileListElement.addEventListener('click', (e) => {
+                const target = (e.target as HTMLElement)?.closest('[data-action]') as HTMLElement | null;
+                if (!target) return;
+                const action = target.dataset.action;
+                if (action === 'navigate-path') {
+                    void this.navigateToPath(target.dataset.path || '');
+                } else if (action === 'navigate-folder') {
+                    void this.navigateToFolder(target.dataset.name || '');
+                } else if (action === 'stream') {
+                    this.streamFile(target.dataset.path || '');
+                } else if (action === 'download') {
+                    this.downloadFile(target.dataset.path || '');
+                }
+            });
+        }
+
         this.isInitialized = true;
         logger.debug('OutputFileBrowser', 'Initialized');
     }
@@ -143,11 +165,11 @@ export class OutputFileBrowser {
         if (breadcrumbs && breadcrumbs.length > 1) {
             const breadcrumbItems = breadcrumbs.map((crumb, index) => {
                 const isLast = index === breadcrumbs.length - 1;
-                const clickHandler = isLast
+                const attrs = isLast
                     ? ''
-                    : `onclick="outputFileBrowser.navigateToPath('${crumb.path}')"`;
+                    : `data-action="navigate-path" data-path="${escapeHtml(crumb.path)}"`;
                 const cls = isLast ? 'output-crumb-active' : 'output-crumb-link';
-                return `<span class="${cls}" ${clickHandler}>${crumb.name}</span>`;
+                return `<span class="${cls}" ${attrs}>${escapeHtml(crumb.name)}</span>`;
             }).join(' <span class="output-crumb-sep">/</span> ');
 
             content += `<div class="output-breadcrumbs">${breadcrumbItems}</div>`;
@@ -187,19 +209,19 @@ export class OutputFileBrowser {
                 : file.filename;
 
             if (isFolder) {
-                return `<div class="output-file-row output-folder-row" onclick="outputFileBrowser.navigateToFolder('${file.filename}')">
+                return `<div class="output-file-row output-folder-row" data-action="navigate-folder" data-name="${escapeHtml(file.filename)}">
                     <span class="output-file-icon">📁</span>
-                    <span class="output-file-name">${file.filename}</span>
+                    <span class="output-file-name">${escapeHtml(file.filename)}</span>
                 </div>`;
             }
 
             return `<div class="output-file-row">
                 <span class="output-file-icon">📄</span>
-                <span class="output-file-name">${file.filename}</span>
-                <span class="output-file-meta">${sizeText} &bull; ${modifiedDate} ${modifiedTime}</span>
+                <span class="output-file-name">${escapeHtml(file.filename)}</span>
+                <span class="output-file-meta">${escapeHtml(sizeText)} &bull; ${modifiedDate} ${modifiedTime}</span>
                 <span class="output-file-actions">
-                    <button class="console-btn" onclick="outputFileBrowser.streamFile('${filePath}')">▶ Stream</button>
-                    <button class="console-btn" onclick="outputFileBrowser.downloadFile('${filePath}')">⬇ Download</button>
+                    <button class="console-btn" data-action="stream" data-path="${escapeHtml(filePath)}">▶ Stream</button>
+                    <button class="console-btn" data-action="download" data-path="${escapeHtml(filePath)}">⬇ Download</button>
                 </span>
             </div>`;
         }).join('');

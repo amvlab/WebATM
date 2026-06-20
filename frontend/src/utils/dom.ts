@@ -10,10 +10,18 @@ export function onDOMReady(callback: () => void): void {
     }
 }
 
+/**
+ * Escape a string for safe interpolation into HTML. Escapes the five
+ * characters significant in HTML text and quoted-attribute contexts, so the
+ * result is safe in both `<span>${x}</span>` and `data-foo="${x}"`.
+ */
 export function escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 /**
