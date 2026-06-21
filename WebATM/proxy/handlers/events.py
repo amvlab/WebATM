@@ -3,27 +3,16 @@
 import time
 
 from ...logger import get_logger
+from ._base import active_proxy
 
 logger = get_logger()
 
 
-def get_bluesky_proxy():
-    """Get the current BlueSky proxy instance."""
-    from .. import get_bluesky_proxy as _get_proxy
-
-    return _get_proxy()
-
-
 def on_reset_received(data=None, *args, **kwargs):
     """Handle RESET messages from BlueSky server."""
-    proxy = get_bluesky_proxy()
+    proxy = active_proxy()
     if not proxy:
         return
-
-    if not proxy.allow_reconnection:
-        return
-
-    proxy.last_successful_update = time.time()
 
     try:
         # Get sender_id from BlueSky context (same pattern as on_poly_received)
@@ -75,18 +64,11 @@ def on_reset_received(data=None, *args, **kwargs):
 
 def on_request_received(data, *args, **kwargs):
     """Handle REQUEST messages from BlueSky server."""
-    proxy = get_bluesky_proxy()
-    if not proxy:
+    if not active_proxy():
         return
-
-    if not proxy.allow_reconnection:
-        return
-
-    proxy.last_successful_update = time.time()
 
     try:
         logger.debug(f"REQUEST data received: {data}")
         # TODO: Implement specific request handling logic
-
     except Exception as e:
         logger.error(f"Error processing REQUEST data: {e}")

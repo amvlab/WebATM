@@ -3,15 +3,9 @@
 import time
 
 from ...logger import get_logger
+from ._base import get_bluesky_proxy
 
 logger = get_logger()
-
-
-def get_bluesky_proxy():
-    """Get the current BlueSky proxy instance."""
-    from .. import get_bluesky_proxy as _get_proxy
-
-    return _get_proxy()
 
 
 def on_stackcmds_received(action, data):
