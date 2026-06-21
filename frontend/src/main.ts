@@ -2,6 +2,7 @@ import { App } from './core/App';
 import { echoManager } from './ui/EchoManager';
 import { connectionStatus } from './core/ConnectionStatusService';
 import { logger } from './utils/Logger';
+import { themeManager } from './utils/ThemeManager';
 import './ui/LogStreamManager';
 import './ui/OutputFileBrowser';
 
@@ -15,6 +16,10 @@ import './ui/OutputFileBrowser';
 // Initialize application when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     logger.info('main', 'DOM loaded, initializing WebATM...');
+
+    // Apply the saved colour theme (the inline head script sets it before first
+    // paint; this re-asserts it and wires up live OS/preference changes).
+    themeManager.init();
 
     const app = new App();
 

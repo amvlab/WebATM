@@ -1,24 +1,171 @@
 /* WebATM Styles */
 
-/* Text Size Settings - Controlled by dropdown menu */
+/* ===========================================================================
+   THEME TOKENS
+   ---------------------------------------------------------------------------
+   All colours, fonts and sizes in this stylesheet are driven by the custom
+   properties (design tokens) defined here — there are no raw hex/rgba colours
+   in the rest of the file. To retheme the UI, change the values below; to add a
+   new theme, copy the `[data-theme="light"]` block and override the tokens you
+   want. The active theme is selected by the `data-theme` attribute on <html>
+   (set before first paint by the inline script in index.html and at runtime by
+   ThemeManager); the bare `:root` block is the default (dark) theme.
+
+   Token groups:
+     - Typography  (--font-*)
+     - Surfaces    (--bg-*)        page / panel / control backgrounds
+     - Borders     (--border-*)
+     - Text        (--text-*)
+     - Accents     (--accent-*)    brand green, danger, warning, info/link
+     - Overlays    (--shadow-*, --overlay-*)
+   ========================================================================= */
+
 :root {
-    --console-font-size: 11px;    /* Console text size */
-    --echo-font-size: 11px;       /* Echo text size */
-    --console-input-font-size: 11px; /* Console input text size */
-    --panel-font-size: 11px;      /* Panel text size */
-    --header-font-size: 20px;     /* Header text size */
+    /* ---- Typography ------------------------------------------------------ */
+    --font-family-base: 'Arial', sans-serif;
+    --font-family-mono: 'Courier New', Courier, monospace;
+    --font-size-base: 12px;
+    --console-font-size: 11px;        /* Console text size */
+    --echo-font-size: 11px;           /* Echo text size */
+    --console-input-font-size: 11px;  /* Console input text size */
+    --panel-font-size: 11px;          /* Panel text size */
+    --header-font-size: 20px;         /* Header text size */
+
+    /* ---- Surfaces (dark) ------------------------------------------------- */
+    --bg-base: #2b2b2b;            /* app / body background */
+    --bg-panel: #2a2a2a;           /* side panels, cards */
+    --bg-elevated: #1e1e1e;        /* header, footer, toolbars */
+    --bg-sunken: #1a1a1a;          /* console / echo (darkest chrome) */
+    --bg-deep: #111111;            /* deepest wells */
+    --bg-control: #333333;         /* inputs, selects, list items */
+    --bg-control-hover: #3a3a3a;
+    --bg-control-active: #444444;
+    --bg-map-overlay: rgba(11, 15, 21, 0.95); /* glass panels over the map */
+
+    /* ---- Borders (dark) -------------------------------------------------- */
+    --border: #404040;
+    --border-strong: #555555;
+
+    /* ---- Text (dark) ----------------------------------------------------- */
+    --text-primary: #ffffff;
+    --text-secondary: #cccccc;
+    --text-muted: #909090;
+    --text-disabled: #666666;
+    --text-on-accent: #ffffff;     /* text on saturated accent fills */
+    --color-black: #000000;
+    --bg-terminal: #000000;        /* console / echo / log output wells */
+
+    /* ---- Accent: brand green --------------------------------------------- */
+    --accent-primary: #4caf50;
+    --accent-primary-hover: #45a049;
+    --accent-primary-bright: #66bb6a;
+    --accent-primary-bg: #2a5a2a;
+    --accent-primary-border: #3e6c3e;
+    --console-success: #00ff00;
+    --accent-primary-tint: rgba(76, 175, 80, 0.2);
+    --accent-primary-tint-strong: rgba(76, 175, 80, 0.4);
+    --accent-primary-glow: rgba(102, 187, 106, 0.3);
+    --accent-primary-glow-strong: rgba(102, 187, 106, 0.5);
+
+    /* ---- Accent: danger red ---------------------------------------------- */
+    --accent-danger: #f44336;
+    --accent-danger-bright: #ff4444;
+    --accent-danger-hover: #d32f2f;
+    --accent-danger-tint: rgba(255, 0, 0, 0.1);
+    --accent-danger-tint-strong: rgba(255, 0, 0, 0.2);
+
+    /* ---- Accent: warning orange/amber ------------------------------------ */
+    --accent-warning: #ff9800;
+    --accent-warning-bright: #ffa726;
+    --accent-warning-hover: #f57c00;
+    --accent-warning-strong: #ff6b35;
+    --accent-amber: #ffc107;
+    --accent-warning-bg: #5a3a00;
+    --accent-warning-tint: rgba(255, 107, 53, 0.1);
+    --accent-warning-tint-strong: rgba(255, 107, 53, 0.2);
+
+    /* ---- Accent: blue (info / link) -------------------------------------- */
+    --accent-link: #64b5f6;
+    --accent-link-hover: #90caf9;
+    --accent-info: #4da3ff;
+    --accent-info-hover: #007acc;
+    --accent-info-soft: #cfe6ff;
+    --accent-cyan: #00d4ff;
+    --accent-link-glow: rgba(144, 202, 249, 0.5);
+    --accent-link-glow-soft: rgba(100, 181, 246, 0.3);
+    --accent-info-tint: rgba(77, 163, 255, 0.18);
+
+    /* ---- Overlays & shadows (dark) --------------------------------------- */
+    --shadow-soft: rgba(0, 0, 0, 0.3);
+    --shadow-medium: rgba(0, 0, 0, 0.5);
+    --shadow-strong: rgba(0, 0, 0, 0.7);
+    --overlay-hover: rgba(255, 255, 255, 0.15);
+    --overlay-surface: rgba(68, 68, 68, 0.9);
+    --overlay-surface-2: rgba(51, 51, 51, 0.8);
+    --overlay-surface-3: rgba(34, 34, 34, 0.9);
+    --overlay-surface-4: rgba(26, 26, 26, 0.9);
+
+    /* Hint native form controls / scrollbars to render dark. */
+    color-scheme: dark;
 }
 
-/* Examples for larger text:
-   --console-font-size: 13px;
-   --echo-font-size: 13px;
-   --console-input-font-size: 13px;
-   
-   Or even larger:
-   --console-font-size: 15px;
-   --echo-font-size: 15px;
-   --console-input-font-size: 15px;
-*/
+/* ===========================================================================
+   LIGHT THEME
+   Overrides only the tokens that must change for a light background. Accent
+   hues are kept, but the lightest/brightest variants are darkened so they stay
+   legible on light surfaces. Everything else inherits from :root above.
+   ========================================================================= */
+html[data-theme="light"] {
+    /* Surfaces */
+    --bg-base: #f4f5f7;
+    --bg-panel: #ffffff;
+    --bg-elevated: #ffffff;
+    --bg-sunken: #eceef1;
+    --bg-deep: #e2e5ea;
+    --bg-control: #ffffff;
+    --bg-control-hover: #eef1f5;
+    --bg-control-active: #e2e6ec;
+    --bg-map-overlay: rgba(255, 255, 255, 0.92);
+
+    /* Borders */
+    --border: #d4d8de;
+    --border-strong: #b7bdc6;
+
+    /* Text */
+    --text-primary: #1b1e23;
+    --text-secondary: #41474f;
+    --text-muted: #6b7280;
+    --text-disabled: #9aa0a8;
+    --bg-terminal: #eceef1;
+    /* --text-on-accent and --color-black stay as-is */
+
+    /* Accents — darkened bright/soft variants for contrast on light */
+    --accent-primary: #2e8b43;
+    --accent-primary-hover: #277339;
+    --accent-primary-bright: #2e8b43;
+    --accent-primary-bg: #e3f3e6;
+    --accent-primary-border: #bfe3c6;
+    --console-success: #1a8a1a;
+    --accent-link: #1565c0;
+    --accent-link-hover: #1976d2;
+    --accent-info: #1565c0;
+    --accent-info-hover: #0d47a1;
+    --accent-info-soft: #1565c0;
+    --accent-cyan: #0277bd;
+    --accent-warning-bg: #fff3d6;
+
+    /* Overlays & shadows — lighter, softer on a light background */
+    --shadow-soft: rgba(0, 0, 0, 0.12);
+    --shadow-medium: rgba(0, 0, 0, 0.18);
+    --shadow-strong: rgba(0, 0, 0, 0.28);
+    --overlay-hover: rgba(0, 0, 0, 0.06);
+    --overlay-surface: rgba(255, 255, 255, 0.96);
+    --overlay-surface-2: rgba(245, 246, 248, 0.96);
+    --overlay-surface-3: rgba(255, 255, 255, 0.96);
+    --overlay-surface-4: rgba(245, 246, 248, 0.96);
+
+    color-scheme: light;
+}
 
 * {
     box-sizing: border-box;
@@ -27,10 +174,10 @@
 }
 
 body {
-    font-family: 'Arial', sans-serif;
-    font-size: 12px;
-    background-color: #2b2b2b;
-    color: #ffffff;
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-base);
+    background-color: var(--bg-base);
+    color: var(--text-primary);
     overflow: hidden;
 }
 
@@ -46,9 +193,9 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: #1e1e1e;
+    background-color: var(--bg-elevated);
     padding: 8px 16px;
-    border-bottom: 1px solid #404040;
+    border-bottom: 1px solid var(--border);
     min-height: 50px;
     height: auto;
 }
@@ -66,44 +213,44 @@ body {
 .header-left h1 {
     font-size: var(--header-font-size);
     font-weight: bold;
-    color: #66BB6A;
+    color: var(--accent-primary-bright);
     margin-bottom: 0;
-    text-shadow: 0 0 2px rgba(102, 187, 106, 0.3);
+    text-shadow: 0 0 2px var(--accent-primary-glow);
     white-space: nowrap;
     flex-shrink: 0;
 }
 
 .amvlab-link {
-    color: #64B5F6;
+    color: var(--accent-link);
     text-decoration: none;
     font-weight: bold;
-    text-shadow: 0 0 2px rgba(100, 181, 246, 0.3);
+    text-shadow: 0 0 2px var(--accent-link-glow-soft);
     transition: color 0.2s ease, text-shadow 0.2s ease;
 }
 
 .amvlab-link:hover {
-    color: #90CAF9;
-    text-shadow: 0 0 4px rgba(144, 202, 249, 0.5);
+    color: var(--accent-link-hover);
+    text-shadow: 0 0 4px var(--accent-link-glow);
     text-decoration: underline;
 }
 
 .bluesky-link {
-    color: #66BB6A;
+    color: var(--accent-primary-bright);
     text-decoration: none;
     font-weight: bold;
-    text-shadow: 0 0 2px rgba(102, 187, 106, 0.3);
+    text-shadow: 0 0 2px var(--accent-primary-glow);
     transition: color 0.2s ease, text-shadow 0.2s ease;
 }
 
 .bluesky-link:hover {
-    color: #66BB6A;
-    text-shadow: 0 0 4px rgba(102, 187, 106, 0.5);
+    color: var(--accent-primary-bright);
+    text-shadow: 0 0 4px var(--accent-primary-glow-strong);
     text-decoration: underline;
 }
 
 .sim-info {
     font-size: calc(var(--header-font-size) * 0.7);
-    color: #cccccc;
+    color: var(--text-secondary);
 }
 
 .sim-info span {
@@ -123,17 +270,17 @@ body {
 }
 
 .status-connected {
-    color: #4CAF50;
+    color: var(--accent-primary);
     font-size: calc(var(--header-font-size) * 0.7);
 }
 
 .status-disconnected {
-    color: #f44336;
+    color: var(--accent-danger);
     font-size: calc(var(--header-font-size) * 0.7);
 }
 
 .status-waiting {
-    color: #ffa000;
+    color: var(--accent-warning-hover);
     font-size: calc(var(--header-font-size) * 0.7);
 }
 
@@ -152,18 +299,18 @@ body {
 }
 
 .connection-label {
-    color: #999;
+    color: var(--text-muted);
     font-size: calc(var(--header-font-size) * 0.63);
 }
 
 .connection-separator {
-    color: #666;
+    color: var(--text-disabled);
     margin: 0 4px;
     font-size: calc(var(--header-font-size) * 0.7);
 }
 
 .header-separator {
-    color: #666;
+    color: var(--text-disabled);
     margin: 0 15px;
     font-size: calc(var(--header-font-size) * 0.8);
     font-weight: normal;
@@ -185,9 +332,9 @@ body {
 }
 
 .control-btn {
-    background-color: #404040;
-    color: white;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     padding: 0;
     cursor: pointer;
     border-radius: 3px;
@@ -203,13 +350,13 @@ body {
 }
 
 .control-btn:hover {
-    background-color: #505050;
+    background-color: var(--border-strong);
 }
 
 .speed-control {
-    background-color: #404040;
-    color: white;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     padding: calc(var(--header-font-size) * 0.2);
     border-radius: 3px;
     min-height: calc(var(--header-font-size) * 1.4);
@@ -230,10 +377,10 @@ body {
     position: absolute;
     top: 100%;
     right: 0;
-    background-color: #404040;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: 3px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    box-shadow: 0 2px 5px var(--shadow-soft);
     z-index: 10000;
     min-width: 200px;
     margin-top: 2px;
@@ -242,9 +389,9 @@ body {
 .dropdown-item {
     display: block;
     padding: 8px 12px;
-    color: white;
+    color: var(--text-primary);
     text-decoration: none;
-    border-bottom: 1px solid #505050;
+    border-bottom: 1px solid var(--border-strong);
     cursor: pointer;
     transition: background-color 0.2s ease;
 }
@@ -254,8 +401,8 @@ body {
 }
 
 .dropdown-item:hover {
-    background-color: #505050;
-    color: #ffffff;
+    background-color: var(--border-strong);
+    color: var(--text-primary);
 }
 
 /* Content area */
@@ -266,8 +413,8 @@ body {
 }
 
 .left-panel, .right-panel {
-    background-color: #333333;
-    border-right: 1px solid #404040;
+    background-color: var(--bg-control);
+    border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -285,14 +432,14 @@ body {
 .right-panel {
     flex: 0 0 var(--right-panel-basis, 250px);
     border-right: none;
-    border-left: 1px solid #404040;
+    border-left: 1px solid var(--border);
     height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
 }
 
 .panel {
-    border-bottom: 1px solid #404040;
+    border-bottom: 1px solid var(--border);
     padding: 8px;
     display: flex;
     flex-direction: column;
@@ -355,7 +502,7 @@ body {
 
 .panel h3 {
     font-size: calc(var(--panel-font-size) + 1px);
-    color: #4CAF50;
+    color: var(--accent-primary);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -373,25 +520,25 @@ body {
 
 .traffic-list {
     overflow-y: auto;
-    border: 1px solid #404040;
-    background-color: #2b2b2b;
+    border: 1px solid var(--border);
+    background-color: var(--bg-base);
     flex: 1;
 }
 
 .traffic-item {
     padding: 4px 8px;
-    border-bottom: 1px solid #404040;
+    border-bottom: 1px solid var(--border);
     cursor: pointer;
     font-size: var(--panel-font-size);
 }
 
 .traffic-item:hover {
-    background-color: #404040;
+    background-color: var(--border);
 }
 
 .traffic-item.selected {
-    background-color: #4CAF50;
-    color: black;
+    background-color: var(--accent-primary);
+    color: var(--color-black);
 }
 
 /* Navigation panel */
@@ -411,9 +558,9 @@ body {
 
 .nav-btn {
     flex: 1;
-    background-color: #404040;
-    color: white;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     padding: 4px;
     cursor: pointer;
     border-radius: 3px;
@@ -421,21 +568,21 @@ body {
 }
 
 .nav-btn:hover {
-    background-color: #505050;
+    background-color: var(--border-strong);
 }
 
 .nav-btn:disabled,
 .nav-btn.disabled {
-    background-color: #2a2a2a;
-    color: #777777;
-    border-color: #404040;
+    background-color: var(--bg-panel);
+    color: var(--text-muted);
+    border-color: var(--border);
     cursor: not-allowed;
     opacity: 0.7;
 }
 
 .nav-btn:disabled:hover,
 .nav-btn.disabled:hover {
-    background-color: #2a2a2a;
+    background-color: var(--bg-panel);
 }
 
 /* Drawing Controls */
@@ -448,7 +595,7 @@ body {
 
 .drawing-status {
     font-size: var(--panel-font-size);
-    color: #ffcc00;
+    color: var(--accent-warning-bright);
     text-align: center;
     min-height: 16px;
     display: flex;
@@ -457,12 +604,12 @@ body {
 }
 
 #draw-area-btn.active {
-    background-color: #007acc;
-    border-color: #0099ff;
+    background-color: var(--accent-info-hover);
+    border-color: var(--accent-info);
 }
 
 #draw-area-btn.active:hover {
-    background-color: #0088dd;
+    background-color: var(--accent-info-hover);
 }
 
 /* Drawing Mode Banner */
@@ -477,15 +624,15 @@ body {
 }
 
 .drawing-banner-content {
-    background-color: #ff6b00;
-    color: #ffffff;
+    background-color: var(--accent-warning-strong);
+    color: var(--text-primary);
     padding: 8px 16px;
     border-radius: 6px;
     font-size: 13px;
     font-weight: bold;
     text-align: center;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-    border: 2px solid #ff8533;
+    box-shadow: 0 2px 10px var(--shadow-soft);
+    border: 2px solid var(--accent-warning-strong);
 }
 
 .drawing-banner-content::before {
@@ -495,7 +642,7 @@ body {
 
 .position-info {
     font-size: var(--panel-font-size);
-    color: #cccccc;
+    color: var(--text-secondary);
     flex: 1;
     overflow-y: auto;
     margin-top: 16px;
@@ -520,7 +667,7 @@ body {
     display: block;
     margin-bottom: 6px;
     cursor: pointer;
-    color: #cccccc;
+    color: var(--text-secondary);
 }
 
 .checkbox-label input[type="checkbox"] {
@@ -530,7 +677,7 @@ body {
 .route-sub-option {
     margin-left: 20px;
     font-size: 0.9em;
-    color: #aaaaaa;
+    color: var(--text-muted);
 }
 
 .map-style-control {
@@ -540,15 +687,15 @@ body {
 .map-style-control label {
     display: block;
     margin-bottom: 4px;
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: var(--panel-font-size);
 }
 
 .map-style-control select {
     width: 100%;
-    background-color: #404040;
-    color: white;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     padding: 4px;
     border-radius: 3px;
     font-size: var(--panel-font-size);
@@ -561,7 +708,7 @@ body {
 
 .icon-size-control label {
     display: block;
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: var(--panel-font-size);
     margin-bottom: 4px;
 }
@@ -572,7 +719,7 @@ body {
 }
 
 .icon-size-control span {
-    color: #4CAF50;
+    color: var(--accent-primary);
     font-weight: bold;
 }
 
@@ -589,9 +736,9 @@ body {
     width: 100%;
     margin-top: 8px;
     padding: 6px 8px;
-    background-color: #383838;
-    color: #cccccc;
-    border: 1px solid #555555;
+    background-color: var(--bg-control-hover);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-strong);
     border-radius: 3px;
     font-size: var(--panel-font-size);
     text-align: left;
@@ -601,14 +748,14 @@ body {
 }
 
 .section-toggle:hover {
-    background-color: #454545;
-    color: #ffffff;
+    background-color: var(--bg-control-active);
+    color: var(--text-primary);
 }
 
 .section-toggle::before {
     content: '▸';
     font-size: 10px;
-    color: #8a8a8a;
+    color: var(--text-muted);
     transition: transform 0.2s ease;
 }
 
@@ -625,9 +772,9 @@ html.wa-open-threeD-controls #threeD-toggle::before {
     opacity: 0;
     margin-top: 0;
     padding: 0;
-    border: 0 solid #606060;
+    border: 0 solid var(--border-strong);
     border-radius: 4px;
-    background-color: #404040;
+    background-color: var(--border);
     overflow: hidden;
     transition: max-height 0.22s ease, opacity 0.18s ease,
         padding 0.22s ease, margin-top 0.22s ease;
@@ -657,7 +804,7 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .font-size-controls label {
     display: block;
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: var(--panel-font-size);
     margin-bottom: 4px;
 }
@@ -668,7 +815,7 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .font-size-controls span {
-    color: #4CAF50;
+    color: var(--accent-primary);
     font-weight: bold;
 }
 
@@ -686,7 +833,7 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .color-controls label {
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: var(--panel-font-size);
     margin-right: 8px;
     flex-grow: 1;
@@ -695,7 +842,7 @@ html.wa-open-threeD-controls #threeD-controls {
 .color-controls input[type="color"] {
     width: 30px;
     height: 20px;
-    border: 1px solid #666;
+    border: 1px solid var(--text-disabled);
     border-radius: 4px;
     padding: 0;
     cursor: pointer;
@@ -725,7 +872,7 @@ html.wa-open-threeD-controls #threeD-controls {
 /* Map info section content (label/value rows) */
 .map-info-controls {
     font-size: var(--panel-font-size);
-    color: #cccccc;
+    color: var(--text-secondary);
 }
 
 .map-info-row {
@@ -736,7 +883,7 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .map-info-row span:first-child {
-    color: #999999;
+    color: var(--text-muted);
 }
 
 .map-info-row span:last-child {
@@ -755,7 +902,7 @@ html.wa-open-threeD-controls #threeD-controls {
     margin-bottom: 0;
 }
 .developer-section label {
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: var(--panel-font-size);
     margin-right: 8px;
     flex-grow: 1;
@@ -763,9 +910,9 @@ html.wa-open-threeD-controls #threeD-controls {
     align-items: center;
 }
 .developer-section select {
-    background-color: #666666;
-    color: white;
-    border: 1px solid #808080;
+    background-color: var(--text-disabled);
+    color: var(--text-primary);
+    border: 1px solid var(--text-muted);
     padding: 4px;
     border-radius: 3px;
     font-size: var(--panel-font-size);
@@ -789,16 +936,16 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .unit-controls label {
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: var(--panel-font-size);
     margin-right: 8px;
     flex-grow: 1;
 }
 
 .unit-controls select {
-    background-color: #505050;
-    color: white;
-    border: 1px solid #666;
+    background-color: var(--border-strong);
+    color: var(--text-primary);
+    border: 1px solid var(--text-disabled);
     border-radius: 4px;
     padding: 2px 4px;
     font-size: var(--panel-font-size);
@@ -825,8 +972,8 @@ html.wa-open-threeD-controls #threeD-controls {
     margin-top: 8px;
     margin-bottom: 8px;
     padding: 8px;
-    background-color: #333333;
-    border: 1px solid #444444;
+    background-color: var(--bg-control);
+    border: 1px solid var(--bg-control-active);
     border-radius: 4px;
     display: flex;
     flex-direction: column;
@@ -842,8 +989,8 @@ html.wa-open-threeD-controls #threeD-controls {
     margin-top: 8px;
     margin-bottom: 8px;
     padding: 8px;
-    background-color: #333333;
-    border: 1px solid #444444;
+    background-color: var(--bg-control);
+    border: 1px solid var(--bg-control-active);
     border-radius: 4px;
     display: flex;
     flex-direction: column;
@@ -855,7 +1002,7 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .color-controls input[type="color"]:focus {
-    outline: 2px solid #4CAF50;
+    outline: 2px solid var(--accent-primary);
     outline-offset: 1px;
 }
 
@@ -863,7 +1010,7 @@ html.wa-open-threeD-controls #threeD-controls {
 .map-container {
     flex: 1;
     position: relative;
-    background-color: #000000;
+    background-color: var(--color-black);
     min-width: 300px;
 }
 
@@ -874,7 +1021,7 @@ html.wa-open-threeD-controls #threeD-controls {
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(26, 26, 26, 0.9);
+    background-color: var(--overlay-surface-4);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -884,17 +1031,17 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .message-content {
     text-align: center;
-    color: #ffffff;
-    background-color: rgba(51, 51, 51, 0.8);
+    color: var(--text-primary);
+    background-color: var(--overlay-surface-2);
     padding: 30px;
     border-radius: 8px;
-    border: 1px solid #606060;
+    border: 1px solid var(--border-strong);
 }
 
 .message-content h3 {
     margin: 0 0 15px 0;
     font-size: 1.4em;
-    color: #ffa000;
+    color: var(--accent-warning-hover);
 }
 
 .message-content p {
@@ -912,11 +1059,11 @@ html.wa-open-threeD-controls #threeD-controls {
     position: absolute;
     top: 10px;
     right: 10px;
-    background-color: rgba(0, 0, 0, 0.7);
+    background-color: var(--shadow-strong);
     padding: 8px;
     border-radius: 4px;
     font-size: 11px;
-    color: #ffffff;
+    color: var(--text-primary);
     pointer-events: none;
     display: flex;
     align-items: flex-start;
@@ -925,9 +1072,9 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .projection-toggle-btn {
     pointer-events: auto;
-    background-color: rgba(34, 34, 34, 0.9);
-    border: 1px solid #444;
-    color: #fff;
+    background-color: var(--overlay-surface-3);
+    border: 1px solid var(--bg-control-active);
+    color: var(--text-primary);
     padding: 6px 8px;
     border-radius: 4px;
     cursor: pointer;
@@ -936,7 +1083,7 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .projection-toggle-btn:hover {
-    background-color: rgba(68, 68, 68, 0.9);
+    background-color: var(--overlay-surface);
 }
 
 .map-info div {
@@ -958,13 +1105,13 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .no-selection {
-    color: #888888;
+    color: var(--text-muted);
     font-style: italic;
     font-size: var(--panel-font-size);
 }
 
 .aircraft-details {
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: var(--panel-font-size);
 }
 
@@ -985,12 +1132,12 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .info-label {
-    color: #aaaaaa;
+    color: var(--text-muted);
     font-size: var(--panel-font-size);
 }
 
 .info-value {
-    color: #cccccc;
+    color: var(--text-secondary);
     font-weight: bold;
     font-size: var(--panel-font-size);
 }
@@ -1013,29 +1160,29 @@ html.wa-open-threeD-controls #threeD-controls {
     padding: 2px 4px;
     font-size: var(--panel-font-size);
     font-family: inherit;
-    color: #cccccc;
-    background-color: #2a2a2a;
-    border: 1px solid #444;
+    color: var(--text-secondary);
+    background-color: var(--bg-panel);
+    border: 1px solid var(--bg-control-active);
     border-radius: 2px;
 }
 
 .aircraft-scale-override::placeholder {
-    color: #888;
+    color: var(--text-muted);
 }
 
 .copyable-value:hover {
-    background-color: rgba(76, 175, 80, 0.2);
-    outline: 1px solid rgba(76, 175, 80, 0.4);
+    background-color: var(--accent-primary-tint);
+    outline: 1px solid var(--accent-primary-tint-strong);
 }
 
 /* Conflict status styling in aircraft info */
 .conflict-warning {
-    color: #ff6b35;
+    color: var(--accent-warning-strong);
     font-weight: bold;
 }
 
 .conflict-clear {
-    color: #4CAF50;
+    color: var(--accent-primary);
 }
 
 /* Conflicts panel */
@@ -1051,7 +1198,7 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .no-conflicts {
-    color: #888888;
+    color: var(--text-muted);
     font-style: italic;
     font-size: var(--panel-font-size);
 }
@@ -1062,8 +1209,8 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .conflict-item {
-    background-color: rgba(255, 107, 53, 0.1);
-    border: 1px solid #ff6b35;
+    background-color: var(--accent-warning-tint);
+    border: 1px solid var(--accent-warning-strong);
     border-radius: 4px;
     padding: 6px;
     margin-bottom: 4px;
@@ -1073,35 +1220,35 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .conflict-item:hover {
-    background-color: rgba(255, 107, 53, 0.2);
+    background-color: var(--accent-warning-tint-strong);
 }
 
 .conflict-item.selected {
-    background-color: rgba(76, 175, 80, 0.2);
-    border-color: #4CAF50;
+    background-color: var(--accent-primary-tint);
+    border-color: var(--accent-primary);
 }
 
 .conflict-item.intrusion {
-    background-color: rgba(255, 0, 0, 0.1);
-    border: 1px solid #ff0000;
+    background-color: var(--accent-danger-tint);
+    border: 1px solid var(--accent-danger-bright);
 }
 
 .conflict-item.intrusion:hover {
-    background-color: rgba(255, 0, 0, 0.2);
+    background-color: var(--accent-danger-tint-strong);
 }
 
 .conflict-pair {
-    color: #ff6b35;
+    color: var(--accent-warning-strong);
     font-weight: bold;
     font-size: var(--panel-font-size);
 }
 
 .conflict-pair.intrusion {
-    color: #ff0000;
+    color: var(--accent-danger-bright);
 }
 
 .conflict-tcpa {
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: calc(var(--panel-font-size) * 0.9);
     margin-top: 2px;
 }
@@ -1109,7 +1256,7 @@ html.wa-open-threeD-controls #threeD-controls {
 /* Status panel */
 .status-info {
     font-size: 11px;
-    color: #cccccc;
+    color: var(--text-secondary);
 }
 
 .status-info div {
@@ -1118,8 +1265,8 @@ html.wa-open-threeD-controls #threeD-controls {
 
 /* Console and Echo Container */
 .console-container {
-    background-color: #1e1e1e;
-    border-top: 1px solid #404040;
+    background-color: var(--bg-elevated);
+    border-top: 1px solid var(--border);
     display: flex;
     flex-direction: row;
     flex: 0 0 var(--console-container-basis, 200px);
@@ -1130,7 +1277,7 @@ html.wa-open-threeD-controls #threeD-controls {
 .console-section {
     display: flex;
     flex-direction: column;
-    border-right: 1px solid #404040;
+    border-right: 1px solid var(--border);
     flex: 0 0 var(--console-section-basis, 50%);
     min-width: 200px;
 }
@@ -1147,13 +1294,13 @@ html.wa-open-threeD-controls #threeD-controls {
     justify-content: space-between;
     align-items: center;
     padding: 4px 8px;
-    background-color: #333333;
-    border-bottom: 1px solid #404040;
+    background-color: var(--bg-control);
+    border-bottom: 1px solid var(--border);
 }
 
 .console-header h3, .echo-header h3 {
     font-size: var(--console-font-size);
-    color: #4CAF50;
+    color: var(--accent-primary);
 }
 
 .echo-tab-bar {
@@ -1162,9 +1309,9 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .echo-tab {
-    background-color: #404040;
-    color: #aaa;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-muted);
+    border: 1px solid var(--border-strong);
     padding: calc(var(--console-font-size) * 0.2) calc(var(--console-font-size) * 0.6);
     cursor: pointer;
     border-radius: 3px;
@@ -1174,14 +1321,14 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .echo-tab:hover {
-    background-color: #505050;
-    color: #ddd;
+    background-color: var(--border-strong);
+    color: var(--text-secondary);
 }
 
 .echo-tab.active {
-    background-color: #4CAF50;
-    color: #fff;
-    border-color: #4CAF50;
+    background-color: var(--accent-primary);
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
 }
 
 .echo-header-controls {
@@ -1192,8 +1339,8 @@ html.wa-open-threeD-controls #threeD-controls {
 
 #log-stream-filename {
     font-size: var(--echo-font-size);
-    color: #888;
-    font-family: 'Courier New', monospace;
+    color: var(--text-muted);
+    font-family: var(--font-family-mono);
     max-width: 150px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1204,12 +1351,12 @@ html.wa-open-threeD-controls #threeD-controls {
     flex: 1;
     overflow-y: auto;
     padding: 4px 8px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
     font-size: var(--echo-font-size);
-    background-color: #000000;
-    color: #e0e0e0;
+    background-color: var(--bg-terminal);
+    color: var(--text-primary);
     scrollbar-width: thin;
-    scrollbar-color: #808080 #2b2b2b;
+    scrollbar-color: var(--text-muted) var(--bg-base);
 }
 
 .log-stream-line {
@@ -1223,18 +1370,18 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .log-stream-output::-webkit-scrollbar-track {
-    background: #2b2b2b;
+    background: var(--bg-base);
     border-radius: 4px;
 }
 
 .log-stream-output::-webkit-scrollbar-thumb {
-    background-color: #808080;
+    background-color: var(--text-muted);
     border-radius: 4px;
-    border: 2px solid #2b2b2b;
+    border: 2px solid var(--bg-base);
 }
 
 .log-stream-output::-webkit-scrollbar-thumb:hover {
-    background-color: #999999;
+    background-color: var(--text-muted);
 }
 
 #output-log-container {
@@ -1243,14 +1390,14 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .output-breadcrumbs {
     padding: 4px 8px;
-    background-color: #1a1a1a;
-    border-bottom: 1px solid #333;
+    background-color: var(--bg-sunken);
+    border-bottom: 1px solid var(--bg-control);
     font-size: var(--echo-font-size);
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
 }
 
 .output-crumb-link {
-    color: #4CAF50;
+    color: var(--accent-primary);
     cursor: pointer;
 }
 
@@ -1259,12 +1406,12 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .output-crumb-active {
-    color: #fff;
+    color: var(--text-primary);
     font-weight: bold;
 }
 
 .output-crumb-sep {
-    color: #666;
+    color: var(--text-disabled);
     margin: 0 2px;
 }
 
@@ -1272,18 +1419,18 @@ html.wa-open-threeD-controls #threeD-controls {
     display: flex;
     align-items: center;
     padding: 3px 8px;
-    border-bottom: 1px solid #222;
+    border-bottom: 1px solid var(--bg-deep);
     font-size: var(--echo-font-size);
     gap: 6px;
 }
 
 .output-file-row:hover {
-    background-color: #1a1a1a;
+    background-color: var(--bg-sunken);
 }
 
 .output-folder-row {
     cursor: pointer;
-    color: #4CAF50;
+    color: var(--accent-primary);
 }
 
 .output-file-icon {
@@ -1297,12 +1444,12 @@ html.wa-open-threeD-controls #threeD-controls {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
 }
 
 .output-file-meta {
     flex-shrink: 0;
-    color: #666;
+    color: var(--text-disabled);
     font-size: calc(var(--echo-font-size) - 1px);
     white-space: nowrap;
 }
@@ -1322,12 +1469,12 @@ html.wa-open-threeD-controls #threeD-controls {
 .output-browser-message {
     padding: 12px;
     text-align: center;
-    color: #666;
+    color: var(--text-disabled);
     font-size: var(--echo-font-size);
 }
 
 .output-browser-error {
-    color: #f44336;
+    color: var(--accent-danger);
 }
 
 .log-search-bar {
@@ -1335,30 +1482,30 @@ html.wa-open-threeD-controls #threeD-controls {
     align-items: center;
     gap: 4px;
     padding: 3px 8px;
-    background-color: #1a1a1a;
-    border-top: 1px solid #444;
+    background-color: var(--bg-sunken);
+    border-top: 1px solid var(--bg-control-active);
 }
 
 .log-search-field {
     flex: 1;
     padding: 2px 6px;
-    background-color: #111;
-    border: 1px solid #444;
+    background-color: var(--bg-deep);
+    border: 1px solid var(--bg-control-active);
     border-radius: 3px;
-    color: #ccc;
+    color: var(--text-secondary);
     font-size: var(--echo-font-size);
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
     min-width: 0;
 }
 
 .log-search-field:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--accent-primary);
 }
 
 .log-search-count {
     font-size: calc(var(--echo-font-size) - 1px);
-    color: #888;
+    color: var(--text-muted);
     white-space: nowrap;
     min-width: 50px;
     text-align: center;
@@ -1372,43 +1519,43 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .log-search-highlight {
-    background-color: #665500;
-    color: #fff;
+    background-color: var(--accent-warning-bg);
+    color: var(--text-primary);
     border-radius: 1px;
 }
 
 .log-search-highlight.active {
-    background-color: #ff8c00;
-    color: #000;
+    background-color: var(--accent-warning-hover);
+    color: var(--color-black);
 }
 
 .output-search-bar {
     padding: 4px 8px;
-    background-color: #1a1a1a;
-    border-bottom: 1px solid #333;
+    background-color: var(--bg-sunken);
+    border-bottom: 1px solid var(--bg-control);
 }
 
 .output-search-field {
     width: 100%;
     padding: 3px 6px;
-    background-color: #111;
-    border: 1px solid #444;
+    background-color: var(--bg-deep);
+    border: 1px solid var(--bg-control-active);
     border-radius: 3px;
-    color: #ccc;
+    color: var(--text-secondary);
     font-size: var(--echo-font-size);
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
     box-sizing: border-box;
 }
 
 .output-search-field:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--accent-primary);
 }
 
 .console-btn {
-    background-color: #404040;
-    color: white;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     padding: calc(var(--console-font-size) * 0.2) calc(var(--console-font-size) * 0.5);
     cursor: pointer;
     border-radius: 3px;
@@ -1417,17 +1564,17 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .console-btn:hover {
-    background-color: #505050;
+    background-color: var(--border-strong);
 }
 
 .console-output {
     flex: 1;
     overflow-y: auto;
     padding: 4px 8px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
     font-size: var(--console-font-size);
-    background-color: #000000;
-    color: #00ff00;
+    background-color: var(--bg-terminal);
+    color: var(--console-success);
 }
 
 .console-line {
@@ -1437,52 +1584,52 @@ html.wa-open-threeD-controls #threeD-controls {
 .console-line.command {
     margin-bottom: 8px;
     padding-bottom: 4px;
-    border-bottom: 1px solid #333333;
-    color: #00ff00;
+    border-bottom: 1px solid var(--bg-control);
+    color: var(--console-success);
 }
 
 .console-error {
-    color: #ff4444;
+    color: var(--accent-danger-bright);
 }
 
 .console-warning {
-    color: #ffaa00;
+    color: var(--accent-warning);
 }
 
 .console-info {
-    color: #4CAF50;
+    color: var(--accent-primary);
 }
 
 .echo-output {
     flex: 1;
     overflow-y: auto;
     padding: 4px 8px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
     font-size: var(--echo-font-size);
-    background-color: #000000;
-    color: #00ddff;
+    background-color: var(--bg-terminal);
+    color: var(--accent-cyan);
     /* Force scrollbar to always be visible and properly sized */
     scrollbar-width: thin;
-    scrollbar-color: #808080 #2b2b2b;
+    scrollbar-color: var(--text-muted) var(--bg-base);
 }
 
 .echo-line {
     margin-bottom: 8px;
     padding-bottom: 4px;
-    border-bottom: 1px solid #333333;
+    border-bottom: 1px solid var(--bg-control);
 }
 
 .echo-timestamp {
-    color: #666666;
+    color: var(--text-disabled);
     font-size: 0.85em;
     margin-right: 8px;
 }
 
 .echo-node-id {
-    color: #888888;
+    color: var(--text-muted);
     font-size: 0.85em;
     margin-right: 8px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
 }
 
 .echo-text {
@@ -1490,32 +1637,32 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .echo-info {
-    color: #00d4ff;
+    color: var(--accent-cyan);
     font-style: normal;
 }
 
 .echo-error {
-    color: #ff4444;
+    color: var(--accent-danger-bright);
     font-weight: bold;
 }
 
 .echo-warning {
-    color: #ffaa00;
+    color: var(--accent-warning);
     font-weight: bold;
 }
 
 .echo-success {
-    color: #66ff66;
+    color: var(--accent-primary-bright);
     font-weight: bold;
 }
 
 .echo-line a {
-    color: #4CAF50;
+    color: var(--accent-primary);
     text-decoration: underline;
 }
 
 .echo-line a:hover {
-    color: #66BB6A;
+    color: var(--accent-primary-bright);
 }
 
 .echo-line div {
@@ -1527,31 +1674,31 @@ html.wa-open-threeD-controls #threeD-controls {
     display: flex;
     align-items: center;
     padding: 4px 8px;
-    background-color: #333333;
-    border-top: 1px solid #404040;
+    background-color: var(--bg-control);
+    border-top: 1px solid var(--border);
     position: relative;
 }
 
 .console-prompt {
-    color: #4CAF50;
-    font-family: 'Courier New', monospace;
+    color: var(--accent-primary);
+    font-family: var(--font-family-mono);
     font-weight: bold;
     margin-right: 8px;
 }
 
 .console-input-container input {
     flex: 1;
-    background-color: #000000;
-    color: #00ff00;
-    border: 1px solid #404040;
+    background-color: var(--bg-terminal);
+    color: var(--console-success);
+    border: 1px solid var(--border);
     padding: 4px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
     font-size: var(--console-input-font-size);
 }
 
 .console-input-container input:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--accent-primary);
 }
 
 /* Command suggestion overlay */
@@ -1559,8 +1706,8 @@ html.wa-open-threeD-controls #threeD-controls {
     position: absolute;
     top: 8px;
     left: 10px;
-    color: #666;
-    font-family: 'Courier New', monospace;
+    color: var(--text-disabled);
+    font-family: var(--font-family-mono);
     font-size: var(--console-input-font-size);
     pointer-events: none;
     white-space: pre;
@@ -1575,19 +1722,19 @@ html.wa-open-threeD-controls #threeD-controls {
     right: 60px;
     max-height: 220px;
     overflow-y: auto;
-    background-color: #1e1e1e;
-    border: 1px solid #4CAF50;
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--accent-primary);
     border-radius: 4px 4px 0 0;
     z-index: 100;
-    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 -4px 12px var(--shadow-medium);
     scrollbar-width: thin;
-    scrollbar-color: #4CAF50 #1e1e1e;
+    scrollbar-color: var(--accent-primary) var(--bg-elevated);
 }
 
 .acid-dropdown-item {
     padding: 4px 10px;
-    color: #00ff00;
-    font-family: 'Courier New', monospace;
+    color: var(--console-success);
+    font-family: var(--font-family-mono);
     font-size: var(--console-input-font-size);
     cursor: pointer;
     white-space: nowrap;
@@ -1597,8 +1744,8 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .acid-dropdown-item:hover,
 .acid-dropdown-item.selected {
-    background-color: #2a5a2a;
-    color: #ffffff;
+    background-color: var(--accent-primary-bg);
+    color: var(--text-primary);
 }
 
 /* Aircraft Type Autocomplete Dropdown */
@@ -1609,19 +1756,19 @@ html.wa-open-threeD-controls #threeD-controls {
     right: 60px;
     max-height: 220px;
     overflow-y: auto;
-    background-color: #1e1e1e;
-    border: 1px solid #4CAF50;
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--accent-primary);
     border-radius: 4px 4px 0 0;
     z-index: 100;
-    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 -4px 12px var(--shadow-medium);
     scrollbar-width: thin;
-    scrollbar-color: #4CAF50 #1e1e1e;
+    scrollbar-color: var(--accent-primary) var(--bg-elevated);
 }
 
 .actype-dropdown-item {
     padding: 4px 10px;
-    color: #00ff00;
-    font-family: 'Courier New', monospace;
+    color: var(--console-success);
+    font-family: var(--font-family-mono);
     font-size: var(--console-input-font-size);
     cursor: pointer;
     white-space: nowrap;
@@ -1631,8 +1778,8 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .actype-dropdown-item:hover,
 .actype-dropdown-item.selected {
-    background-color: #2a5a2a;
-    color: #ffffff;
+    background-color: var(--accent-primary-bg);
+    color: var(--text-primary);
 }
 
 /* Aircraft Type dropdown inside the Create Aircraft modal */
@@ -1647,20 +1794,20 @@ html.wa-open-threeD-controls #threeD-controls {
     right: 0;
     max-height: 180px;
     overflow-y: auto;
-    background-color: #2b2b2b;
-    border: 1px solid #4CAF50;
+    background-color: var(--bg-base);
+    border: 1px solid var(--accent-primary);
     border-top: none;
     border-radius: 0 0 4px 4px;
     z-index: 10000;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 4px 12px var(--shadow-medium);
     scrollbar-width: thin;
-    scrollbar-color: #4CAF50 #2b2b2b;
+    scrollbar-color: var(--accent-primary) var(--bg-base);
 }
 
 .modal-actype-dropdown-item {
     padding: 6px 10px;
-    color: #ffffff;
-    font-family: 'Courier New', monospace;
+    color: var(--text-primary);
+    font-family: var(--font-family-mono);
     font-size: 13px;
     cursor: pointer;
     white-space: nowrap;
@@ -1668,14 +1815,14 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .modal-actype-dropdown-item:hover,
 .modal-actype-dropdown-item.selected {
-    background-color: #2a5a2a;
-    color: #ffffff;
+    background-color: var(--accent-primary-bg);
+    color: var(--text-primary);
 }
 
 .modal-actype-warning,
 .modal-field-warning {
     display: block;
-    color: #ffa726;
+    color: var(--accent-warning-bright);
     font-size: 0.85em;
     margin-top: 4px;
 }
@@ -1685,15 +1832,15 @@ html.wa-open-threeD-controls #threeD-controls {
     position: absolute;
     bottom: 100%;
     right: 60px;
-    background-color: #1e1e1e;
-    color: #4CAF50;
-    border: 1px solid #4CAF50;
+    background-color: var(--bg-elevated);
+    color: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
     border-radius: 4px 4px 0 0;
     padding: 4px 10px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
     font-size: var(--console-input-font-size);
     z-index: 100;
-    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 -4px 12px var(--shadow-medium);
     white-space: nowrap;
     pointer-events: none;
 }
@@ -1704,15 +1851,15 @@ html.wa-open-threeD-controls #threeD-controls {
     position: absolute;
     bottom: 100%;
     left: 40px;
-    background-color: #5a3a00;
-    color: #ffa726;
-    border: 1px solid #ff9800;
+    background-color: var(--accent-warning-bg);
+    color: var(--accent-warning-bright);
+    border: 1px solid var(--accent-warning);
     border-radius: 4px 4px 0 0;
     padding: 4px 10px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
     font-size: var(--console-input-font-size);
     z-index: 100;
-    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 -4px 12px var(--shadow-medium);
     white-space: nowrap;
 }
 
@@ -1722,18 +1869,18 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 ::-webkit-scrollbar-track {
-    background: #2b2b2b;
-    border: 1px solid #404040;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #808080;
+    background: var(--text-muted);
     border-radius: 6px;
-    border: 1px solid #606060;
+    border: 1px solid var(--border-strong);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #909090;
+    background: var(--text-muted);
 }
 
 /* Specific scrollbar styling for echo output */
@@ -1742,20 +1889,20 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .echo-output::-webkit-scrollbar-track {
-    background: #1a1a1a;
-    border: 1px solid #404040;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border);
     border-radius: 7px;
 }
 
 .echo-output::-webkit-scrollbar-thumb {
-    background: #909090;
+    background: var(--text-muted);
     border-radius: 7px;
-    border: 2px solid #1a1a1a;
+    border: 2px solid var(--bg-sunken);
     min-height: 30px;
 }
 
 .echo-output::-webkit-scrollbar-thumb:hover {
-    background: #a0a0a0;
+    background: var(--text-muted);
 }
 
 /* Node controls styles */
@@ -1780,7 +1927,7 @@ html.wa-open-threeD-controls #threeD-controls {
     flex-direction: column;
     gap: 5px;
     padding: 8px;
-    background-color: #404040;
+    background-color: var(--border);
     border-radius: 4px;
     font-size: var(--panel-font-size);
     flex-shrink: 0;
@@ -1812,13 +1959,13 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .node-selector-container label {
     font-size: var(--panel-font-size);
-    color: #cccccc;
+    color: var(--text-secondary);
 }
 
 #node-selector {
-    background-color: #404040;
-    color: #ffffff;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     padding: 6px;
     font-size: var(--panel-font-size);
@@ -1831,7 +1978,7 @@ html.wa-open-threeD-controls #threeD-controls {
 
 #node-selector:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--accent-primary);
 }
 
 .node-actions {
@@ -1851,9 +1998,9 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .node-list {
     flex: 1;
-    border: 1px solid #606060;
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
-    background-color: #404040;
+    background-color: var(--border);
     /* Reserve room for one node entry (header + three detail lines +
        padding) so the panel doesn't grow when the first node arrives */
     min-height: calc(var(--panel-font-size) * 5.6 + 28px);
@@ -1864,7 +2011,7 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .node-item {
     padding: 8px;
-    border-bottom: 1px solid #606060;
+    border-bottom: 1px solid var(--border-strong);
     cursor: pointer;
     transition: background-color 0.2s;
 }
@@ -1874,16 +2021,16 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .node-item:hover {
-    background-color: #505050;
+    background-color: var(--border-strong);
 }
 
 .node-item.active-node {
-    background-color: #2e5c2e;
-    border-left: 3px solid #4CAF50;
+    background-color: var(--accent-primary-bg);
+    border-left: 3px solid var(--accent-primary);
 }
 
 .node-item.active-node:hover {
-    background-color: #3e6c3e;
+    background-color: var(--accent-primary-border);
 }
 
 .node-header {
@@ -1895,12 +2042,12 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .node-header strong {
-    color: #ffffff;
+    color: var(--text-primary);
 }
 
 .active-badge {
-    background-color: #4CAF50;
-    color: #ffffff;
+    background-color: var(--accent-primary);
+    color: var(--text-primary);
     padding: 2px 6px;
     border-radius: 3px;
     font-size: 9px;
@@ -1909,7 +2056,7 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .node-details {
     font-size: var(--panel-font-size);
-    color: #cccccc;
+    color: var(--text-secondary);
     line-height: 1.3;
 }
 
@@ -1929,15 +2076,15 @@ html.wa-open-threeD-controls #threeD-controls {
     top: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.7);
+    background-color: var(--shadow-strong);
     display: flex;
     justify-content: center;
     align-items: center;
 }
 
 .modal-content {
-    background-color: #2b2b2b;
-    border: 1px solid #606060;
+    background-color: var(--bg-base);
+    border: 1px solid var(--border-strong);
     border-radius: 8px;
     width: 90%;
     max-width: 450px;
@@ -1979,12 +2126,12 @@ html.wa-open-threeD-controls #threeD-controls {
     justify-content: space-between;
     align-items: center;
     padding: 12px 16px;
-    background-color: #1e1e1e;
-    border-bottom: 1px solid #404040;
+    background-color: var(--bg-elevated);
+    border-bottom: 1px solid var(--border);
 }
 
 .modal-header h3 {
-    color: #4CAF50;
+    color: var(--accent-primary);
     font-size: 16px;
     margin: 0;
 }
@@ -1992,7 +2139,7 @@ html.wa-open-threeD-controls #threeD-controls {
 .modal-close {
     background: none;
     border: none;
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: 24px;
     cursor: pointer;
     padding: 0;
@@ -2006,8 +2153,8 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .modal-close:hover {
-    background-color: #404040;
-    color: #ffffff;
+    background-color: var(--border);
+    color: var(--text-primary);
 }
 
 .modal-body {
@@ -2019,7 +2166,7 @@ html.wa-open-threeD-controls #threeD-controls {
 /* Settings sections styling */
 .settings-section {
     padding: 16px 0;
-    border-bottom: 4px solid #404040;
+    border-bottom: 4px solid var(--border);
 }
 
 .settings-section:last-child {
@@ -2029,12 +2176,12 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .section-header {
     margin-bottom: 16px;
-    border-bottom: 1px solid #404040;
+    border-bottom: 1px solid var(--border);
     padding-bottom: 8px;
 }
 
 .section-header h4 {
-    color: #4CAF50;
+    color: var(--accent-primary);
     font-size: 15px;
     font-weight: bold;
     margin: 0 0 4px 0;
@@ -2044,7 +2191,7 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .section-description {
-    color: #aaaaaa;
+    color: var(--text-muted);
     font-size: 12px;
     font-style: italic;
     margin: 0;
@@ -2066,7 +2213,7 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .setting-group label {
     display: block;
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: 13px;
     font-weight: bold;
     margin-bottom: 6px;
@@ -2074,9 +2221,9 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .setting-group input[type="text"] {
     width: 100%;
-    background-color: #404040;
-    color: #ffffff;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     padding: 8px;
     font-size: 13px;
@@ -2085,14 +2232,14 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .setting-group input[type="text"]:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--accent-primary);
 }
 
 .setting-group input[type="number"] {
     width: 100%;
-    background-color: #404040;
-    color: #ffffff;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     padding: 8px;
     font-size: 13px;
@@ -2101,12 +2248,12 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .setting-group input[type="number"]:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--accent-primary);
 }
 
 .setting-help {
     display: block;
-    color: #999999;
+    color: var(--text-muted);
     font-size: 11px;
     margin-top: 4px;
     line-height: 1.3;
@@ -2126,13 +2273,13 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .connection-info {
     padding: 8px;
-    background-color: #404040;
+    background-color: var(--border);
     border-radius: 4px;
-    border: 1px solid #606060;
+    border: 1px solid var(--border-strong);
 }
 
 .connection-info small {
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: 11px;
 }
 
@@ -2141,14 +2288,14 @@ html.wa-open-threeD-controls #threeD-controls {
     justify-content: flex-end;
     gap: 8px;
     padding: 12px 16px;
-    background-color: #333333;
-    border-top: 1px solid #404040;
+    background-color: var(--bg-control);
+    border-top: 1px solid var(--border);
 }
 
 .btn-primary {
-    background-color: #4CAF50;
-    color: #ffffff;
-    border: 1px solid #4CAF50;
+    background-color: var(--accent-primary);
+    color: var(--text-on-accent);
+    border: 1px solid var(--accent-primary);
     padding: 8px 16px;
     border-radius: 4px;
     cursor: pointer;
@@ -2158,13 +2305,13 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .btn-primary:hover {
-    background-color: #45a049;
+    background-color: var(--accent-primary-hover);
 }
 
 .btn-secondary {
-    background-color: #606060;
-    color: #ffffff;
-    border: 1px solid #606060;
+    background-color: var(--border-strong);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     padding: 8px 16px;
     border-radius: 4px;
     cursor: pointer;
@@ -2173,31 +2320,31 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .btn-secondary:hover {
-    background-color: #707070;
+    background-color: var(--text-muted);
 }
 
 /* License information styling */
 .license-info {
     padding: 12px;
-    background-color: #363636;
+    background-color: var(--bg-control);
     border-radius: 4px;
-    border: 1px solid #555555;
+    border: 1px solid var(--border-strong);
 }
 
 .license-text {
-    color: #cccccc;
+    color: var(--text-secondary);
     font-size: 12px;
     line-height: 1.4;
     text-align: left;
 }
 
 .license-text strong {
-    color: #ffffff;
+    color: var(--text-primary);
 }
 
 /* Resize handles */
 .resize-handle {
-    background-color: #404040;
+    background-color: var(--border);
     transition: background-color 0.2s ease;
     user-select: none;
     -webkit-user-select: none;
@@ -2206,11 +2353,11 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .resize-handle:hover {
-    background-color: #4CAF50;
+    background-color: var(--accent-primary);
 }
 
 .resize-handle.resizing {
-    background-color: #66BB6A;
+    background-color: var(--accent-primary-bright);
 }
 
 .horizontal-resize {
@@ -2238,8 +2385,8 @@ html.wa-open-threeD-controls #threeD-controls {
         to bottom,
         transparent 0px,
         transparent 2px,
-        #666 2px,
-        #666 4px
+        var(--text-disabled) 2px,
+        var(--text-disabled) 4px
     );
     pointer-events: none;
 }
@@ -2256,8 +2403,8 @@ html.wa-open-threeD-controls #threeD-controls {
         to right,
         transparent 0px,
         transparent 2px,
-        #666 2px,
-        #666 4px
+        var(--text-disabled) 2px,
+        var(--text-disabled) 4px
     );
     pointer-events: none;
 }
@@ -2289,8 +2436,8 @@ html.wa-open-threeD-controls #threeD-controls {
     flex-shrink: 0;
     height: 28px;
     min-height: 28px;
-    background-color: #2a2a2a;
-    border-bottom: 1px solid #404040;
+    background-color: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
 }
 
 .panel-header h3 {
@@ -2301,7 +2448,7 @@ html.wa-open-threeD-controls #threeD-controls {
 .collapse-btn {
     background: none;
     border: none;
-    color: #9e9e9e;
+    color: var(--text-muted);
     font-size: 11px;
     cursor: pointer;
     width: 20px;
@@ -2316,8 +2463,8 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .collapse-btn:hover {
-    background-color: #404040;
-    color: #ffffff;
+    background-color: var(--border);
+    color: var(--text-primary);
 }
 
 .panel-content {
@@ -2378,9 +2525,9 @@ html.wa-open-threeD-controls #threeD-controls {
     overflow-x: hidden;
     min-height: 0;
     max-height: 250px;
-    border: 1px solid #606060;
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
-    background-color: #404040;
+    background-color: var(--border);
 }
 
 /* Aircraft info panel styling */
@@ -2390,9 +2537,9 @@ html.wa-open-threeD-controls #threeD-controls {
     overflow-x: hidden;
     min-height: 0;
     padding: 8px;
-    border: 1px solid #606060;
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
-    background-color: #404040;
+    background-color: var(--border);
 }
 
 /* Conflicts panel styling */
@@ -2402,9 +2549,9 @@ html.wa-open-threeD-controls #threeD-controls {
     overflow-x: hidden;
     min-height: 0;
     padding: 8px;
-    border: 1px solid #606060;
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
-    background-color: #404040;
+    background-color: var(--border);
 }
 
 .nav-controls {
@@ -2492,8 +2639,8 @@ html.wa-open-threeD-controls #threeD-controls {
 
 /* Server Control Panel Styles */
 .server-control-panel {
-    background-color: #2b2b2b;
-    border: 1px solid #606060;
+    background-color: var(--bg-base);
+    border: 1px solid var(--border-strong);
 }
 
 .server-control-panel.collapsed {
@@ -2504,8 +2651,8 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .server-logs-panel {
-    background-color: #2b2b2b;
-    border: 1px solid #606060;
+    background-color: var(--bg-base);
+    border: 1px solid var(--border-strong);
 }
 
 .server-logs-panel.collapsed {
@@ -2520,7 +2667,7 @@ html.wa-open-threeD-controls #threeD-controls {
     align-items: center;
     gap: 8px;
     padding: 4px;
-    background-color: #404040;
+    background-color: var(--border);
     border-radius: 3px;
     font-size: var(--panel-font-size);
 }
@@ -2533,19 +2680,19 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .status-indicator.status-running {
-    background-color: #4CAF50; /* Green */
+    background-color: var(--accent-primary); /* Green */
 }
 
 .status-indicator.status-stopped {
-    background-color: #F44336; /* Red */
+    background-color: var(--accent-danger); /* Red */
 }
 
 .status-indicator.status-unknown {
-    background-color: #FFC107; /* Yellow */
+    background-color: var(--accent-amber); /* Yellow */
 }
 
 .status-indicator.status-starting {
-    background-color: #2196F3; /* Blue */
+    background-color: var(--accent-info); /* Blue */
 }
 
 .server-controls {
@@ -2561,21 +2708,21 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .nav-btn.server-warning {
-    background-color: #ff9800;
-    border-color: #f57c00;
+    background-color: var(--accent-warning);
+    border-color: var(--accent-warning-hover);
 }
 
 .nav-btn.server-warning:hover {
-    background-color: #ff8f00;
+    background-color: var(--accent-warning-hover);
 }
 
 .nav-btn.server-danger {
-    background-color: #f44336;
-    border-color: #d32f2f;
+    background-color: var(--accent-danger);
+    border-color: var(--accent-danger-hover);
 }
 
 .nav-btn.server-danger:hover {
-    background-color: #e53935;
+    background-color: var(--accent-danger-hover);
 }
 
 /* Log Display Styles */
@@ -2586,9 +2733,9 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .log-tab {
     flex: 1;
-    background-color: #404040;
-    color: white;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     padding: 4px 8px;
     cursor: pointer;
     font-size: 10px;
@@ -2596,20 +2743,20 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .log-tab.active {
-    background-color: #505050;
-    border-color: #707070;
+    background-color: var(--border-strong);
+    border-color: var(--text-muted);
 }
 
 .log-tab:hover {
-    background-color: #505050;
+    background-color: var(--border-strong);
 }
 
 .log-output-container {
     position: relative;
     max-height: 300px;
-    border: 1px solid #606060;
+    border: 1px solid var(--border-strong);
     border-radius: 3px;
-    background-color: #1e1e1e;
+    background-color: var(--bg-elevated);
 }
 
 .log-output {
@@ -2617,7 +2764,7 @@ html.wa-open-threeD-controls #threeD-controls {
     padding: 8px;
     max-height: 300px;
     overflow-y: auto;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-family: var(--font-family-mono);
     font-size: 10px;
     line-height: 1.2;
 }
@@ -2631,7 +2778,7 @@ html.wa-open-threeD-controls #threeD-controls {
     padding: 0;
     white-space: pre-wrap;
     word-wrap: break-word;
-    color: #e0e0e0;
+    color: var(--text-primary);
 }
 
 /* Scrollbar styling for log output */
@@ -2640,16 +2787,16 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .log-output::-webkit-scrollbar-track {
-    background: #2b2b2b;
+    background: var(--bg-base);
 }
 
 .log-output::-webkit-scrollbar-thumb {
-    background: #606060;
+    background: var(--border-strong);
     border-radius: 4px;
 }
 
 .log-output::-webkit-scrollbar-thumb:hover {
-    background: #707070;
+    background: var(--text-muted);
 }
 
 /* Server Control in Settings Modal */
@@ -2658,7 +2805,7 @@ html.wa-open-threeD-controls #threeD-controls {
     align-items: center;
     gap: 8px;
     padding: 8px;
-    background-color: #404040;
+    background-color: var(--border);
     border-radius: 3px;
     font-size: 12px;
     margin-bottom: 10px;
@@ -2666,33 +2813,33 @@ html.wa-open-threeD-controls #threeD-controls {
 
 /* Demo Mode Restrictions */
 .demo-readonly {
-    background-color: #3a3a3a !important;
-    color: #888888 !important;
+    background-color: var(--bg-control-hover) !important;
+    color: var(--text-muted) !important;
     cursor: not-allowed !important;
-    border-color: #555555 !important;
+    border-color: var(--border-strong) !important;
 }
 
 .demo-readonly:focus {
     outline: none !important;
     box-shadow: none !important;
-    border-color: #555555 !important;
+    border-color: var(--border-strong) !important;
 }
 
 .demo-restriction {
-    background-color: #2a2a3a;
-    border: 1px solid #4a4a6a;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--bg-control-active);
     border-radius: 4px;
     padding: 10px;
     margin-top: 8px;
     font-size: 11px;
     line-height: 1.4;
-    color: #cccccc;
+    color: var(--text-secondary);
 }
 
 .demo-badge {
     display: inline-block;
-    background-color: #ff9800;
-    color: #000000;
+    background-color: var(--accent-warning);
+    color: var(--color-black);
     font-weight: bold;
     font-size: 9px;
     padding: 2px 6px;
@@ -2704,24 +2851,24 @@ html.wa-open-threeD-controls #threeD-controls {
 
 /* Demo Modal Styles */
 .demo-message {
-    background-color: #3a3a3a;
+    background-color: var(--bg-control-hover);
     padding: 15px;
     border-radius: 5px;
     margin-bottom: 15px;
-    border-left: 4px solid #ff9800;
+    border-left: 4px solid var(--accent-warning);
 }
 
 .demo-commands {
-    background-color: #2b2b2b;
+    background-color: var(--bg-base);
     padding: 10px;
     border-radius: 3px;
     margin: 10px 0;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
 }
 
 .demo-commands code {
     background-color: transparent;
-    color: #4CAF50;
+    color: var(--accent-primary);
     font-weight: bold;
     padding: 0;
 }
@@ -2731,13 +2878,13 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .settings-content pre {
-    background-color: #2b2b2b;
-    border: 1px solid #505050;
+    background-color: var(--bg-base);
+    border: 1px solid var(--border-strong);
     border-radius: 5px;
     padding: 15px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
     font-size: 12px;
-    color: #cccccc;
+    color: var(--text-secondary);
     overflow-y: auto;
     max-height: 400px;
     white-space: pre-wrap;
@@ -2745,8 +2892,8 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .plugin-list {
-    background-color: #2b2b2b;
-    border: 1px solid #505050;
+    background-color: var(--bg-base);
+    border: 1px solid var(--border-strong);
     border-radius: 5px;
     padding: 10px;
     margin: 10px 0;
@@ -2754,8 +2901,8 @@ html.wa-open-threeD-controls #threeD-controls {
 
 .plugin-item {
     padding: 5px 0;
-    border-bottom: 1px solid #404040;
-    font-family: 'Courier New', monospace;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-family-mono);
     font-size: 13px;
 }
 
@@ -2764,24 +2911,24 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 .plugin-item strong {
-    color: #4CAF50;
+    color: var(--accent-primary);
 }
 
 /* Disabled buttons in demo mode */
 .btn-primary:disabled,
 .btn-secondary:disabled {
-    background-color: #2a2a2a !important;
-    color: #666666 !important;
-    border-color: #444444 !important;
+    background-color: var(--bg-panel) !important;
+    color: var(--text-disabled) !important;
+    border-color: var(--bg-control-active) !important;
     cursor: not-allowed !important;
     opacity: 0.6;
 }
 
 .btn-primary:disabled:hover,
 .btn-secondary:disabled:hover {
-    background-color: #2a2a2a !important;
-    color: #666666 !important;
-    border-color: #444444 !important;
+    background-color: var(--bg-panel) !important;
+    color: var(--text-disabled) !important;
+    border-color: var(--bg-control-active) !important;
 }
 
 /* Draw Route button disabled-state tooltip
@@ -2801,16 +2948,16 @@ html.wa-open-threeD-controls #threeD-controls {
 .draw-route-disabled-tooltip {
     display: none;
     position: fixed;
-    background-color: #1e1e1e;
-    color: #ffffff;
-    border: 1px solid #606060;
+    background-color: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     padding: 6px 10px;
     font-size: var(--panel-font-size);
     white-space: nowrap;
     z-index: 10000;
     pointer-events: none;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 2px 6px var(--shadow-medium);
 }
 
 /* Route Constraints modal - waypoint table */
@@ -2834,30 +2981,30 @@ html.wa-open-threeD-controls #threeD-controls {
 }
 
 #route-constraints-table tbody tr + tr td {
-    border-top: 1px solid #3a3a3a;
+    border-top: 1px solid var(--bg-control-hover);
 }
 
 #route-constraints-table input[type="number"],
 .route-constraints-bulk-table input[type="number"] {
     padding: 6px 8px;
-    background-color: #404040;
-    color: #ffffff;
-    border: 1px solid #606060;
+    background-color: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
 }
 
 #route-constraints-table input[type="number"]:focus,
 .route-constraints-bulk-table input[type="number"]:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--accent-primary);
 }
 
 /* Disabled state for server control buttons */
 .disabled,
 button.disabled {
-    background-color: #2a2a2a !important;
-    color: #666666 !important;
-    border-color: #444444 !important;
+    background-color: var(--bg-panel) !important;
+    color: var(--text-disabled) !important;
+    border-color: var(--bg-control-active) !important;
     cursor: not-allowed !important;
     opacity: 0.6;
     pointer-events: none;
@@ -2865,9 +3012,9 @@ button.disabled {
 
 .disabled:hover,
 button.disabled:hover {
-    background-color: #2a2a2a !important;
-    color: #666666 !important;
-    border-color: #444444 !important;
+    background-color: var(--bg-panel) !important;
+    color: var(--text-disabled) !important;
+    border-color: var(--bg-control-active) !important;
 }
 
 /* Allow hover (and the native title tooltip) on disabled header controls;
@@ -2883,51 +3030,51 @@ button.disabled:hover {
     align-items: center;
     gap: 8px;
     padding: 4px 10px;
-    background-color: #1e1e1e;
-    border-bottom: 1px solid #2a2a2a;
-    font-family: 'Courier New', monospace;
+    background-color: var(--bg-elevated);
+    border-bottom: 1px solid var(--bg-panel);
+    font-family: var(--font-family-mono);
     font-size: var(--console-input-font-size);
-    color: #909090;
+    color: var(--text-muted);
 }
 
 .console-arg-hint .cmd-arg-cmd {
-    color: #4CAF50;
+    color: var(--accent-primary);
     font-weight: 600;
 }
 
 .console-arg-hint .cmd-arg-chip {
-    color: #909090;
+    color: var(--text-muted);
     padding: 0 2px;
 }
 
 .console-arg-hint .cmd-arg-chip.optional {
-    color: #6f6f6f;
+    color: var(--border-strong);
     font-style: italic;
 }
 
 .console-arg-hint .cmd-arg-chip.current {
-    color: #66BB6A;
+    color: var(--accent-primary-bright);
     font-weight: 700;
     text-decoration: underline;
 }
 
 .console-arg-hint .cmd-arg-empty {
-    color: #6f6f6f;
+    color: var(--border-strong);
     font-style: italic;
 }
 
 .console-arg-hint .cmd-arg-cmd.cmd-arg-unknown {
-    color: #ffa726;
+    color: var(--accent-warning-bright);
 }
 
 .console-arg-hint .cmd-arg-kbd {
     display: inline-block;
     padding: 0 5px;
-    background: #2a2a2a;
-    border: 1px solid #4a4a4a;
+    background: var(--bg-panel);
+    border: 1px solid var(--bg-control-active);
     border-radius: 3px;
-    color: #ddd;
-    font-family: 'Courier New', monospace;
+    color: var(--text-secondary);
+    font-family: var(--font-family-mono);
     font-size: calc(var(--console-input-font-size) - 1px);
     font-style: normal;
 }
@@ -2947,17 +3094,17 @@ button.disabled:hover {
 .command-list-view .cmd-search-input {
     width: 100%;
     box-sizing: border-box;
-    background-color: #000000;
-    color: #00ff00;
-    border: 1px solid #404040;
+    background-color: var(--bg-terminal);
+    color: var(--console-success);
+    border: 1px solid var(--border);
     padding: 6px 8px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-mono);
     font-size: var(--panel-font-size);
 }
 
 .command-list-view .cmd-search-input:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--accent-primary);
 }
 
 .command-list-view .cmd-list {
@@ -2968,7 +3115,7 @@ button.disabled:hover {
 }
 
 .command-list-view .cmd-section-header {
-    color: #4CAF50;
+    color: var(--accent-primary);
     font-size: var(--panel-font-size);
     font-weight: 700;
     padding: 6px 12px 2px 12px;
@@ -2987,14 +3134,14 @@ button.disabled:hover {
 }
 
 .command-list-view .cmd-row:hover {
-    background-color: #2a5a2a;
-    border-left-color: #4CAF50;
+    background-color: var(--accent-primary-bg);
+    border-left-color: var(--accent-primary);
 }
 
 .command-list-view .cmd-fav {
     background: none;
     border: none;
-    color: #707070;
+    color: var(--text-muted);
     font-size: 14px;
     cursor: pointer;
     padding: 0;
@@ -3002,23 +3149,23 @@ button.disabled:hover {
 }
 
 .command-list-view .cmd-fav.active {
-    color: #FFC107;
+    color: var(--accent-amber);
 }
 
 .command-list-view .cmd-fav:hover {
-    color: #FFC107;
+    color: var(--accent-amber);
 }
 
 .command-list-view .cmd-name {
-    color: #ffffff;
-    font-family: 'Courier New', monospace;
+    color: var(--text-primary);
+    font-family: var(--font-family-mono);
     font-size: var(--panel-font-size);
     font-weight: 700;
 }
 
 .command-list-view .cmd-sig {
-    color: #909090;
-    font-family: 'Courier New', monospace;
+    color: var(--text-muted);
+    font-family: var(--font-family-mono);
     font-size: var(--panel-font-size);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3026,7 +3173,7 @@ button.disabled:hover {
 }
 
 .command-list-view .cmd-empty {
-    color: #707070;
+    color: var(--text-muted);
     font-style: italic;
     padding: 8px 12px;
     font-size: var(--panel-font-size);
@@ -3083,25 +3230,25 @@ button.disabled:hover {
     width: 100%;
     box-sizing: border-box;
     padding: 7px 10px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    border: 1px solid var(--overlay-hover);
     border-radius: 4px;
-    background: rgba(11, 15, 21, 0.9);
-    color: #e6edf3;
+    background: var(--bg-map-overlay);
+    color: var(--text-primary);
     outline: none;
 }
 
 .nav-search-field:focus {
-    border-color: #4da3ff;
+    border-color: var(--accent-info);
 }
 
 .nav-search-field::placeholder {
-    color: #7d8a97;
+    color: var(--text-muted);
 }
 
 .nav-search-results {
     margin-top: 4px;
-    background: rgba(11, 15, 21, 0.97);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: var(--bg-map-overlay);
+    border: 1px solid var(--overlay-hover);
     border-radius: 4px;
     overflow: hidden;
     max-height: 320px;
@@ -3119,7 +3266,7 @@ button.disabled:hover {
 
 .nav-search-item:hover,
 .nav-search-item.active {
-    background: rgba(77, 163, 255, 0.18);
+    background: var(--accent-info-tint);
 }
 
 .nav-search-badge {
@@ -3128,24 +3275,24 @@ button.disabled:hover {
     font-weight: 600;
     padding: 1px 5px;
     border-radius: 3px;
-    color: #0b0f15;
+    color: var(--bg-sunken);
 }
 
 .nav-search-badge-airport {
-    background: #4da3ff;
+    background: var(--accent-info);
 }
 
 .nav-search-badge-heliport {
-    background: #e0823c;
+    background: var(--accent-warning-strong);
 }
 
 .nav-search-badge-waypoint {
-    background: #9aa7b4;
+    background: var(--text-muted);
 }
 
 .nav-search-ident {
     font-weight: 600;
-    color: #e6edf3;
+    color: var(--text-primary);
 }
 
 .nav-search-iata {
@@ -3155,17 +3302,17 @@ button.disabled:hover {
     letter-spacing: 0.5px;
     padding: 1px 5px;
     border-radius: 3px;
-    color: #cfe6ff;
-    background: rgba(77, 163, 255, 0.18);
+    color: var(--accent-info-soft);
+    background: var(--accent-info-tint);
 }
 
 .nav-search-name {
-    color: #9aa7b4;
+    color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .nav-search-message {
     padding: 8px 10px;
-    color: #9aa7b4;
+    color: var(--text-muted);
 }
