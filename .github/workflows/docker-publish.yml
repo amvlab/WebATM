@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Large/binary static assets (offline tiles, glyphs, navdata) are
       # gitignored and shipped via a separate "assets" GitHub release that
