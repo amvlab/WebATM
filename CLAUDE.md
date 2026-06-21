@@ -37,6 +37,22 @@ python WebATM.py
 
 The web interface will be available at http://localhost:8082
 
+### Python Environment and Tests
+Dependencies are managed with [uv](https://docs.astral.sh/uv/) from `pyproject.toml` and the pinned `uv.lock` (the legacy `requirements*.txt` files have been removed).
+
+```bash
+# Sync the dev environment (core deps + PEP 735 `dev` group)
+uv sync
+
+# Sync with production extras (gunicorn, eventlet)
+uv sync --extra prod
+
+# Run the test suite (collects both core and integrated suites)
+uv run pytest                # everything (core + integrated)
+uv run pytest -m core        # core `webatm` package only (tests/)
+uv run pytest -m integrated  # optional `webatm_integrated` package only
+```
+
 ### Frontend (TypeScript) Development
 The TypeScript source lives in the top-level `frontend/` directory. Build output is emitted to `WebATM/static/dist/` (consumed by the Flask templates) and vendored third-party assets (FontAwesome, MapLibre GL CSS) are copied into `WebATM/static/vendor/` by the `vendor-assets` prebuild step.
 
@@ -258,10 +274,10 @@ WebATM/
 │   ├── run_webatm.sh          # Application startup script
 │   ├── wsgi.py                # WSGI configuration (eventlet, standalone)
 │   └── wsgi_integrated.py     # WSGI configuration (gthread, integrated build)
-├── requirements.txt            # Python dependencies (core)
-├── requirements-dev.txt        # Development dependencies
-├── requirements-prod.txt       # Production dependencies
-├── pyproject.toml             # Python project configuration (Python 3.13+)
+├── pyproject.toml             # Python project config + deps (Python 3.13+, uv-managed)
+├── uv.lock                    # Pinned dependency lockfile (uv)
+├── conftest.py                # Root pytest config (auto-marks core vs integrated suites)
+├── tests/                     # pytest unit tests for the core webatm package
 ├── docker-compose.yml         # Docker Compose configuration (incl. commented integrated service)
 ├── Dockerfile                 # Docker image definition (standalone)
 ├── Dockerfile.integrated      # Docker image definition (integrated — bundles BlueSky)
@@ -329,7 +345,7 @@ WebATM/
 - FontAwesome (icons, vendored at build time)
 - Webpack (bundling)
 
-**Installation:** See `requirements.txt` (core), `requirements-dev.txt` (development), `requirements-prod.txt` (production), and `pyproject.toml` (full configuration)
+**Installation:** Dependencies are managed with [uv](https://docs.astral.sh/uv/) from `pyproject.toml` and the pinned `uv.lock`. Run `uv sync` for the full dev environment (core deps + the PEP 735 `dev` group), or `uv sync --extra prod` to add the production extras (`gunicorn`, `eventlet`). The legacy `requirements*.txt` files have been removed.
 
 ### Development Workflow
 
