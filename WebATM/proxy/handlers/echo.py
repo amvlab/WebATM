@@ -4,31 +4,16 @@ import time
 
 from ...bluesky_client import safe_decode
 from ...logger import get_logger
+from ._base import active_proxy
 
 logger = get_logger()
 
 
-def get_bluesky_proxy():
-    """Get the current BlueSky proxy instance."""
-    from .. import get_bluesky_proxy as _get_proxy
-
-    return _get_proxy()
-
-
 def echo(text, flags=None, sender_id=None):
     """Handle echo messages from simulation."""
-    proxy = get_bluesky_proxy()
+    proxy = active_proxy()
     if not proxy:
         return
-
-    # Ignore data if reconnection is not allowed (we're disconnected)
-    if not proxy.allow_reconnection:
-        return
-
-    # Mark successful data reception
-    proxy.last_successful_update = time.time()
-
-    # Mark successful echo reception (minimal logging)
 
     # Preserve newlines and formatting in the echo data
     formatted_text = str(text) if text is not None else ""

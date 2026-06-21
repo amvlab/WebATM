@@ -4,15 +4,9 @@ import time
 
 from ...logger import get_logger
 from ...utils import make_json_serializable
+from ._base import get_bluesky_proxy
 
 logger = get_logger()
-
-
-def get_bluesky_proxy():
-    """Get the current BlueSky proxy instance."""
-    from .. import get_bluesky_proxy as _get_proxy
-
-    return _get_proxy()
 
 
 def on_routedata_received(data):
@@ -32,13 +26,10 @@ def on_routedata_received(data):
         logger.debug("Route data ignored - no active node available")
         return
 
-    # Check if this aircraft's route data should be displayed
-    # We filter based on the aircraft ID in the route data
-    route_aircraft_id = (
-        getattr(data, "acid", None) or data.get("acid")
-        if hasattr(data, "get")
-        else None
-    )
+    # Filter on the aircraft ID, supporting both attribute- and dict-style data.
+    route_aircraft_id = getattr(data, "acid", None)
+    if route_aircraft_id is None and hasattr(data, "get"):
+        route_aircraft_id = data.get("acid")
     if not route_aircraft_id:
         logger.debug("Route data ignored - no aircraft ID found")
         return

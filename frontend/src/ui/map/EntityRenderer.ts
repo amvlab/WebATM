@@ -436,11 +436,7 @@ export abstract class EntityRenderer<T extends EntityData> {
             const id = ids[i];
 
             // Validate coordinates
-            if (
-                typeof lat !== 'number' || typeof lon !== 'number' ||
-                isNaN(lat) || isNaN(lon) ||
-                lat < -90 || lat > 90 || lon < -180 || lon > 180
-            ) {
+            if (!isValidCoordinate(lat, lon)) {
                 skippedCount++;
                 if (skippedCount <= 3) {
                     logger.warn(`${this.config.entityType}Renderer`, `Skipping entity ${id} - invalid coordinates:`, { lat, lon });

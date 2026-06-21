@@ -1,32 +1,17 @@
 """Shape handlers for POLY and POLYLINE data."""
 
-import time
-
 from ...logger import get_logger
 from ...utils import make_json_serializable
+from ._base import active_proxy
 
 logger = get_logger()
 
 
-def get_bluesky_proxy():
-    """Get the current BlueSky proxy instance."""
-    from .. import get_bluesky_proxy as _get_proxy
-
-    return _get_proxy()
-
-
 def on_poly_received(data, *args, **kwargs):
     """Handle polygon data updates from BlueSky server."""
-    proxy = get_bluesky_proxy()
+    proxy = active_proxy()
     if not proxy:
         return
-
-    # Ignore data if reconnection is not allowed (we're disconnected)
-    if not proxy.allow_reconnection:
-        return
-
-    # Mark successful data reception
-    proxy.last_successful_update = time.time()
 
     try:
         # Get sender_id from BlueSky context

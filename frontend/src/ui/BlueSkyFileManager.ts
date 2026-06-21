@@ -793,5 +793,5 @@ export class BlueSkyFileManager {
 // Export singleton instance
 export const blueSkyFileManager = new BlueSkyFileManager();
 
-// Make it globally available for onclick handlers (typed in types/globals.d.ts)
+// Exposed on window for global access (typed in types/globals.d.ts).
 window.blueSkyFileManager = blueSkyFileManager;

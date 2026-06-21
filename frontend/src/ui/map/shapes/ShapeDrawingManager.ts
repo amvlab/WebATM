@@ -39,29 +39,21 @@ export class ShapeDrawingManager extends BaseDrawingManager {
     }
 
     /**
-     * Set up modal event handlers
+     * Wire the name-modal's Create button and shape-type selector. Registered
+     * with teardownSignal so App.cleanup() (which calls destroy()) removes
+     * them - otherwise these long-lived listeners outlive the manager and
+     * would drive a torn-down instance.
      */
     private setupModalHandlers(): void {
-        // Handle Create Polygon button (Start Drawing)
-        const createBtn = document.getElementById('create-polygon-btn');
-        if (createBtn) {
-            createBtn.addEventListener('click', () => {
-                this.onCreatePolygonClick();
-            });
-        }
+        const signal = this.teardownSignal;
 
-        // Handle shape type changes
-        const shapeTypeSelect = document.getElementById('shape-type-select') as HTMLSelectElement;
-        if (shapeTypeSelect) {
-            shapeTypeSelect.addEventListener('change', () => {
-                this.updateShapeTypeUI();
-            });
-        }
+        const createBtn = document.getElementById('create-polygon-btn');
+        createBtn?.addEventListener('click', () => this.onCreatePolygonClick(), { signal });
+
+        const shapeTypeSelect = document.getElementById('shape-type-select') as HTMLSelectElement | null;
+        shapeTypeSelect?.addEventListener('change', () => this.updateShapeTypeUI(), { signal });
     }
 
-    /**
-     * Toggle drawing mode
-     */
     public toggleDrawing(): void {
         if (this.drawingMode) {
             this.stopDrawing();
@@ -172,9 +164,6 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         this.startDrawing();
     }
 
-    /**
-     * Start drawing mode
-     */
     private startDrawing(): void {
         this.drawingMode = true;
         this.drawingPoints = [];
@@ -199,9 +188,6 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         logger.info('ShapeDrawingManager', `Started drawing ${this.currentShapeType}: ${this.currentShapeName}`);
     }
 
-    /**
-     * Stop drawing mode
-     */
     private stopDrawing(): void {
         this.drawingMode = false;
         this.drawingPoints = [];
@@ -388,9 +374,6 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         });
     }
 
-    /**
-     * Update temporary drawing visualization
-     */
     private updateTemporaryDrawing(): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
@@ -426,10 +409,7 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         logger.debug('ShapeDrawingManager', `Drawing preview updated: ${this.drawingPoints.length} points`);
     }
 
-    /**
-     * Update cursor preview
-     */
-    private updateCursorPreview(cursorPoint: {lat: number, lng: number}): void {
+    private updateCursorPreview(cursorPoint: { lat: number; lng: number }): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
@@ -461,9 +441,6 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         updateSourceFeatures(map, 'temp-drawing-preview', features);
     }
 
-    /**
-     * Clear temporary drawing visualization
-     */
     private clearTemporaryDrawing(): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
@@ -474,14 +451,10 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         logger.debug('ShapeDrawingManager', 'Cleared temporary drawing visualization');
     }
 
-    /**
-     * Remove temporary drawing layers
-     */
     private removeTemporaryDrawingLayers(): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        // Remove layers
         const layers = [
             'temp-drawing-points',
             'temp-drawing-polygon-line',

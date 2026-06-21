@@ -200,8 +200,9 @@ export class OutputFileBrowser {
         }
 
         const fileItems = sorted.map(file => {
-            const modifiedDate = new Date(file.modified * 1000).toLocaleDateString();
-            const modifiedTime = new Date(file.modified * 1000).toLocaleTimeString();
+            const modified = new Date(file.modified * 1000);
+            const modifiedDate = modified.toLocaleDateString();
+            const modifiedTime = modified.toLocaleTimeString();
             const isFolder = file.type === 'folder';
             const sizeText = isFolder ? '' : this.formatFileSize(file.size);
             const filePath = this.currentPath
@@ -263,5 +264,6 @@ export class OutputFileBrowser {
 
 export const outputFileBrowser = new OutputFileBrowser();
 
-// Make it globally available for onclick handlers (typed in types/globals.d.ts)
+// Exposed on window so other modules can reach the singleton (e.g.
+// LogStreamManager refreshes/shows it); typed in types/globals.d.ts.
 window.outputFileBrowser = outputFileBrowser;

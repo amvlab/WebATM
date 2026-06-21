@@ -5,6 +5,7 @@ import type { AircraftData, DisplayOptions } from '../../../data/types';
 import type { StateManager } from '../../../core/StateManager';
 import { AUTO_MODEL_SENTINEL, getModelForAircraftType } from '../../../data/aircraftCategories';
 import { logger } from '../../../utils/Logger';
+import { isValidCoordinate } from '../../../utils/maplibre';
 import { Aircraft3DModelLoader } from './Aircraft3DModelLoader';
 import { Aircraft3DTransforms } from './Aircraft3DTransforms';
 import type { AircraftMeshData } from './Aircraft3DTransforms';
@@ -133,16 +134,11 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
         for (let i = 0; i < aircraftData.id.length; i++) {
             const id = aircraftData.id[i];
 
-            // Skip aircraft with invalid coordinates — matches the 2D
-            // renderer's guard. MercatorCoordinate.fromLngLat throws on
-            // out-of-range values, which would crash the whole tick.
+            // Skip aircraft with invalid coordinates: MercatorCoordinate.fromLngLat
+            // throws on out-of-range values, which would crash the whole tick.
             const lat = aircraftData.lat[i];
             const lon = aircraftData.lon[i];
-            if (
-                typeof lat !== 'number' || typeof lon !== 'number' ||
-                isNaN(lat) || isNaN(lon) ||
-                lat < -90 || lat > 90 || lon < -180 || lon > 180
-            ) {
+            if (!isValidCoordinate(lat, lon)) {
                 continue;
             }
 
