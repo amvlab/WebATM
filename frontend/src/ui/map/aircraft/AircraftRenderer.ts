@@ -160,18 +160,14 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
      * Provides aircraft-specific method name for backward compatibility
      */
     public updateAircraftDisplay(aircraftData: AircraftData): void {
-        // Check if map sources are ready before updating
-        // This handles the race condition where aircraft data arrives before map finishes loading
+        // Sources may be missing if data arrives before the map finishes
+        // loading, or right after a style change (which drops sources). In
+        // either case, (re)initialize the renderer before updating.
         const source = this.map.getSource('aircraft-points') as GeoJSONSource;
         if (!source) {
-            // Sources not ready yet, which can happen:
-            // 1. During initial map load 
-            // 2. After map style change (sources are removed)
-            // In both cases, we need to initialize the renderer
             logger.debug('AircraftRenderer', 'Points source not found, initializing renderer...');
             this.initialize(true);
-            
-            // After initialization, try updating again
+
             const sourceAfterInit = this.map.getSource('aircraft-points') as GeoJSONSource;
             if (!sourceAfterInit) {
                 logger.warn('AircraftRenderer', 'Failed to initialize aircraft sources');
@@ -182,11 +178,9 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         this.updateEntityDisplay(aircraftData);
         this.updateAircraftTrails(aircraftData);
 
-        // Defensive: if the 3D overlay exists, make sure its custom layer is
-        // still on top. updateEntityDisplay doesn't add layers on the hot path,
-        // but some code paths (style reloads, first-frame lazy init) can leave
-        // the 2D sprites above the 3D layer — raising here is cheap and
-        // guarantees correct stacking regardless of ordering.
+        // Some code paths (style reloads, first-frame lazy init) can leave the
+        // 2D sprites stacked above the 3D layer; raising here is cheap and keeps
+        // the 3D models on top regardless of ordering.
         this.raise3DLayerIfPresent();
     }
 
