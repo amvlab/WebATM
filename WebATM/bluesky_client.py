@@ -303,37 +303,43 @@ class BlueSkyClient:
         self.running = False
         self.connected = False
 
-        try:
-            # Unregister from poller first
-            if self.poller:
-                if self.sock_recv:
-                    self.poller.unregister(self.sock_recv)
-                if self.sock_send:
-                    self.poller.unregister(self.sock_send)
-
-            # Close sockets (following ZMQ pattern: close sockets first)
-            if self.sock_recv:
-                self.sock_recv.close()
-                self.sock_recv = None
-
-            if self.sock_send:
-                self.sock_send.close()
-                self.sock_send = None
-
-            # Destroy context (following ZMQ pattern: destroy context after sockets)
-            if self.zmq_context:
-                self.zmq_context.destroy()
-                self.zmq_context = None
-
+        # Each step is guarded independently so a failure in one cannot abort
+        # the rest and leak resources. In particular, a connect() that raised
+        # mid-setup can leave a socket created but never registered with the
+        # poller; unregister() then raises and must not prevent the socket from
+        # being closed and the context destroyed.
+        if self.poller:
+            for sock in (self.sock_recv, self.sock_send):
+                if sock is not None:
+                    try:
+                        self.poller.unregister(sock)
+                    except Exception:
+                        # Never registered (e.g. failed connect) - nothing to do.
+                        pass
             self.poller = None
 
-            logger.info("All ZMQ resources cleaned up")
+        # Close sockets (following ZMQ pattern: close sockets first)
+        for attr in ("sock_recv", "sock_send"):
+            sock = getattr(self, attr)
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception as e:
+                    if "ENOTSOCK" in str(e):
+                        logger.debug("Socket already closed, ignoring")
+                    else:
+                        logger.warning(f"Error closing {attr}: {e}")
+                setattr(self, attr, None)
 
-        except Exception as e:
-            if "ENOTSOCK" in str(e):
-                logger.debug("Socket already closed, ignoring")
-            else:
-                logger.warning(f"Error during close: {e}")
+        # Destroy context (following ZMQ pattern: destroy context after sockets)
+        if self.zmq_context:
+            try:
+                self.zmq_context.destroy()
+            except Exception as e:
+                logger.warning(f"Error destroying ZMQ context: {e}")
+            self.zmq_context = None
+
+        logger.info("All ZMQ resources cleaned up")
 
         # Clear state
         self.nodes.clear()
