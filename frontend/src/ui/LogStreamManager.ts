@@ -261,36 +261,25 @@ export class LogStreamManager {
     }
 
     private clearSearch(): void {
-        this.searchMatches.forEach(el => {
-            el.classList.remove('log-search-highlight', 'active');
-            // Restore original text (remove <mark> wrappers)
-            if (el.querySelector('mark')) {
-                // Reading textContent flattens the <mark> children; writing it
-                // back replaces them with a single plain-text node.
-                const plainText = el.textContent;
-                el.textContent = plainText;
-            }
-        });
+        this.removeHighlights(this.searchMatches);
         this.searchMatches = [];
         this.currentMatchIndex = -1;
         this.searchTerm = '';
         if (this.searchCount) this.searchCount.textContent = '';
     }
 
+    // Highlights are whole-line CSS classes, so clearing them is just class removal.
+    private removeHighlights(lines: Iterable<Element>): void {
+        for (const el of lines) {
+            el.classList.remove('log-search-highlight', 'active');
+        }
+    }
+
     private performSearch(): void {
         if (!this.logStreamOutput || !this.searchInput) return;
 
-        // Clear previous highlights by restoring textContent
-        const highlighted = this.logStreamOutput.querySelectorAll('.log-search-highlight');
-        highlighted.forEach(el => {
-            el.classList.remove('log-search-highlight', 'active');
-            if (el.querySelector('mark')) {
-                // Reading textContent flattens the <mark> children; writing it
-                // back replaces them with a single plain-text node.
-                const plainText = el.textContent;
-                el.textContent = plainText;
-            }
-        });
+        // Clear highlights from the previous search before re-scanning.
+        this.removeHighlights(this.logStreamOutput.querySelectorAll('.log-search-highlight'));
 
         this.searchMatches = [];
         this.currentMatchIndex = -1;
@@ -435,5 +424,6 @@ export class LogStreamManager {
 
 export const logStreamManager = new LogStreamManager();
 
-// Make it globally available for onclick handlers (typed in types/globals.d.ts)
+// Exposed on window so other modules can reach the singleton (e.g.
+// OutputFileBrowser streams/downloads through it); typed in types/globals.d.ts.
 window.logStreamManager = logStreamManager;
