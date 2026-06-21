@@ -84,8 +84,14 @@ def register_basic_routes(app, session_manager):
     def index():
         """Main page."""
         try:
+            from .. import __version__
+
             webpack_scripts = get_webpack_assets()
-            return render_template("index.html", webpack_scripts=webpack_scripts)
+            return render_template(
+                "index.html",
+                webpack_scripts=webpack_scripts,
+                webatm_version=__version__,
+            )
         except Exception as e:
             return f"Error loading page: {str(e)}", 500
 
