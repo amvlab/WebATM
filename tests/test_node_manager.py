@@ -1,5 +1,7 @@
 """Tests for WebATM.proxy.managers.node_manager.NodeManager."""
 
+import time
+
 import pytest
 
 
@@ -54,6 +56,52 @@ class TestServerTracking:
 
     def test_on_server_removed_missing_is_noop(self, proxy):
         proxy.node_mgr._on_server_removed(b"GHOST")  # should not raise
+
+
+class TestNodeAddedConnectionClock:
+    """The first node appearing flips ``was_connected`` *and* restarts the
+    data-flow timeout clock.
+
+    Regression test for a demo-deploy disconnect: under a slow cold-start the
+    node can take ~60s to spawn after ``start_client()``. ``_on_node_added``
+    runs synchronously inside ``bluesky_client.update()`` and wins the race to
+    set ``was_connected = True`` before the network timer can, so the timer's
+    clock reset (guarded on ``not was_connected``) is skipped. If this handler
+    doesn't reset the clock too, the stale ``start_client()`` timestamp is
+    already older than ``connection_timeout`` and the connection is dropped the
+    instant the node shows up.
+    """
+
+    def test_first_node_refreshes_last_successful_update(self, proxy, fake_client):
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = False
+        # Clock as it would look after a slow cold start: further in the past
+        # than connection_timeout allows.
+        proxy.last_successful_update = time.time() - (proxy.connection_timeout + 60)
+
+        before = time.time()
+        proxy.node_mgr._on_node_added(b"\x01\x02\x03\x04\x81")
+
+        assert proxy.was_connected is True
+        # Clock restarted from "now" rather than left at the stale value.
+        assert proxy.last_successful_update >= before
+        # And the connection is no longer past the timeout window.
+        assert time.time() - proxy.last_successful_update <= proxy.connection_timeout
+
+    def test_clock_not_touched_when_already_connected(self, proxy, fake_client):
+        # A second node arriving must not reset the clock — only the
+        # False->True transition does, mirroring the network-timer guard.
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        proxy.tracked_nodes["aabbccdd81"] = {"node_id": b"\xaa\xbb\xcc\xdd\x81"}
+        sentinel = time.time() - 5
+        proxy.last_successful_update = sentinel
+
+        proxy.node_mgr._on_node_added(b"\x01\x02\x03\x04\x81")
+
+        assert proxy.last_successful_update == sentinel
 
 
 class TestNodeRemoval:

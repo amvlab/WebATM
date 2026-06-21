@@ -19,7 +19,7 @@ from flask import Flask, jsonify, request
 from flask_socketio import SocketIO
 
 from .logger import get_logger
-from .proxy import BlueSkyProxy, register_subscribers, set_bluesky_proxy
+from .proxy import BlueSkyProxy, set_bluesky_proxy
 from .server import (
     SessionManager,
     register_basic_routes,
@@ -70,8 +70,12 @@ def create_app():
     bluesky_proxy.socketio = socketio
     set_bluesky_proxy(bluesky_proxy)  # Set it globally for the subscriber callbacks
 
-    # Register subscriber callbacks after client is fully initialized
-    register_subscribers()
+    # NB: subscribers are NOT registered here. The proxy creates its network
+    # client lazily on connect (ZMQ pattern), so at app-creation time
+    # bluesky_client is still None and there is nothing to attach to.
+    # register_subscribers() is therefore called on connect instead -- by the
+    # /api/server/config route (standalone) and by the auto-start hook
+    # (integrated), both right after start_client() builds the client.
 
     # Store proxy reference in app for access in routes
     app.bluesky_proxy = bluesky_proxy

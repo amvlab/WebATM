@@ -1,6 +1,7 @@
 """Node and server management for BlueSky proxy."""
 
 import threading
+import time
 
 from ...bluesky_client import safe_decode, seqid2idx, seqidx2id
 from ...logger import get_logger
@@ -125,6 +126,19 @@ class NodeManager:
                 # Update connection status immediately when nodes are detected
                 if not self.proxy.was_connected and len(self.proxy.tracked_nodes) > 0:
                     self.proxy.was_connected = True
+                    # Start the data-flow timeout clock from "first node
+                    # appeared". Until a node existed no sim/traffic data could
+                    # arrive, so the wait between start_client() and the first
+                    # node spawning must not count against connection_timeout —
+                    # otherwise a slow cold-start (gVisor / capped CPU)
+                    # disconnects the instant the node shows up. The network
+                    # timer has the matching reset, but this signal handler runs
+                    # synchronously inside bluesky_client.update() and flips
+                    # was_connected first, so the timer's reset (guarded on
+                    # `not was_connected`) is skipped — the clock must be reset
+                    # here too or the stale start_client() timestamp triggers an
+                    # immediate timeout.
+                    self.proxy.last_successful_update = time.time()
                     logger.info(" Connection established")
                     # Use connection manager to emit status
                     conn_mgr = ConnectionManager(self.proxy)
