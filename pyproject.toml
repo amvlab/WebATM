@@ -11,7 +11,7 @@ dependencies = [
     "flask>=2.0.0",
     "flask-socketio>=5.0.0",
     "numpy>=1.21.0",
-    "msgpack>=1.0.0",
+    "msgpack>=1.2.1",
     "pyzmq>=22.0.0",
     "requests>=2.25.0",
 ]
