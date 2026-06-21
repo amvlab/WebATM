@@ -116,13 +116,15 @@ Use this if you want to run WebATM directly from source without installing Node.
    This bundle changes rarely (only when tiles, fonts, or navdata roll), so a single download usually carries across many code releases.
 
 4. **Install Python dependencies**
+
+   Dependencies are managed with [uv](https://docs.astral.sh/uv/) from `pyproject.toml` and the pinned `uv.lock`:
    ```bash
-   pip install -r requirements.txt
+   uv sync
    ```
 
 5. **Start the application**
    ```bash
-   script/run_webatm.sh
+   uv run script/run_webatm.sh
    ```
 
 6. **Access the web interface**
@@ -142,8 +144,10 @@ Use this if you want to run WebATM directly from source without installing Node.
    ```
 
 2. **Install Python dependencies**
+
+   Dependencies are managed with [uv](https://docs.astral.sh/uv/) from `pyproject.toml` and the pinned `uv.lock`:
    ```bash
-   pip install -r requirements.txt
+   uv sync
    ```
 
 3. **Build frontend assets**
@@ -153,7 +157,7 @@ Use this if you want to run WebATM directly from source without installing Node.
 
 4. **Start the application**
    ```bash
-   script/run_webatm.sh
+   uv run script/run_webatm.sh
    ```
 
 5. **Access the web interface**
@@ -278,6 +282,18 @@ ruff format .
 ```bash
 cd frontend/
 npm run type-check
+```
+
+### Tests
+
+Python tests are driven by `pytest` and managed through uv. A bare run collects
+both suites (the core `webatm` package and the optional `webatm_integrated`
+package); use the `core`/`integrated` markers to pick a subset:
+
+```bash
+uv run pytest                # everything (core + integrated)
+uv run pytest -m core        # core webatm package only
+uv run pytest -m integrated  # optional webatm_integrated package only
 ```
 
 ## License

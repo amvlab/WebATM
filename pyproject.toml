@@ -16,11 +16,17 @@ dependencies = [
     "requests>=2.25.0",
 ]
 
+# Runtime-only extras (installed in production with `uv sync --extra prod`).
 [project.optional-dependencies]
 prod = [
     "gunicorn>=20.0.0",
     "eventlet>=0.33.0",
 ]
+
+# Development tooling lives in a PEP 735 dependency group so that a bare
+# `uv sync` installs it automatically (great for testing/linting), while it is
+# never published as part of the package or pulled into production images.
+[dependency-groups]
 dev = [
     "ruff>=0.1.0",
     "pytest>=7.0.0",
@@ -32,6 +38,21 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["WebATM*"]
+
+[tool.pytest.ini_options]
+# Single entry point for both suites. Pick a subset with markers:
+#   uv run pytest                # everything (core + integrated)
+#   uv run pytest -m core        # core `webatm` package only
+#   uv run pytest -m integrated  # optional `webatm_integrated` package only
+testpaths = ["tests", "WebATM-integrated/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "core: tests for the core webatm package (tests/)",
+    "integrated: tests for the optional webatm_integrated package (WebATM-integrated/tests/)",
+]
+addopts = "-ra"
 
 [tool.ruff]
 line-length = 88
@@ -52,6 +73,11 @@ ignore = [
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# The production WSGI entry point must call eventlet.monkey_patch() before any
+# other import, so module-level imports legitimately follow executable code.
+"script/wsgi.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["WebATM"]
