@@ -1,0 +1,56 @@
+"""Tests for WebATM.proxy.subscribers.register_subscribers.
+
+A real (but unconnected) BlueSkyClient is used: its ``_subscribe`` short-circuits
+when there is no receive socket, so registration just populates the in-process
+subscriber table without any network I/O.
+"""
+
+from WebATM.bluesky_client import BlueSkyClient
+from WebATM.proxy import BlueSkyProxy, set_bluesky_proxy
+from WebATM.proxy.subscribers import register_subscribers
+
+
+class TestRegisterSubscribers:
+    def test_registers_expected_topics(self):
+        proxy = BlueSkyProxy()
+        proxy.bluesky_client = BlueSkyClient()
+        set_bluesky_proxy(proxy)
+        try:
+            register_subscribers()
+            subs = proxy.bluesky_client.subscriber.subscribers
+            for topic in (
+                "SIMINFO",
+                "ACDATA",
+                "ECHO",
+                "STACK",
+                "STACKCMDS",
+                "POLY",
+                "ROUTEDATA",
+                "STATECHANGE",
+                "RESET",
+                "REQUEST",
+                "PLOT",
+                "SHOWDIALOG",
+                "SIMSETTINGS",
+                "TRAILS",
+                "DEFWPT",
+            ):
+                assert topic in subs
+                assert len(subs[topic]) >= 1
+        finally:
+            set_bluesky_proxy(None)
+
+    def test_no_proxy_is_safe(self):
+        set_bluesky_proxy(None)
+        # Should log an error and return without raising.
+        register_subscribers()
+
+    def test_no_client_is_safe(self):
+        proxy = BlueSkyProxy()
+        proxy.bluesky_client = None
+        set_bluesky_proxy(proxy)
+        try:
+            # Warns about missing client and returns without raising.
+            register_subscribers()
+        finally:
+            set_bluesky_proxy(None)

@@ -39,6 +39,21 @@ dev = [
 where = ["."]
 include = ["WebATM*"]
 
+[tool.pytest.ini_options]
+# Single entry point for both suites. Pick a subset with markers:
+#   uv run pytest                # everything (core + integrated)
+#   uv run pytest -m core        # core `webatm` package only
+#   uv run pytest -m integrated  # optional `webatm_integrated` package only
+testpaths = ["tests", "WebATM-integrated/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "core: tests for the core webatm package (tests/)",
+    "integrated: tests for the optional webatm_integrated package (WebATM-integrated/tests/)",
+]
+addopts = "-ra"
+
 [tool.ruff]
 line-length = 88
 target-version = "py313"
