@@ -9,6 +9,7 @@ import { modalManager } from './ModalManager';
 import { serverManager } from './ServerManager';
 import { logger, LogLevel } from '../utils/Logger';
 import { storage } from '../utils/StorageManager';
+import { themeManager, ThemePreference } from '../utils/ThemeManager';
 import { onDOMReady, setDisabled, setVisible } from '../utils/dom';
 
 /**
@@ -43,6 +44,7 @@ export class SettingsModal {
         logPrefixesCheckbox: HTMLInputElement | null;
         resetLoggingButton: HTMLButtonElement | null;
         developerToggle: HTMLButtonElement | null;
+        themeSelect: HTMLSelectElement | null;
     } = {
             modal: null,
             serverIpInput: null,
@@ -56,7 +58,8 @@ export class SettingsModal {
             logTimestampsCheckbox: null,
             logPrefixesCheckbox: null,
             resetLoggingButton: null,
-            developerToggle: null
+            developerToggle: null,
+            themeSelect: null
         };
 
     constructor() {
@@ -86,8 +89,14 @@ export class SettingsModal {
         this.elements.resetLoggingButton = document.getElementById('reset-logging-btn') as HTMLButtonElement;
         this.elements.developerToggle = document.getElementById('developer-toggle') as HTMLButtonElement;
 
+        // Appearance controls
+        this.elements.themeSelect = document.getElementById('theme-select') as HTMLSelectElement;
+
         // Register with modal manager
         modalManager.registerModal(this.modalId);
+
+        // Reflect the active theme preference and react to changes
+        this.initializeThemeControls();
 
         // Initialize logger controls with current settings
         this.initializeLoggerControls();
@@ -113,6 +122,31 @@ export class SettingsModal {
         if (this.elements.logPrefixesCheckbox) {
             this.elements.logPrefixesCheckbox.checked = logger.getConfig().enableComponentPrefixes;
         }
+    }
+
+    /**
+     * Initialize the theme selector with the current preference and persist /
+     * apply changes through ThemeManager.
+     */
+    private initializeThemeControls(): void {
+        const select = this.elements.themeSelect;
+        if (!select) return;
+
+        select.value = themeManager.getPreference();
+
+        select.addEventListener('change', (e) => {
+            const value = (e.target as HTMLSelectElement).value as ThemePreference;
+            themeManager.setPreference(value);
+            logger.info('SettingsModal', `Theme changed to: ${value}`);
+        });
+
+        // Keep the dropdown in sync if the theme changes elsewhere (e.g. the OS
+        // preference flips while "System" is selected).
+        themeManager.subscribe((_resolved, preference) => {
+            if (select.value !== preference) {
+                select.value = preference;
+            }
+        });
     }
 
     /**

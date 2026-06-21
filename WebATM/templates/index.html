@@ -22,6 +22,23 @@
                     return null;
                 }
             }
+            // Apply the saved colour theme before first paint to avoid a flash
+            // of the wrong theme. 'system' follows the OS preference. Mirrors
+            // ThemeManager (utils/ThemeManager.ts), which takes over at runtime.
+            (function applyTheme() {
+                var pref = read('theme');
+                if (pref !== 'dark' && pref !== 'light' && pref !== 'system') {
+                    pref = 'dark';
+                }
+                var resolved = pref;
+                if (pref === 'system') {
+                    resolved = (window.matchMedia &&
+                        window.matchMedia('(prefers-color-scheme: light)').matches)
+                        ? 'light' : 'dark';
+                }
+                document.documentElement.setAttribute('data-theme', resolved);
+            })();
+
             var root = document.documentElement.style;
             function applyFontSize(key, vars) {
                 var size = read(key);
@@ -629,7 +646,7 @@
                 </div>
                 <div id="output-log-container" style="display: none; flex: 1; overflow: hidden;">
                     <div id="output-file-browser" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
-                        <div id="output-not-configured" style="padding: 12px; color: #ffa500; display: none;">
+                        <div id="output-not-configured" style="padding: 12px; color: var(--accent-warning); display: none;">
                             BlueSky base directory not configured. Configure it in Settings.
                         </div>
                         <div class="output-search-bar">
@@ -721,8 +738,8 @@
                         </small>
                         
                         <div style="margin-top: 8px; padding: 8px; border-radius: 4px; background-color: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3);">
-                            <div style="color: #ffc107; font-size: 11px; font-weight: bold;">⚠️ File Upload Requirements:</div>
-                            <ul style="margin: 4px 0 0 16px; padding: 0; font-size: 11px; color: #cccccc;">
+                            <div style="color: var(--accent-amber); font-size: 11px; font-weight: bold;">⚠️ File Upload Requirements:</div>
+                            <ul style="margin: 4px 0 0 16px; padding: 0; font-size: 11px; color: var(--text-secondary);">
                                 <li>WebATM backend must have file system access to this BlueSky directory</li>
                                 <li>If WebATM and BlueSky run on different machines/containers, file uploads won't work</li>
                                 <li>BlueSky simulation works normally without file upload capability</li>
@@ -731,7 +748,7 @@
                     </div>
 
                     <div id="base-path-status-settings" style="margin-top: 8px; display: none;">
-                        <div style="padding: 8px; border-radius: 4px; background-color: #333;">
+                        <div style="padding: 8px; border-radius: 4px; background-color: var(--bg-control);">
                             <strong>Configured paths:</strong>
                             <div style="margin-top: 4px; font-family: monospace; font-size: 11px;">
                                 <div>📁 Scenarios: <span id="scenario-path-display-settings">-</span></div>
@@ -787,6 +804,25 @@
                     </div>
                 </div>
 
+                <!-- Appearance Section -->
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h4>🎨 Appearance</h4>
+                        <div class="section-description">Configure the look and feel of the interface</div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="theme-select">Theme:</label>
+                        <select id="theme-select">
+                            <option value="dark">Dark</option>
+                            <option value="light">Light</option>
+                            <option value="system">System (follow OS)</option>
+                        </select>
+                        <small class="setting-help">Choose the colour theme for the interface. "System" follows your
+                            operating system's light/dark preference.</small>
+                    </div>
+                </div>
+
                 <!-- License & Attribution Section -->
                 <div class="setting-group license-section">
                     <label>License & Attribution:</label>
@@ -795,10 +831,10 @@
                             <strong>WebATM version {{ webatm_version }}</strong><br>
                             <strong>Copyright © 2025 amvlab</strong><br>
                             Licensed under the <a href="https://www.gnu.org/licenses/agpl-3.0.en.html"
-                                target="_blank" style="color: #4CAF50;">GNU Affero General Public License v3.0 (AGPL-3.0)</a><br><br>
+                                target="_blank" style="color: var(--accent-primary);">GNU Affero General Public License v3.0 (AGPL-3.0)</a><br><br>
                             <strong>Attribution:</strong><br>
                             This software incorporates <a href="https://github.com/TUDelft-CNS-ATM/bluesky"
-                                target="_blank" style="color: #4CAF50;">BlueSky - The Open Air Traffic Simulator</a>
+                                target="_blank" style="color: var(--accent-primary);">BlueSky - The Open Air Traffic Simulator</a>
                             technology developed by TU Delft (Delft University of Technology). We acknowledge and thank
                             TU Delft for their contribution to the aviation simulation community.
                         </div>
@@ -916,7 +952,7 @@
                 <div id="map-drawing-instruction" style="display: none;">
                     <div class="setting-group">
                         <div class="setting-help"
-                            style="background-color: #333; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                            style="background-color: var(--bg-control); padding: 10px; border-radius: 4px; margin: 10px 0;">
                             <strong>Map Drawing Instructions:</strong><br>
                             <em>⚠️ Fill in ALL fields (ID, Type, Altitude, Speed) first!</em><br><br>
                             1. Complete all aircraft details above<br>
@@ -1006,13 +1042,13 @@
                 <div class="confirmation-message">
                     <p><strong>This feature is available in the full version</strong></p>
                     <p>In the full version of WebATM for BlueSky, you can:</p>
-                    <ul style="margin: 10px 0; padding-left: 20px; color: #cccccc;">
+                    <ul style="margin: 10px 0; padding-left: 20px; color: var(--text-secondary);">
                         <li>Use any compatible MapLibre GL style JSON</li>
                         <li>Access MapTiler styles with your own API key</li>
                         <li>Load custom map styles from URLs</li>
                         <li>Save and manage multiple style preferences</li>
                     </ul>
-                    <p style="color: #4CAF50;"><em>This demo version includes the Demo Style for evaluation
+                    <p style="color: var(--accent-primary);"><em>This demo version includes the Demo Style for evaluation
                             purposes.</em></p>
                 </div>
             </div>
@@ -1038,8 +1074,8 @@
                     </div>
                     
                     <div id="base-path-not-configured" class="setting-group">
-                        <div style="padding: 8px; border-radius: 4px; background-color: #333; border: 1px solid #666;">
-                            <p style="margin: 0; color: #ffa500;">
+                        <div style="padding: 8px; border-radius: 4px; background-color: var(--bg-control); border: 1px solid var(--border-strong);">
+                            <p style="margin: 0; color: var(--accent-warning);">
                                 ⚠️ <strong>BlueSky base directory not configured</strong><br>
                                 Please configure the BlueSky base directory in <strong>Settings</strong> before uploading files.
                             </p>
@@ -1047,7 +1083,7 @@
                     </div>
 
                     <div id="base-path-status" style="margin-top: 8px; display: none;">
-                        <div style="padding: 8px; border-radius: 4px; background-color: #333;">
+                        <div style="padding: 8px; border-radius: 4px; background-color: var(--bg-control);">
                             <strong>Configured paths:</strong>
                             <div style="margin-top: 4px; font-family: monospace; font-size: 11px;">
                                 <div>📁 Scenarios: <span id="scenario-path-display">-</span></div>
@@ -1080,13 +1116,13 @@
                         <label for="file-input">Select File:</label>
                         <input type="file" id="file-input" accept=".scn" style="width: 100%; margin-bottom: 5px;">
                         <div id="file-drop-zone" style="
-                            border: 2px dashed #555;
+                            border: 2px dashed var(--border-strong);
                             border-radius: 4px;
                             padding: 20px;
                             text-align: center;
-                            color: #888;
+                            color: var(--text-muted);
                             margin-top: 8px;
-                            background-color: #222;
+                            background-color: var(--bg-deep);
                             transition: all 0.2s;
                             cursor: pointer;
                         ">
@@ -1099,9 +1135,9 @@
                         <button id="upload-file-btn" class="btn-primary" style="width: 100%;" disabled>Upload File</button>
                         <button id="upload-and-run-scenario-btn" class="btn-primary" style="width: 100%; margin-top: 8px; display: none;" disabled>Upload File and run scenario</button>
                         <div id="upload-progress" style="display: none; margin-top: 8px;">
-                            <div style="background-color: #333; border-radius: 4px; padding: 4px;">
+                            <div style="background-color: var(--bg-control); border-radius: 4px; padding: 4px;">
                                 <div id="upload-progress-bar" style="
-                                    background-color: #4CAF50;
+                                    background-color: var(--accent-primary);
                                     height: 20px;
                                     border-radius: 2px;
                                     width: 0%;
@@ -1137,11 +1173,11 @@
                     <div id="file-list" style="
                         max-height: 200px;
                         overflow-y: auto;
-                        border: 1px solid #444;
+                        border: 1px solid var(--border);
                         border-radius: 4px;
-                        background-color: #1a1a1a;
+                        background-color: var(--bg-sunken);
                     ">
-                        <div style="padding: 16px; text-align: center; color: #666;">
+                        <div style="padding: 16px; text-align: center; color: var(--text-disabled);">
                             Configure base path first
                         </div>
                     </div>
@@ -1171,10 +1207,10 @@
                             <code>PLUGIN LOAD PLUGIN_NAME</code>
                         </div>
                         <p>See <a href="https://github.com/TUDelft-CNS-ATM/bluesky/tree/master/bluesky/plugins"
-                                target="_blank" style="color: #4CAF50;">here</a> for the rest of the plugins included.
+                                target="_blank" style="color: var(--accent-primary);">here</a> for the rest of the plugins included.
                         </p>
                         <p>When fully developed, you will be able to:</p>
-                        <ul style="margin: 10px 0; padding-left: 20px; color: #cccccc;">
+                        <ul style="margin: 10px 0; padding-left: 20px; color: var(--text-secondary);">
                             <li>Upload custom Python plugin files (.py)</li>
                             <li>Enable/disable plugins dynamically</li>
                             <li>Configure plugin-specific settings</li>
@@ -1203,12 +1239,12 @@
                         <span class="demo-badge">DEMO MODE</span>
                         <p><strong>This feature is not available in Demo mode</strong></p>
                         <p>In the full version of WebATM for BlueSky, you can:</p>
-                        <ul style="margin: 10px 0; padding-left: 20px; color: #cccccc;">
+                        <ul style="margin: 10px 0; padding-left: 20px; color: var(--text-secondary);">
                             <li>Add multiple simulation nodes for distributed computing</li>
                             <li>Manage node configurations and resources</li>
                             <li>Monitor individual node performance</li>
                         </ul>
-                        <p style="color: #4CAF50;"><em>This demo is limited to a single simulation node.</em></p>
+                        <p style="color: var(--accent-primary);"><em>This demo is limited to a single simulation node.</em></p>
                     </div>
                 </div>
             </div>
