@@ -67,6 +67,15 @@ describe('currentArgIndex', () => {
         expect(currentArgIndex('CRE KL123 A320', 7)).toBe(0);
     });
 
+    it('ignores leading whitespace before the command', () => {
+        expect(currentArgIndex(' CRE KL123', 10)).toBe(0);
+        expect(currentArgIndex('  CRE KL123,A320', 16)).toBe(1);
+    });
+
+    it('returns -1 for whitespace-only input', () => {
+        expect(currentArgIndex('   ', 3)).toBe(-1);
+    });
+
     it('clamps an out-of-range cursor', () => {
         expect(currentArgIndex('CRE KL123', 999)).toBe(0);
     });
