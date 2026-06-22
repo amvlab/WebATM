@@ -1,12 +1,10 @@
 /**
  * Pure helpers for working with cmddict argument signatures.
  *
- * cmddict ships from the backend (node_runner.py) as a flat
- * `{ COMMAND: "arg1,arg2,[arg3]" }` map - no help text. These helpers parse a
- * signature string, locate the cursor's current argument, and score commands
- * for the searchable palette. All functions are DOM-free so they can be reused
- * by the inline hint, the left panel, the modal palette, and (eventually) the
- * client-side validator from TODO #2.
+ * cmddict ships from the backend as a flat `{ COMMAND: "arg1,arg2,[arg3]" }`
+ * map with no help text. These DOM-free helpers parse a signature string,
+ * locate the cursor's current argument, and score commands for the searchable
+ * palette, so the inline hint, panels, and modal palette can all reuse them.
  */
 
 export interface SignatureArg {
@@ -19,15 +17,12 @@ export interface SignatureArg {
 }
 
 /**
- * Map of commands whose user-facing signature differs from the raw cmddict
- * signature because `CommandHandler` rewrites the input before sending it
- * to the backend.
+ * Commands whose user-facing signature differs from the raw cmddict one
+ * because `CommandHandler` rewrites the input before sending it.
  *
- * Today only MCRE qualifies: the user types `MCRE n[,type[,alt[,spd]]]` and
- * `CommandHandler.handleMcreCommand` injects the four bounding-box
- * coordinates (south, west, north, east) before the optional tail. Surfacing
- * the wire signature in the hint would mislead users into typing lat/lon
- * themselves.
+ * Only MCRE qualifies today: the user types `MCRE n,[type,alt,spd]` and
+ * `CommandHandler.handleMcreCommand` injects the bounding-box coordinates,
+ * so surfacing the wire signature would mislead users into typing lat/lon.
  */
 const DISPLAY_SIGNATURE_OVERRIDES: Record<string, string> = {
     MCRE: 'n,[type,alt,spd]',
@@ -91,9 +86,15 @@ export function currentArgIndex(input: string, cursor: number): number {
     const clamped = Math.max(0, Math.min(cursor, input.length));
     const upTo = input.substring(0, clamped);
 
-    // Find the end of the command token (first whitespace).
-    const cmdEnd = upTo.search(/\s/);
-    if (cmdEnd === -1) return -1; // still typing the command
+    // Find the command token's end: skip any leading whitespace first (like
+    // commandFromInput does), then take the next whitespace. Without the skip,
+    // a leading space would be mistaken for the command end and shift every
+    // arg index by one.
+    const cmdStart = upTo.search(/\S/);
+    if (cmdStart === -1) return -1; // nothing but whitespace typed yet
+    const sepRel = upTo.slice(cmdStart).search(/\s/);
+    if (sepRel === -1) return -1; // still typing the command
+    const cmdEnd = cmdStart + sepRel;
 
     // Count separator runs after the command token. Each run advances the
     // arg index by one. Treat both whitespace and comma as separators so
