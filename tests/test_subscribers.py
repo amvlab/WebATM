@@ -7,7 +7,7 @@ subscriber table without any network I/O.
 
 from WebATM.bluesky_client import BlueSkyClient
 from WebATM.proxy import BlueSkyProxy, set_bluesky_proxy
-from WebATM.proxy.subscribers import register_subscribers
+from WebATM.proxy.subscribers import SUBSCRIPTIONS, register_subscribers
 
 
 class TestRegisterSubscribers:
@@ -54,3 +54,37 @@ class TestRegisterSubscribers:
             register_subscribers()
         finally:
             set_bluesky_proxy(None)
+
+
+class TestSubscriptionTable:
+    """Guard the data-driven SUBSCRIPTIONS table that registration iterates."""
+
+    EXPECTED_TOPICS = {
+        "SIMINFO",
+        "STATECHANGE",
+        "ACDATA",
+        "ROUTEDATA",
+        "ECHO",
+        "STACKCMDS",
+        "STACK",
+        "POLY",
+        "RESET",
+        "REQUEST",
+        "PLOT",
+        "SHOWDIALOG",
+        "SIMSETTINGS",
+        "TRAILS",
+        "DEFWPT",
+    }
+
+    def test_table_covers_expected_topics_without_duplicates(self):
+        topics = [topic for topic, _, _ in SUBSCRIPTIONS]
+        assert set(topics) == self.EXPECTED_TOPICS
+        assert len(topics) == len(set(topics))
+
+    def test_actonly_is_limited_to_active_node_topics(self):
+        actonly_topics = {topic for topic, _, actonly in SUBSCRIPTIONS if actonly}
+        assert actonly_topics == {"ACDATA", "ROUTEDATA"}
+
+    def test_callbacks_are_callable(self):
+        assert all(callable(callback) for _, callback, _ in SUBSCRIPTIONS)
