@@ -21,6 +21,26 @@ from .handlers import (
 
 logger = get_logger()
 
+# (topic, callback, actonly). actonly topics only deliver data for the
+# active node and are re-subscribed when the active node changes.
+SUBSCRIPTIONS = [
+    ("SIMINFO", on_siminfo_received, False),
+    ("STATECHANGE", on_statechange_received, False),
+    ("ACDATA", on_acdata_received, True),
+    ("ROUTEDATA", on_routedata_received, True),
+    ("ECHO", echo, False),
+    ("STACKCMDS", on_stackcmds_received, False),
+    ("STACK", on_stack_received, False),
+    ("POLY", on_poly_received, False),  # handles both polygons and polylines
+    ("RESET", on_reset_received, False),
+    ("REQUEST", on_request_received, False),
+    ("PLOT", on_plot_received, False),
+    ("SHOWDIALOG", on_showdialog_received, False),
+    ("SIMSETTINGS", on_simsettings_received, False),
+    ("TRAILS", on_trails_received, False),
+    ("DEFWPT", on_defwpt_received, False),
+]
+
 
 def get_bluesky_proxy():
     """Get the current BlueSky proxy instance."""
@@ -44,80 +64,9 @@ def register_subscribers():
 
     logger.debug("Registering subscriber callbacks with standalone client...")
     try:
-        # Register callbacks directly with standalone proxy
-        logger.debug("Registering SIMINFO subscriber...")
-        proxy.bluesky_client.subscribe("SIMINFO", on_siminfo_received)
-        logger.debug(
-            f"SIMINFO subscribers: {len(proxy.bluesky_client.subscriber.subscribers['SIMINFO'])}"
-        )
-
-        logger.debug("Registering STATECHANGE subscriber...")
-        proxy.bluesky_client.subscribe("STATECHANGE", on_statechange_received)
-        logger.debug(
-            f"STATECHANGE subscribers: {len(proxy.bluesky_client.subscriber.subscribers['STATECHANGE'])}"
-        )
-
-        logger.debug("Registering ACDATA subscriber with actonly=True...")
-        proxy.bluesky_client.subscribe("ACDATA", on_acdata_received, actonly=True)
-        logger.debug(
-            f"ACDATA subscribers: {len(proxy.bluesky_client.subscriber.subscribers['ACDATA'])}"
-        )
-
-        logger.debug("Registering ROUTEDATA subscriber...")
-        proxy.bluesky_client.subscribe("ROUTEDATA", on_routedata_received, actonly=True)
-        logger.debug(
-            f"ROUTEDATA subscribers: {len(proxy.bluesky_client.subscriber.subscribers['ROUTEDATA'])}"
-        )
-
-        logger.debug("Registering echo subscriber...")
-        proxy.bluesky_client.subscribe("ECHO", echo)
-        logger.debug(
-            f"ECHO subscribers: {len(proxy.bluesky_client.subscriber.subscribers['ECHO'])}"
-        )
-
-        logger.debug("Registering STACKCMDS subscriber...")
-        proxy.bluesky_client.subscribe("STACKCMDS", on_stackcmds_received)
-        logger.debug(
-            f"STACKCMDS subscribers: {len(proxy.bluesky_client.subscriber.subscribers['STACKCMDS'])}"
-        )
-
-        logger.debug(
-            "Registering STACK subscriber (to detect incoming stack commands)..."
-        )
-        proxy.bluesky_client.subscribe("STACK", on_stack_received)
-        logger.debug(
-            f"STACK subscribers: {len(proxy.bluesky_client.subscriber.subscribers['STACK'])}"
-        )
-
-        logger.debug(
-            "Registering POLY subscriber (handles both polygons and polylines)..."
-        )
-        proxy.bluesky_client.subscribe("POLY", on_poly_received)
-        logger.debug(
-            f"POLY subscribers: {len(proxy.bluesky_client.subscriber.subscribers['POLY'])}"
-        )
-
-        # Register new topic subscribers
-        logger.debug("Registering RESET subscriber...")
-        proxy.bluesky_client.subscribe("RESET", on_reset_received)
-
-        logger.debug("Registering REQUEST subscriber...")
-        proxy.bluesky_client.subscribe("REQUEST", on_request_received)
-
-        logger.debug("Registering PLOT subscriber...")
-        proxy.bluesky_client.subscribe("PLOT", on_plot_received)
-
-        logger.debug("Registering SHOWDIALOG subscriber...")
-        proxy.bluesky_client.subscribe("SHOWDIALOG", on_showdialog_received)
-
-        logger.debug("Registering SIMSETTINGS subscriber...")
-        proxy.bluesky_client.subscribe("SIMSETTINGS", on_simsettings_received)
-
-        logger.debug("Registering TRAILS subscriber...")
-        proxy.bluesky_client.subscribe("TRAILS", on_trails_received)
-
-        logger.debug("Registering DEFWPT subscriber...")
-        proxy.bluesky_client.subscribe("DEFWPT", on_defwpt_received)
+        for topic, callback, actonly in SUBSCRIPTIONS:
+            proxy.bluesky_client.subscribe(topic, callback, actonly=actonly)
+            logger.debug(f"Registered {topic} subscriber (actonly={actonly})")
 
         logger.info("All subscribers registered successfully with standalone client")
     except Exception as e:
