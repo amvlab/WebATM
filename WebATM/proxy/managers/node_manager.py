@@ -92,9 +92,6 @@ class NodeManager:
     def _on_node_added(self, node_id):
         """Callback when a new node is discovered."""
         try:
-            # Import connection manager to emit status
-            from .connection_manager import ConnectionManager
-
             # Convert binary node_id to hex string for consistency with SIMINFO
             node_id_str = node_id.hex() if isinstance(node_id, bytes) else str(node_id)
 
@@ -140,9 +137,7 @@ class NodeManager:
                     # immediate timeout.
                     self.proxy.last_successful_update = time.time()
                     logger.info(" Connection established")
-                    # Use connection manager to emit status
-                    conn_mgr = ConnectionManager(self.proxy)
-                    conn_mgr._emit_connection_status(True)
+                    self.proxy.connection_mgr._emit_connection_status(True)
 
                 # The standalone proxy auto-selects the first node, so we don't need to do it manually here
                 # Emit updated node list to connected clients
@@ -191,11 +186,9 @@ class NodeManager:
             and self.proxy.running
         ):
             logger.info("Server shutdown detected")
-            # Import connection manager to handle disconnection
-            from .connection_manager import ConnectionManager
-
-            conn_mgr = ConnectionManager(self.proxy)
-            conn_mgr._handle_disconnection("All nodes removed (server shutdown)")
+            self.proxy.connection_mgr._handle_disconnection(
+                "All nodes removed (server shutdown)"
+            )
 
     def _on_server_removed(self, server_id):
         """Callback when a server is removed."""
