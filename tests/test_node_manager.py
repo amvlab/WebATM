@@ -104,6 +104,40 @@ class TestNodeAddedConnectionClock:
         assert proxy.last_successful_update == sentinel
 
 
+class TestUsesPersistentManagers:
+    """The node manager must reuse the proxy's persistent ``connection_mgr``
+    rather than constructing throwaway instances, so monkeypatching it takes
+    effect and no redundant objects are created."""
+
+    def test_first_node_emits_via_proxy_connection_mgr(
+        self, proxy, fake_client, monkeypatch
+    ):
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = False
+        statuses = []
+        monkeypatch.setattr(
+            proxy.connection_mgr,
+            "_emit_connection_status",
+            lambda connected: statuses.append(connected),
+        )
+        proxy.node_mgr._on_node_added(b"\x01\x02\x03\x04\x81")
+        assert statuses == [True]
+
+    def test_check_node_shutdown_uses_proxy_connection_mgr(self, proxy, monkeypatch):
+        proxy.running = True
+        proxy.was_connected = True
+        proxy.tracked_nodes.clear()
+        reasons = []
+        monkeypatch.setattr(
+            proxy.connection_mgr,
+            "_handle_disconnection",
+            lambda reason: reasons.append(reason),
+        )
+        proxy.node_mgr._check_node_shutdown()
+        assert reasons == ["All nodes removed (server shutdown)"]
+
+
 class TestNodeRemoval:
     def test_on_node_removed_deletes_tracked_node(self, proxy):
         node_bytes = b"\x01\x02\x03\x04\x81"

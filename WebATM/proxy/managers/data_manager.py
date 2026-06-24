@@ -154,11 +154,7 @@ class DataManager:
         # Emit updated node info to show disconnection
         if self.proxy.socketio and self.proxy.connected_clients > 0:
             try:
-                # Local import to avoid circular dependency
-                from .node_manager import NodeManager
-
-                node_mgr = NodeManager(self.proxy)
-                node_mgr._emit_node_info()
+                self.proxy.node_mgr._emit_node_info()
             except Exception:
                 pass
 
@@ -171,10 +167,7 @@ class DataManager:
 
     def get_current_data(self) -> dict[str, Any]:
         """Get current simulation data for initial page load."""
-        from .node_manager import NodeManager
-
-        node_mgr = NodeManager(self.proxy)
-        active_node_id = node_mgr._get_safe_active_node()
+        active_node_id = self.proxy.node_mgr._get_safe_active_node()
 
         poly_data = {}
         polyline_data = {}

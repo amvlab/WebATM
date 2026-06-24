@@ -45,9 +45,7 @@ class ConnectionManager:
             return
 
         try:
-            from .node_manager import NodeManager
-
-            node_mgr = NodeManager(self.proxy)
+            node_mgr = self.proxy.node_mgr
 
             logger.debug("Connecting BlueSky client signals...")
 
@@ -154,10 +152,7 @@ class ConnectionManager:
             self._start_network_timer()
 
             # Start backup data emission timer
-            from .data_manager import DataManager
-
-            data_mgr = DataManager(self.proxy)
-            data_mgr.start_backup_timer()
+            self.proxy.data_mgr.start_backup_timer()
 
             logger.debug(
                 f"Node detection started (timeout: {self.proxy.connection_timeout}s)"
@@ -298,16 +293,9 @@ class ConnectionManager:
         # Clear all screen data and emit updates to show disconnected state
         if self.proxy.socketio and self.proxy.connected_clients > 0:
             try:
-                # Import data manager to emit cleared data
-                from .data_manager import DataManager
-                from .node_manager import NodeManager
-
-                data_mgr = DataManager(self.proxy)
-                node_mgr = NodeManager(self.proxy)
-
                 # Emit cleared data to remove all aircraft and simulation info from screen
-                data_mgr._emit_cleared_data()
-                node_mgr._emit_node_info()
+                self.proxy.data_mgr._emit_cleared_data()
+                self.proxy.node_mgr._emit_node_info()
                 logger.debug(
                     f"Sent disconnection updates to {self.proxy.connected_clients} web clients"
                 )
@@ -408,10 +396,7 @@ class ConnectionManager:
         self._close_bluesky_client()
 
         # Clear remaining state
-        from .data_manager import DataManager
-
-        data_mgr = DataManager(self.proxy)
-        data_mgr._clear_state(context)
+        self.proxy.data_mgr._clear_state(context)
 
     def _cancel_timers(self):
         """Cancel all timers with proper cleanup."""
@@ -469,10 +454,7 @@ class ConnectionManager:
         time.sleep(0.2)
 
         # Clear state and prepare for fresh connection
-        from .data_manager import DataManager
-
-        data_mgr = DataManager(self.proxy)
-        data_mgr._clear_state()
+        self.proxy.data_mgr._clear_state()
 
         # Following ZMQ pattern: create fresh context and sockets
         try:

@@ -103,3 +103,22 @@ class TestGetCurrentData:
         data = proxy.data_mgr.get_current_data()
         assert data["poly_data"] == {}
         assert data["polyline_data"] == {}
+
+
+class TestUsesPersistentManagers:
+    """The data manager must reuse the proxy's persistent manager instances
+    rather than constructing throwaway ones, so monkeypatching them takes
+    effect and no redundant objects are created."""
+
+    def test_clear_state_uses_proxy_node_mgr(self, proxy, monkeypatch):
+        called = []
+        monkeypatch.setattr(proxy.node_mgr, "_emit_node_info", lambda: called.append(1))
+        proxy.data_mgr._clear_state()
+        assert called == [1]
+
+    def test_get_current_data_uses_proxy_node_mgr(self, proxy, monkeypatch):
+        monkeypatch.setattr(
+            proxy.node_mgr, "_get_safe_active_node", lambda: "deadbeef81"
+        )
+        data = proxy.data_mgr.get_current_data()
+        assert data["node_info"]["active_node"] == "deadbeef81"
