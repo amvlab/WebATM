@@ -52,6 +52,11 @@ export class RouteDrawingManager extends BaseDrawingManager {
     // the last existing waypoint of an aircraft that already has a route.
     private leaderAnchor: DrawingPoint | null = null;
 
+    // Human-readable source of the leader anchor, snapshotted alongside
+    // leaderAnchor at draw start so the banner can't drift if route data
+    // changes mid-draw.
+    private leaderAnchorLabel = 'aircraft';
+
     // Units snapshotted at draw start so the constraints modal is stable even
     // if the user toggles display units mid-flow.
     private capturedAltUnit: AltitudeUnit = 'ft';
@@ -212,9 +217,12 @@ export class RouteDrawingManager extends BaseDrawingManager {
         this.drawingMode = true;
         this.routePoints = [];
 
-        // Resolve the leader anchor: last existing waypoint if the aircraft
-        // already has a route, otherwise the aircraft's current position.
-        this.leaderAnchor = this.resolveLeaderAnchor(selected);
+        // Resolve the leader anchor (and its label) once: last existing
+        // waypoint if the aircraft already has a route, otherwise the
+        // aircraft's current position.
+        const resolved = this.resolveLeaderAnchor(selected);
+        this.leaderAnchor = resolved.anchor;
+        this.leaderAnchorLabel = resolved.label;
 
         const drawBtn = document.getElementById('draw-route-btn');
         if (drawBtn) {
@@ -222,24 +230,25 @@ export class RouteDrawingManager extends BaseDrawingManager {
             drawBtn.classList.add('active');
         }
 
-        const anchorLabel = this.leaderAnchorLabel();
         this.showDrawingBanner(
-            `Drawing route for ${this.targetAircraftId} (leader from ${anchorLabel}) - Click to add waypoints, right-click or Enter to finish, Esc to cancel`
+            `Drawing route for ${this.targetAircraftId} (leader from ${this.leaderAnchorLabel}) - Click to add waypoints, right-click or Enter to finish, Esc to cancel`
         );
         this.enableMapDrawing();
         this.preview.updateDrawing(this.routePoints, this.leaderAnchor);
 
         logger.info(
             'RouteDrawingManager',
-            `Started drawing route for ${this.targetAircraftId}; leader anchor = ${anchorLabel}`
+            `Started drawing route for ${this.targetAircraftId}; leader anchor = ${this.leaderAnchorLabel}`
         );
     }
 
     /**
-     * Resolve the leader-line anchor: last existing waypoint if the aircraft
-     * already has a route, else the aircraft's current position.
+     * Resolve the leader-line anchor and its human-readable source label in
+     * one place: last existing waypoint if the aircraft already has a route,
+     * else the aircraft's current position (label stays 'aircraft' even when
+     * no position is available, so the banner reads sensibly).
      */
-    private resolveLeaderAnchor(aircraftId: string): DrawingPoint | null {
+    private resolveLeaderAnchor(aircraftId: string): { anchor: DrawingPoint | null; label: string } {
         const route = this.app.getRouteData();
         if (
             route &&
@@ -250,25 +259,18 @@ export class RouteDrawingManager extends BaseDrawingManager {
             route.wplat.length === route.wplon.length
         ) {
             const lastIdx = route.wplat.length - 1;
-            return { lat: route.wplat[lastIdx], lng: route.wplon[lastIdx] };
+            return {
+                anchor: { lat: route.wplat[lastIdx], lng: route.wplon[lastIdx] },
+                label: 'last existing waypoint',
+            };
         }
 
         const ac = this.stateManager.getAircraftById(aircraftId);
         if (ac) {
-            return { lat: ac.lat, lng: ac.lon };
+            return { anchor: { lat: ac.lat, lng: ac.lon }, label: 'aircraft' };
         }
 
-        return null;
-    }
-
-    private leaderAnchorLabel(): string {
-        const route = this.app.getRouteData();
-        const hasExistingRoute =
-            route &&
-            route.acid === this.targetAircraftId &&
-            route.wplat &&
-            route.wplat.length > 0;
-        return hasExistingRoute ? 'last existing waypoint' : 'aircraft';
+        return { anchor: null, label: 'aircraft' };
     }
 
     /**
@@ -280,6 +282,7 @@ export class RouteDrawingManager extends BaseDrawingManager {
         this.routePoints = [];
         this.targetAircraftId = null;
         this.leaderAnchor = null;
+        this.leaderAnchorLabel = 'aircraft';
 
         const drawBtn = document.getElementById('draw-route-btn');
         if (drawBtn) {
@@ -315,9 +318,8 @@ export class RouteDrawingManager extends BaseDrawingManager {
     protected onPointAdded(point: DrawingPoint): void {
         this.routePoints.push(point);
 
-        const anchorLabel = this.leaderAnchorLabel();
         this.showDrawingBanner(
-            `Drawing route for ${this.targetAircraftId} (leader from ${anchorLabel}) - ${this.routePoints.length} waypoint(s) (right-click or Enter to finish, Esc to cancel)`
+            `Drawing route for ${this.targetAircraftId} (leader from ${this.leaderAnchorLabel}) - ${this.routePoints.length} waypoint(s) (right-click or Enter to finish, Esc to cancel)`
         );
         this.preview.updateDrawing(this.routePoints, this.leaderAnchor);
 
