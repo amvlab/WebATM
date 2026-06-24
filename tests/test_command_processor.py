@@ -36,6 +36,34 @@ class TestSendCommand:
         assert fake_socketio.count("echo") == 1
 
 
+class TestResolveTarget:
+    def test_returns_explicit_target_id(self, proxy, fake_client):
+        proxy.bluesky_client = fake_client
+        assert proxy.command_proc._resolve_target(b"TARGET") == b"TARGET"
+
+    def test_returns_active_node_when_set(self, proxy, fake_client):
+        fake_client.act_id = b"NODE\x81"
+        proxy.bluesky_client = fake_client
+        assert proxy.command_proc._resolve_target() == b"NODE\x81"
+
+    def test_falls_back_to_server_id(self, proxy, fake_client):
+        fake_client.act_id = None
+        proxy.bluesky_client = fake_client
+        assert proxy.command_proc._resolve_target() == fake_client.server_id
+
+
+class TestProcessStackCommands:
+    def test_help_echo_uses_ok_flags(self, proxy, fake_client, fake_socketio):
+        proxy.bluesky_client = fake_client
+        proxy.command_proc.send_command("HELP")
+        assert fake_socketio.last("echo")["flags"] == 0
+
+    def test_blank_command_is_skipped(self, proxy, fake_client):
+        proxy.bluesky_client = fake_client
+        proxy.command_proc.send_command("   ")
+        assert fake_client.sent == []
+
+
 class TestForward:
     def test_no_cmdlines_is_noop(self, proxy, fake_client):
         proxy.bluesky_client = fake_client
