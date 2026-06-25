@@ -15,8 +15,9 @@ import logging
 import os
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from flask_socketio import SocketIO
+from werkzeug.exceptions import HTTPException
 
 from .logger import get_logger
 from .proxy import BlueSkyProxy, set_bluesky_proxy
@@ -80,35 +81,14 @@ def create_app():
     # Store proxy reference in app for access in routes
     app.bluesky_proxy = bluesky_proxy
 
-    # === Request Middleware ===
-    @app.before_request
-    def filter_requests():
-        """Filter requests to skip certain endpoints."""
-        # Skip processing for health, status endpoints and static files
-        if request.endpoint in [
-            "health_check",
-            "status_check",
-        ] or request.path.startswith("/static/"):
-            return
-
-        # Skip for API endpoints that don't create new sessions (existing session operations)
-        if request.endpoint in [
-            "get_data",
-            "send_command",
-            "get_server_config",
-            "update_server_config",
-            "disconnect_server",
-        ]:
-            return
-
     # === Error Handlers ===
     @app.errorhandler(Exception)
     def handle_exception(e):
-        """Handle uncaught exceptions."""
-        try:
-            return jsonify({"error": "Internal server error"}), 500
-        except Exception:
-            return "Internal server error", 500
+        """Return 500 for unexpected errors, but let HTTP errors keep their
+        status (404, 405, ...) instead of masking them all as 500."""
+        if isinstance(e, HTTPException):
+            return e
+        return jsonify({"error": "Internal server error"}), 500
 
     # === Register Routes and Handlers ===
 
