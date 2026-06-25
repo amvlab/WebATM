@@ -195,6 +195,19 @@ class TestConfigureBasePath:
         assert (tmp_path / "plugins").is_dir()
 
 
+class TestErrorHandling:
+    def test_unknown_route_returns_404(self, client):
+        # The catch-all exception handler must not mask routine HTTP errors:
+        # an unmatched route stays a 404, not a 500.
+        resp = client.get("/no/such/route/xyz")
+        assert resp.status_code == 404
+
+    def test_wrong_method_returns_405(self, client):
+        # /health is GET-only; POSTing it is a 405, not a 500.
+        resp = client.post("/health")
+        assert resp.status_code == 405
+
+
 class TestDisconnect:
     def test_disconnect_when_not_running(self, client):
         resp = client.post("/api/server/disconnect")
