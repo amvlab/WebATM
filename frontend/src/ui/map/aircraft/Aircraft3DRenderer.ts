@@ -43,9 +43,6 @@ export class Aircraft3DRenderer implements IEntityRenderer<AircraftData> {
         }
     }
 
-    /**
-     * Initialize renderer with map
-     */
     initialize(map: MapLibreMap): void {
         this.map = map;
 
@@ -72,9 +69,6 @@ export class Aircraft3DRenderer implements IEntityRenderer<AircraftData> {
         }
     }
 
-    /**
-     * Helper method to safely add layer to map
-     */
     private addLayerToMap(map: MapLibreMap): void {
         try {
             // Remove any existing layer with the same ID first
@@ -90,51 +84,34 @@ export class Aircraft3DRenderer implements IEntityRenderer<AircraftData> {
         }
     }
 
-    /**
-     * Update aircraft with new data
-     */
     updateEntities(entities: Map<string, AircraftData>): void {
-        // Extract batch aircraft data
         const aircraftData = entities.get('batch');
         if (aircraftData) {
             this.customLayer.updateAircraft(aircraftData);
         }
     }
 
-    /**
-     * Set the scale factor for all aircraft models
-     */
     setScaleFactor(scaleFactor: number): void {
         this.customLayer.setScaleFactor(scaleFactor);
     }
 
-    /**
-     * Get the current scale factor
-     */
     getScaleFactor(): number {
         return this.customLayer.getScaleFactor();
     }
 
-    /**
-     * Update display options
-     */
     updateDisplayOptions(options: DisplayOptions): void {
         const oldModel = this.displayOptions.selectedAircraftModel;
         this.displayOptions = options;
         this.customLayer.updateDisplayOptions(options);
 
-        // Check if aircraft model changed
+        // Reload the model only when the selected aircraft model actually changed.
         const newModel = options.selectedAircraftModel;
         if (oldModel !== newModel) {
             this.customLayer.updateModelPath();
-            // Reload model if scene is ready
             this.customLayer.reloadAircraftModel();
         }
     }
 
-    /**
-     * Handle map style changes
-     */
     onStyleChange(): void {
         if (!this.map) return;
 
@@ -178,9 +155,6 @@ export class Aircraft3DRenderer implements IEntityRenderer<AircraftData> {
         }
     }
 
-    /**
-     * Cleanup resources
-     */
     destroy(): void {
         if (this.unsubscribeOverrides) {
             this.unsubscribeOverrides();
@@ -209,9 +183,6 @@ export class Aircraft3DRenderer implements IEntityRenderer<AircraftData> {
         this.map = null;
     }
 
-    /**
-     * Get renderer type
-     */
     getType(): '3d' {
         return '3d';
     }

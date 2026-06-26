@@ -491,21 +491,6 @@ export class MapOverlay {
         const savedPitch = map.getPitch();
         const savedBearing = map.getBearing();
 
-        const snapshot = (tag: string) => {
-            const canvas = map.getCanvas();
-            const container = map.getContainer();
-            logger.info(
-                '3D-DIAG',
-                `[${tag}] canvas=${canvas.width}x${canvas.height} ` +
-                    `style=${canvas.style.width}x${canvas.style.height} ` +
-                    `container=${container.clientWidth}x${container.clientHeight} ` +
-                    `dpr=${window.devicePixelRatio} ` +
-                    `isStyleLoaded=${map.isStyleLoaded()}`
-            );
-        };
-
-        snapshot('enable3DOverlay:start');
-
         // Create 3D renderer
         this.aircraft3DRenderer = await AircraftRendererFactory.create(
             displayOptions,
@@ -513,12 +498,8 @@ export class MapOverlay {
             true // request 3D
         );
 
-        snapshot('enable3DOverlay:after-factory-create');
-
         this.aircraft3DRenderer.initialize(map);
         this.is3DOverlayActive = true;
-
-        snapshot('enable3DOverlay:after-aircraft3D-initialize');
 
         // Also create and initialize the 3D route renderer so the selected
         // aircraft's route is rendered at altitude alongside the aircraft.
@@ -536,22 +517,17 @@ export class MapOverlay {
             this.seedAircraftStateFor3DRoute();
         }
 
-        snapshot('enable3DOverlay:after-route3D-initialize');
-
         // Restore view state after map settles from adding 3D layer
         // Three.js WebGLRenderer initialization disrupts MapLibre's viewport/projection.
         // Using 'idle' event ensures the map has fully settled before we restore.
         map.once('idle', () => {
-            snapshot('idle-handler:before-jumpTo');
             map.jumpTo({
                 center: savedCenter,
                 zoom: savedZoom,
                 pitch: savedPitch,
                 bearing: savedBearing
             });
-            snapshot('idle-handler:after-jumpTo-before-resize');
             this.mapDisplay.resize();
-            snapshot('idle-handler:after-resize');
         });
 
         // Safety net: the 3D custom layer keeps the map in a continuous
@@ -561,14 +537,8 @@ export class MapOverlay {
         // map.resize() is idempotent, so this extra call is harmless when
         // 'idle' fired at the right time.
         requestAnimationFrame(() => {
-            snapshot('rAF-safety-net:before-resize');
             this.mapDisplay.resize();
-            snapshot('rAF-safety-net:after-resize');
         });
-
-        // Extra late snapshot so we can see whether the canvas ends up
-        // matching the container, or stays out of sync.
-        setTimeout(() => snapshot('late-500ms'), 500);
 
         // Sync with current aircraft data if available
         const currentAircraftData = this.stateManager.getState().aircraftData;
