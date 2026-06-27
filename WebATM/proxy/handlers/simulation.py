@@ -4,6 +4,7 @@ import time
 
 from ...logger import get_logger
 from ...utils import make_json_serializable, tim2txt
+from ..perf import data_path_perf
 from ._base import get_bluesky_proxy
 
 logger = get_logger()
@@ -97,7 +98,14 @@ def on_siminfo_received(
 
 
 def on_acdata_received(data):
-    """Handle aircraft data updates."""
+    """Handle aircraft data updates.
+
+    Hot path: the network timer delivers ACDATA at up to 50 Hz, but it is only
+    emitted to browsers at ``acdata_interval`` (10 Hz) and only for the active
+    node. ``make_json_serializable`` is the dominant per-frame cost, so it is
+    deferred until after the active-node filter and the emit throttle decide the
+    frame is actually sent. Set WEBATM_PERF=1 (WebATM.proxy.perf) to measure it.
+    """
     try:
         proxy = get_bluesky_proxy()
         if not proxy:
@@ -109,7 +117,10 @@ def on_acdata_received(data):
             logger.debug("on_acdata_received ignored - reconnection not allowed")
             return
 
-        # Check context action like BlueSky web client does
+        # Check context action like BlueSky web client does, and resolve which
+        # node sent this frame (set on the shared context just before this
+        # synchronous dispatch) for the active-node filter below.
+        sender_id_str = None
         if proxy.bluesky_client and hasattr(proxy.bluesky_client, "context"):
             ctx = proxy.bluesky_client.context
             if ctx.action == ctx.Reset or ctx.action == ctx.ActChange:
@@ -144,28 +155,57 @@ def on_acdata_received(data):
                         logger.error(f"Error emitting cleared ACDATA: {e}")
                 return
 
-        # Mark successful data reception
+            sender_id = getattr(ctx, "sender_id", None)
+            if isinstance(sender_id, bytes):
+                sender_id_str = sender_id.hex()
+            elif sender_id is not None:
+                sender_id_str = str(sender_id)
+
+        # Any ACDATA from any node proves the link to BlueSky is alive: update
+        # liveness before filtering so a background node's traffic still counts.
         proxy.last_successful_update = time.time()
+        data_path_perf.record_received()
 
-        # Convert to JSON-serializable format
-        serializable_data = make_json_serializable(data)
-        proxy.traffic_data = serializable_data
-
-        # Throttle aircraft data emissions
-        current_time = time.time()
+        # Only the active node's traffic is displayed. Skip serializing frames
+        # from background nodes nobody is viewing (mirrors the SIMINFO filter).
+        # When the active node can't be resolved yet (early connection or a
+        # single-node sim), accept any sender so the map still populates.
+        active_node = proxy._get_safe_active_node()
         if (
+            active_node is not None
+            and sender_id_str is not None
+            and sender_id_str != active_node
+        ):
+            data_path_perf.record_filtered()
+            return
+
+        # Throttle BEFORE serializing. Emitting (and therefore serializing) only
+        # at acdata_interval removes the wasted per-frame work under heavy node
+        # load. traffic_data refreshes at the emit cadence, which is what the
+        # initial-data snapshot and the 0.5 s backup emit consume.
+        current_time = time.time()
+        if not (
             proxy.socketio
             and proxy.connected_clients > 0
             and (current_time - proxy.last_acdata_emit) >= proxy.acdata_interval
         ):
-            try:
-                proxy.socketio.emit("acdata", serializable_data)
-                proxy.last_acdata_emit = current_time
-            except Exception as e:
-                logger.error(f"Error emitting ACDATA: {e}")
-                import traceback
+            return
 
-                traceback.print_exc()
+        t0 = time.perf_counter()
+        serializable_data = make_json_serializable(data)
+        data_path_perf.record_serialize(time.perf_counter() - t0)
+        proxy.traffic_data = serializable_data
+
+        try:
+            t1 = time.perf_counter()
+            proxy.socketio.emit("acdata", serializable_data)
+            proxy.last_acdata_emit = current_time
+            data_path_perf.record_emit(time.perf_counter() - t1)
+        except Exception as e:
+            logger.error(f"Error emitting ACDATA: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     except Exception as e:
         logger.error(f"ACDATA Handler: Detailed error in on_acdata_received: {e}")
@@ -175,6 +215,8 @@ def on_acdata_received(data):
         import traceback
 
         traceback.print_exc()
+    finally:
+        data_path_perf.maybe_log()
 
 
 def on_statechange_received(data, sender_id=None):
