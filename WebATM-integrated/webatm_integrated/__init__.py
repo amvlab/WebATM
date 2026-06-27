@@ -74,13 +74,11 @@ def register(app, socketio, *, session_manager=None, bluesky_proxy=None):
     # Reap the whole bluesky process group if the worker process exits.
     atexit.register(manager.kill)
 
-    # On first boot only, auto-start the bundled BlueSky server and connect the
-    # WebATM proxy to it (BlueSky lives in this container, so its host is fixed)
-    # so the user lands on a live, connected map without opening Settings or
-    # clicking Start. claim_first_boot() guards it to once per boot so a replaced
-    # gunicorn worker re-running register() never resurrects a manually-stopped
-    # server. Backgrounded so app creation returns promptly; disable entirely
-    # with WEBATM_AUTO_START=0 to drive the lifecycle manually instead.
+    # On first boot, auto-start the bundled BlueSky server and connect the proxy
+    # so the user lands on a live, connected map. claim_first_boot() guards it to
+    # once per boot (a replaced worker re-running register() won't resurrect a
+    # manually-stopped server); it runs in the background so app creation returns
+    # promptly. Disable with WEBATM_AUTO_START=0 to drive the lifecycle manually.
     if auto_start_enabled() and claim_first_boot():
         schedule_auto_start(socketio, manager, bluesky_proxy)
 
