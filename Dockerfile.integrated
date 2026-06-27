@@ -77,9 +77,14 @@ COPY --chown=webatm:webatm script/wsgi_integrated.py ./
 EXPOSE 8082
 
 # Integrated build defaults: enable the extensions, run BlueSky locally.
+# WEBATM_THREADS sizes the gthread pool (see CMD): under Socket.IO each
+# connected browser holds one worker thread for the life of its connection, so
+# this is effectively the cap on concurrent clients. 4 suits a single user;
+# raise it for many concurrent viewers (the demo-deploy stack uses 16).
 ENV WEB_HOST=0.0.0.0 \
     WEB_PORT=8082 \
     WEBATM_INTEGRATED=1 \
+    WEBATM_THREADS=4 \
     BLUESKY_SERVER_HOST=localhost
 
 # Add current directory to Python path so the WebATM package can be found
@@ -87,6 +92,9 @@ ENV PYTHONPATH="/home/webatm"
 
 # Start WebATM with gunicorn using a THREADED worker (not eventlet): the
 # integrated build reads a blocking subprocess pipe in a background thread.
-# Shell form so WEB_HOST / WEB_PORT env vars are honored; exec keeps gunicorn
-# as PID 1 so it receives signals directly and can reap the bluesky group.
-CMD ["sh", "-c", "exec gunicorn --worker-class gthread --threads 4 -w 1 --bind ${WEB_HOST:-0.0.0.0}:${WEB_PORT:-8082} wsgi_integrated:app"]
+# --threads is read from WEBATM_THREADS so the concurrency cap can be raised at
+# `docker run` time (-e WEBATM_THREADS=16) without overriding this whole CMD.
+# Shell form so WEB_HOST / WEB_PORT / WEBATM_THREADS env vars are honored; exec
+# keeps gunicorn as PID 1 so it receives signals directly and can reap the
+# bluesky group.
+CMD ["sh", "-c", "exec gunicorn --worker-class gthread --threads ${WEBATM_THREADS:-4} -w 1 --bind ${WEB_HOST:-0.0.0.0}:${WEB_PORT:-8082} wsgi_integrated:app"]

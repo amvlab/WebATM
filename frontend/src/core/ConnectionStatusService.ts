@@ -68,6 +68,19 @@ export class ConnectionStatusService {
     private dataTimeoutId: number | null = null;
     private readonly DATA_TIMEOUT_MS = 5000; // Consider disconnected if no data for 5 seconds
 
+    // Wall-clock time the active no-data timeout was armed, plus how many times
+    // we have deferred a disconnect because that timeout fired late. A
+    // setTimeout that fires far past its delay means the event loop was blocked
+    // (a heavy synchronous task such as loading a large GeoJSON, a long GC
+    // pause, or a backgrounded tab) - during that window the socket cannot
+    // deliver data even when the server is perfectly healthy, so "no data" is
+    // not evidence of a real disconnect. We defer (bounded) and let live data
+    // confirm the connection instead of flashing a false "BlueSky disconnected".
+    private dataTimeoutArmedAt = 0;
+    private stallDeferrals = 0;
+    private readonly MAX_STALL_DEFERRALS = 2;
+    private readonly STALL_OVERSHOOT_MS = 1500;
+
     // Initial connection tracking
     private isInitialLoadComplete: boolean = false;
     private initialConnectionCheckTimer: number | null = null;
@@ -287,19 +300,55 @@ export class ConnectionStatusService {
      * This is called when we receive nodeinfo, siminfo, or acdata
      */
     private resetDataTimeout(): void {
+        // Fresh data clears any stall-deferral budget and re-arms the timer.
+        this.stallDeferrals = 0;
+        this.armDataTimeout();
+    }
+
+    /** (Re)arm the no-data timeout, recording when it was armed. */
+    private armDataTimeout(): void {
         if (this.dataTimeoutId !== null) {
             window.clearTimeout(this.dataTimeoutId);
         }
+        this.dataTimeoutArmedAt = Date.now();
+        this.dataTimeoutId = window.setTimeout(
+            () => this.onDataTimeoutExpired(),
+            this.DATA_TIMEOUT_MS
+        );
+    }
 
-        this.dataTimeoutId = window.setTimeout(() => {
-            // No data received for DATA_TIMEOUT_MS
-            logger.warn('ConnectionStatus', 'No data received (nodeinfo, siminfo, or acdata) - BlueSky may be disconnected');
-            echoManager.warning('⚠ No data received from BlueSky server - connection may be lost');
-            if (this.status.blueSkyConnected) {
-                this.setBlueSkyConnected(false);
-                this.setReceivingData(false);
-            }
-        }, this.DATA_TIMEOUT_MS);
+    /**
+     * Called when the no-data timeout fires. Distinguishes a genuine server
+     * silence from a local main-thread stall: if the callback ran far later
+     * than its scheduled delay, the page was frozen (so no data could have been
+     * received regardless of server health). In that case we defer the
+     * disconnect and re-arm, giving live data a chance to reset the timer.
+     * Bounded by MAX_STALL_DEFERRALS so a persistently blocked loop still
+     * eventually reports a real outage.
+     */
+    private onDataTimeoutExpired(): void {
+        const overshoot = Date.now() - this.dataTimeoutArmedAt - this.DATA_TIMEOUT_MS;
+
+        if (overshoot > this.STALL_OVERSHOOT_MS && this.stallDeferrals < this.MAX_STALL_DEFERRALS) {
+            this.stallDeferrals++;
+            logger.warn(
+                'ConnectionStatus',
+                `Data timeout fired ${Math.round(overshoot)}ms late - main thread stalled; ` +
+                    `deferring disconnect (${this.stallDeferrals}/${this.MAX_STALL_DEFERRALS})`
+            );
+            this.armDataTimeout();
+            return;
+        }
+
+        // Either the timer fired on schedule (a real silence) or we have
+        // deferred as long as we are willing to - treat it as a disconnect.
+        this.stallDeferrals = 0;
+        logger.warn('ConnectionStatus', 'No data received (nodeinfo, siminfo, or acdata) - BlueSky may be disconnected');
+        echoManager.warning('⚠ No data received from BlueSky server - connection may be lost');
+        if (this.status.blueSkyConnected) {
+            this.setBlueSkyConnected(false);
+            this.setReceivingData(false);
+        }
     }
 
     // ========================================
@@ -444,6 +493,8 @@ export class ConnectionStatusService {
             window.clearTimeout(this.dataTimeoutId);
             this.dataTimeoutId = null;
         }
+        this.stallDeferrals = 0;
+        this.dataTimeoutArmedAt = 0;
 
         logger.info('ConnectionStatus', 'Reset all connection states');
         this.notifyListeners();

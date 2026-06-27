@@ -20,6 +20,7 @@ never imports this module; it is reached only via ``webatm_integrated.register``
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable
 
 from WebATM.logger import get_logger
@@ -30,14 +31,11 @@ logger = get_logger()
 # Either one listening means the server is up enough to connect to.
 _BLUESKY_PORTS = (11000, 11001)
 
-# Marker recording that auto-start has already fired this boot. It lives on a
-# tmpfs (/dev/shm) by default so it survives a gunicorn worker being replaced
-# (a crashed/timed-out worker re-imports the app and re-runs register()) within
-# a running container -- making auto-start a true once-per-boot event that never
-# resurrects a server the user has manually stopped -- yet is cleared when the
-# container (re)starts, which is a genuinely fresh boot. Override the location
-# with WEBATM_AUTOSTART_MARKER (e.g. point it at a persistent volume to fire
-# auto-start only on the very first deployment, ever).
+# Marker recording that auto-start already fired this boot. On tmpfs (/dev/shm)
+# by default so it survives a replaced gunicorn worker re-running register()
+# (once-per-boot, never resurrecting a manually-stopped server) yet clears when
+# the container restarts. Override with WEBATM_AUTOSTART_MARKER (e.g. a persistent
+# volume to auto-start only on the very first deployment).
 _DEFAULT_MARKER = "/dev/shm/webatm_autostart.done"
 
 
@@ -52,12 +50,10 @@ def auto_start_enabled() -> bool:
 def claim_first_boot(marker_path: str | None = None) -> bool:
     """Atomically claim the one-shot auto-start for this boot.
 
-    Returns True exactly once per boot -- for the first caller to create the
-    marker file -- and False thereafter (e.g. when a replaced gunicorn worker
-    re-runs ``register()``), so auto-start runs only on first boot and never
-    fights the manual Start/Stop controls. If the marker cannot be created
-    (e.g. no /dev/shm on a dev box), it degrades to True so a fresh start still
-    auto-starts -- harmless there since such runs create the app only once.
+    Returns True for the first caller to create the marker file and False
+    thereafter (e.g. a replaced gunicorn worker re-running ``register()``), so
+    auto-start never fights the manual Start/Stop controls. If the marker cannot
+    be created (e.g. no /dev/shm on a dev box) it degrades to True.
     """
     path = marker_path or os.environ.get("WEBATM_AUTOSTART_MARKER", _DEFAULT_MARKER)
     try:
@@ -137,8 +133,6 @@ def connect_proxy_when_ready(
     if register_subscribers is None:
         from WebATM.proxy import register_subscribers
     if sleep is None:
-        import time
-
         sleep = time.sleep
 
     host = (
@@ -176,12 +170,20 @@ def _wait_for_ports(
     poll_interval: float,
     is_port_listening: Callable[..., bool],
     sleep: Callable[[float], None],
+    *,
+    clock: Callable[[], float] = time.monotonic,
 ) -> bool:
-    """Poll until a BlueSky port is listening on ``host`` or attempts run out."""
-    attempts = max(1, int(ready_timeout / poll_interval))
-    for attempt in range(attempts):
+    """Poll until a BlueSky port is listening on ``host`` or ``ready_timeout`` elapses.
+
+    Bounds the *wall-clock* wait by ``ready_timeout``. Each probe can itself block
+    on the socket connect (~0.5s per port), so counting attempts would overshoot
+    the timeout several-fold; a monotonic deadline (injectable for tests) avoids
+    that while still doing at least one probe.
+    """
+    deadline = clock() + ready_timeout
+    while True:
         if any(is_port_listening(port, 0.5, host) for port in _BLUESKY_PORTS):
             return True
-        if attempt < attempts - 1:
-            sleep(poll_interval)
-    return False
+        if clock() >= deadline:
+            return False
+        sleep(poll_interval)

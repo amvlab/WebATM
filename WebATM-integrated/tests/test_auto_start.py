@@ -170,6 +170,42 @@ def test_gives_up_when_ports_never_listen():
     assert registered == []
 
 
+def test_wait_for_ports_honors_wall_clock_deadline():
+    """The wait is bounded by ready_timeout even when each probe is slow.
+
+    A fixed attempt count (the old behavior) would probe ``ready_timeout /
+    poll_interval`` = 10 times here regardless of how long each probe blocks; a
+    deadline gives up once the wall clock passes ``ready_timeout``.
+    """
+    # Fake clock: each probe round advances the wall clock by 1s, modeling probes
+    # that each consume ~1s on the socket connect (0.5s per port) -- the cost the
+    # old fixed attempt count ignored.
+    now = {"t": 0.0}
+
+    def clock():
+        now["t"] += 1.0
+        return now["t"]
+
+    rounds = {"n": 0}
+
+    def fake_sleep(_):
+        rounds["n"] += 1  # one sleep follows each not-yet-expired probe round
+
+    result = auto_start._wait_for_ports(
+        "localhost",
+        ready_timeout=5.0,
+        poll_interval=0.5,
+        is_port_listening=_always(False),
+        sleep=fake_sleep,
+        clock=clock,
+    )
+
+    assert result is False
+    # ~5 rounds (deadline / per-round cost), not the 10 (= 5.0 / 0.5) a fixed
+    # attempt count would do regardless of how long each probe blocks.
+    assert 1 <= rounds["n"] < 9
+
+
 def test_explicit_host_overrides_proxy_and_env(monkeypatch):
     monkeypatch.setenv("BLUESKY_SERVER_HOST", "from-env")
     proxy = FakeProxy(server_ip="from-proxy")

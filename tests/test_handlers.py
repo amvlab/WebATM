@@ -138,6 +138,85 @@ class TestAcdataHandler:
         assert emitted["id"] == []
 
 
+class TestAcdataActiveNodeFiltering:
+    """Traffic is displayed for the ACTIVE node only: on_acdata_received caches
+    and emits the active node's aircraft and skips frames from background nodes
+    *before* serializing them, mirroring the SIMINFO active-node filter."""
+
+    def _activate(self, proxy, fake_client, active_bytes):
+        """Wire the proxy so _get_safe_active_node() resolves to active_bytes."""
+        active_hex = active_bytes.hex()
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        fake_client.act_id = active_bytes
+        proxy.tracked_nodes[active_hex] = {"status": "init", "time": "00:00:00"}
+        return active_hex
+
+    def test_active_node_traffic_is_stored_and_emitted(
+        self, proxy, fake_client, fake_socketio
+    ):
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        self._activate(proxy, fake_client, active)
+        fake_client.context.sender_id = active
+
+        on_acdata_received({"id": ["AC1", "AC2"]})
+
+        assert proxy.traffic_data["id"] == ["AC1", "AC2"]
+        assert fake_socketio.count("acdata") == 1
+
+    def test_non_active_node_traffic_is_dropped(
+        self, proxy, fake_client, fake_socketio
+    ):
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        self._activate(proxy, fake_client, active)
+        other = b"\xbb\xbb\xbb\xbb\x81"
+        proxy.tracked_nodes[other.hex()] = {"status": "init", "time": "00:00:00"}
+        fake_client.context.sender_id = other
+
+        on_acdata_received({"id": ["GHOST"]})
+
+        # A background node's traffic is neither cached nor emitted.
+        assert proxy.traffic_data == {}
+        assert fake_socketio.count("acdata") == 0
+
+    def test_non_active_node_still_counts_as_liveness(self, proxy, fake_client):
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        self._activate(proxy, fake_client, active)
+        other = b"\xbb\xbb\xbb\xbb\x81"
+        proxy.tracked_nodes[other.hex()] = {"status": "init", "time": "00:00:00"}
+        fake_client.context.sender_id = other
+        proxy.last_successful_update = 0.0
+
+        on_acdata_received({"id": ["GHOST"]})
+
+        # Filtered for display, but receiving it still proves the link is alive.
+        assert proxy.last_successful_update > 0.0
+
+    def test_falls_back_to_any_sender_without_active_node(self, proxy, fake_socketio):
+        # No client / active node resolvable yet -> single-node display works.
+        on_acdata_received({"id": ["SOLO"]})
+        assert proxy.traffic_data["id"] == ["SOLO"]
+        assert fake_socketio.count("acdata") == 1
+
+
+class TestAcdataThrottle:
+    """Serializing + emitting only happen when an emit is actually due
+    (acdata_interval); rapid frames within the window are skipped wholesale."""
+
+    def test_second_frame_within_interval_is_not_re_emitted(self, proxy, fake_socketio):
+        on_acdata_received({"id": ["AC1"]})
+        assert fake_socketio.count("acdata") == 1
+        cached = proxy.traffic_data
+
+        # A second frame immediately after (well within acdata_interval) is not
+        # re-emitted, and the cached frame is left untouched (not re-serialized).
+        on_acdata_received({"id": ["AC2"]})
+        assert fake_socketio.count("acdata") == 1
+        assert proxy.traffic_data is cached
+        assert proxy.traffic_data["id"] == ["AC1"]
+
+
 class TestStatechangeHandler:
     def test_emits_statechange(self, proxy, fake_socketio):
         proxy.sim_data = {"state": 0}

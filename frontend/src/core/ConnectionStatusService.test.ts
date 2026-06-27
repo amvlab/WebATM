@@ -152,6 +152,79 @@ describe('ConnectionStatusService', () => {
         });
     });
 
+    describe('data timeout resilience to main-thread stalls', () => {
+        // A setTimeout fires "late" when the event loop was blocked (a heavy
+        // synchronous task, GC pause, or backgrounded tab). Fake timers always
+        // fire on schedule, so we drive Date.now() directly to simulate the
+        // wall-clock overshoot the production code measures.
+        it('defers the disconnect when the timeout fires long after its delay', () => {
+            const nowSpy = vi.spyOn(Date, 'now');
+            nowSpy.mockReturnValue(1000);
+            service.onSimInfoReceived(); // armed at t=1000
+            expect(service.isBlueSkyConnected()).toBe(true);
+
+            // Callback runs 9s of wall-clock later (a 4s overshoot on a 5s timer).
+            nowSpy.mockReturnValue(10000);
+            vi.advanceTimersByTime(5000);
+
+            // Stall detected -> connection preserved, no false alarm.
+            expect(service.isBlueSkyConnected()).toBe(true);
+            expect(echoManager.warning).not.toHaveBeenCalledWith(
+                expect.stringContaining('No data received'));
+        });
+
+        it('still disconnects once the stall clears and data really is absent', () => {
+            const nowSpy = vi.spyOn(Date, 'now');
+            nowSpy.mockReturnValue(1000);
+            service.onSimInfoReceived();
+
+            // First fire is late -> deferred.
+            nowSpy.mockReturnValue(10000);
+            vi.advanceTimersByTime(5000);
+            expect(service.isBlueSkyConnected()).toBe(true);
+
+            // Re-armed at t=10000; next fire is on schedule (no overshoot) and
+            // no data arrived -> a genuine disconnect.
+            nowSpy.mockReturnValue(15000);
+            vi.advanceTimersByTime(5000);
+            expect(service.isBlueSkyConnected()).toBe(false);
+        });
+
+        it('live data during the deferral window keeps the connection up', () => {
+            const nowSpy = vi.spyOn(Date, 'now');
+            nowSpy.mockReturnValue(1000);
+            service.onSimInfoReceived();
+
+            nowSpy.mockReturnValue(10000);
+            vi.advanceTimersByTime(5000); // deferred, still connected
+
+            // Buffered data is processed now that the thread is free; it
+            // re-arms the timer from this moment.
+            nowSpy.mockReturnValue(10500);
+            service.onAircraftDataReceived();
+
+            // Less than a full window after that data -> still connected.
+            nowSpy.mockReturnValue(13000);
+            vi.advanceTimersByTime(2500);
+            expect(service.isBlueSkyConnected()).toBe(true);
+        });
+
+        it('bounds deferrals so a persistent stall still reports an outage', () => {
+            const nowSpy = vi.spyOn(Date, 'now');
+            let now = 1000;
+            nowSpy.mockImplementation(() => now);
+            service.onSimInfoReceived();
+
+            // Every fire overshoots; after MAX_STALL_DEFERRALS (2) the third
+            // fire gives up and disconnects.
+            for (let i = 0; i < 3; i++) {
+                now += 9000;
+                vi.advanceTimersByTime(5000);
+            }
+            expect(service.isBlueSkyConnected()).toBe(false);
+        });
+    });
+
     describe('disconnect callbacks', () => {
         it('fires on a connected -> disconnected transition after initial load', () => {
             // Mark the initial load as already complete (as a reloaded page would)
