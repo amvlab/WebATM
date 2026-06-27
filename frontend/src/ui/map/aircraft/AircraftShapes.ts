@@ -9,20 +9,7 @@ import { AircraftShapeDrawer } from './AircraftRenderer';
 
 /**
  * Chevron shape (default)
- * Classic air traffic control chevron with tail notch
- */
-// export const drawChevronShape: AircraftShapeDrawer = (ctx, size) => {
-//     ctx.beginPath();
-//     ctx.moveTo(size / 2, 8);           // Top point
-//     ctx.lineTo(size / 2 - 8, size - 8); // Bottom left
-//     ctx.lineTo(size / 2, size - 12);    // Bottom center notch
-//     ctx.lineTo(size / 2 + 8, size - 8); // Bottom right
-//     ctx.closePath();
-// };
-
-/**
- * Simple arrow shape
- * Clean arrow with defined tail - proportional to canvas size
+ * ATC-style chevron with a tail notch, proportional to canvas size.
  */
 export const drawChevronShape: AircraftShapeDrawer = (ctx, size) => {
     const c = size / 2;
@@ -205,7 +192,9 @@ export const drawDroneShape: AircraftShapeDrawer = (ctx, size) => {
 };
 
 /**
- * Available aircraft shapes with display names
+ * Available aircraft shapes with display names.
+ * Keys must stay in sync with `AircraftShapeType` in data/types.ts
+ * (guarded by AircraftShapes.test.ts).
  */
 export const AIRCRAFT_SHAPES = {
     chevron: { name: 'Chevron', drawer: drawChevronShape },
@@ -213,5 +202,3 @@ export const AIRCRAFT_SHAPES = {
     aircraft: { name: 'Aircraft', drawer: drawAircraftShape },
     drone: { name: 'Drone', drawer: drawDroneShape }
 } as const;
-
-export type AircraftShapeType = keyof typeof AIRCRAFT_SHAPES;
