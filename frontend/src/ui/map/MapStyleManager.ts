@@ -107,7 +107,7 @@ export class MapStyleManager {
         // fall back to the bundled offline style. Guarded so we only try once.
         if (this.shouldFallBackToOffline(e)) {
             this.hasFallenBackToOffline = true;
-            logger.warn('MapStyleManager', 'Remote style/tiles unreachable; switching to offline basemap.');
+            logger.warn('MapStyleManager', 'Remote style unreachable; switching to offline basemap.');
             this.changeStyle(this.OFFLINE_STYLE);
             return;
         }
@@ -142,10 +142,25 @@ export class MapStyleManager {
      * problems. We only fall back once, and only if the current style is a
      * remote URL — local styles failing usually mean a config mistake, not
      * missing internet.
+     *
+     * Crucially we do NOT fall back on individual *tile* fetch failures (errors
+     * that carry a `tile`). Those are common and transient — a single dropped
+     * or CORS-blocked vector tile while panning should not swap the entire
+     * basemap to offline. Swapping the style mid-session reloads every layer:
+     * the basemap visibly flickers, and (with the 3D overlay on) rebuilding the
+     * Three.js custom layer disrupts the viewport and snaps the camera back to
+     * the default view. The map degrades gracefully on a missing tile (the
+     * tile is simply blank until it succeeds), so a tile error is never reason
+     * enough to nuke the user's chosen basemap. A genuinely-offline boot still
+     * triggers the fallback because the *style document* fetch fails, and that
+     * error carries no `tile`.
      */
     private shouldFallBackToOffline(e: MapErrorEvent): boolean {
         if (this.hasFallenBackToOffline) return false;
         if (!this.currentStyle.startsWith('http')) return false;
+
+        // Individual tile failures are transient; never fall back on them.
+        if (e.tile) return false;
 
         const err = e?.error;
         if (!err) return false;

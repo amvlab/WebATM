@@ -7,6 +7,10 @@ import type { AircraftData, DisplayOptions } from '../../../data/types';
 import type { StateManager } from '../../../core/StateManager';
 import { logger } from '../../../utils/Logger';
 
+// Base scale factor folded into every mesh scale alongside the model's
+// real-world scale and the user's aircraft3DScale multiplier.
+const BASE_SCALE_FACTOR = 10;
+
 /**
  * Simplified aircraft data for 3D rendering
  */
@@ -59,7 +63,6 @@ export class Aircraft3DTransforms {
     private sceneOrigin: { lng: number; lat: number } | null = null; // Scene origin for relative positioning
     private sceneOriginElevation: number = 0; // Scene origin elevation in meters
     private maxDistanceFromOrigin: number = 10000; // Max distance in meters before repositioning origin
-    private baseScaleFactor: number = 10; // Base scale factor multiplied with user's aircraft3DScale setting
 
     // Inverse of the globe origin matrix for the current frame. Globe mesh
     // matrices are made origin-relative with this so their translations stay
@@ -71,18 +74,6 @@ export class Aircraft3DTransforms {
     private globeOriginMatrixInverse: THREE.Matrix4 | null = null;
 
     constructor(private readonly deps: Aircraft3DTransformsDeps) {}
-
-    /**
-     * Set the global base scale factor for all aircraft models.
-     * The caller re-applies mesh transforms afterwards.
-     */
-    setBaseScaleFactor(scaleFactor: number): void {
-        this.baseScaleFactor = scaleFactor;
-    }
-
-    getBaseScaleFactor(): number {
-        return this.baseScaleFactor;
-    }
 
     /**
      * Initialize or update scene origin based on aircraft positions.
@@ -237,7 +228,7 @@ export class Aircraft3DTransforms {
         const headingRad = THREE.MathUtils.degToRad(data.hdg);
         const realScale = this.getMeshRealScale(mesh);
         const userMultiplier = this.getUserScaleMultiplier(mesh);
-        const finalScale = realScale * userMultiplier * this.baseScaleFactor;
+        const finalScale = realScale * userMultiplier * BASE_SCALE_FACTOR;
         return { altitudeMeters, headingRad, finalScale };
     }
 

@@ -90,3 +90,26 @@ export function getModelForAircraftType(
     if (category === null) return fallbackModel;
     return CATEGORY_TO_MODEL[category];
 }
+
+/** Directory under which all aircraft GLB models are served. */
+export const MODEL_DIR = '/static/models/aircraft/';
+/** Model used when an aircraft's type is unknown and no model is forced. */
+export const DEFAULT_FALLBACK_MODEL = 'A320.glb';
+
+/**
+ * Resolve the full model path an aircraft should render with, honoring
+ * (highest priority first):
+ *   1. an explicit per-aircraft `override` file,
+ *   2. a globally forced `selectedModel` (anything but the AUTO sentinel),
+ *   3. automatic per-type selection from the aircraft's ICAO `actype`.
+ */
+export function resolveAircraftModelPath(
+    selectedModel: string | undefined | null,
+    actype: string | undefined | null,
+    override?: string | null
+): string {
+    if (override) return `${MODEL_DIR}${override}`;
+    const selected = selectedModel || AUTO_MODEL_SENTINEL;
+    if (selected !== AUTO_MODEL_SENTINEL) return `${MODEL_DIR}${selected}`;
+    return `${MODEL_DIR}${getModelForAircraftType(actype, DEFAULT_FALLBACK_MODEL)}`;
+}
