@@ -420,6 +420,11 @@ export class SettingsModal {
         } else {
             logger.debug('SettingsModal', 'No saved map style found, using default selection');
         }
+
+        // Notify the style selector's change handler so the custom-input and
+        // "Delete Saved Style" controls match the option we just selected
+        // programmatically (setting selectedIndex/value fires no change event).
+        this.elements.mapStyleSelect.dispatchEvent(new Event('change'));
     }
 
     /**

@@ -339,15 +339,16 @@ export class MapDisplay {
 
     /**
      * Classify the active basemap as 'light' or 'dark' so overlays (e.g. the
-     * navdata renderer) can pick a palette that reads well against it. Only the
-     * two bundled offline styles and the default Dark Matter style are known;
-     * everything else (MapTiler, MapLibre demo, custom URLs) is treated as a
-     * non-local style and uses the light palette.
+     * navdata renderer) can pick a palette that reads well against it. The
+     * known dark styles are the bundled offline-dark style, Dark Matter, and
+     * the OpenFreeMap dark/fiord styles; everything else (Positron, Bright,
+     * Liberty, MapTiler, custom URLs) uses the light palette.
      */
     public getMapTheme(): 'light' | 'dark' {
         const s = this.styleManager.getCurrentStyle() || '';
         if (s.includes('offline-style-light')) return 'light';
         if (s.includes('dark-matter') || s.includes('offline-style.json')) return 'dark';
+        if (s.includes('openfreemap.org/styles/dark') || s.includes('openfreemap.org/styles/fiord')) return 'dark';
         return 'light';
     }
 
