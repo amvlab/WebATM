@@ -778,11 +778,14 @@
                         <label for="map-style-select-modal">Map Style:</label>
                         <select id="map-style-select-modal">
                             <option value="">Select a map style...</option>
-                            <option value="https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json"
-                                selected>Dark Matter (No Labels)</option>
+                            <option value="https://tiles.openfreemap.org/styles/positron"
+                                selected>Positron</option>
+                            <option value="https://tiles.openfreemap.org/styles/bright">Bright</option>
+                            <option value="https://tiles.openfreemap.org/styles/liberty">Liberty (3D)</option>
+                            <option value="https://tiles.openfreemap.org/styles/dark">Dark</option>
+                            <option value="https://tiles.openfreemap.org/styles/fiord">Fiord</option>
                             <option value="/static/map/offline-style.json">Offline Dark (Local PMTiles)</option>
                             <option value="/static/map/offline-style-light.json">Offline Light (Local PMTiles)</option>
-                            <option value="https://demotiles.maplibre.org/style.json">MapLibre Demo</option>
                             <option value="https://api.maptiler.com/maps/streets/style.json?key=">MapTiler Streets</option>
                             <option value="https://api.maptiler.com/maps/satellite/style.json?key=">MapTiler Satellite</option>
                             <option value="https://api.maptiler.com/maps/hybrid/style.json?key=">MapTiler Hybrid</option>
@@ -791,6 +794,8 @@
                         </select>
                         <button id="apply-map-style-btn" class="btn-secondary"
                             style="width: 100%; margin-top: 8px;">Apply Map Style</button>
+                        <button id="delete-saved-style-btn" class="btn-secondary"
+                            style="width: 100%; margin-top: 8px; display: none;">Delete Saved Style</button>
                         <small class="setting-help">Select a style above and click Apply to change the map.</small>
                     </div>
 
@@ -799,8 +804,14 @@
                         <input type="text" id="custom-style-url-modal" placeholder="Enter custom style JSON URL"
                             style="width: 100%; margin-bottom: 5px;">
                         <button id="apply-custom-style-modal" class="btn-secondary"
-                            style="width: 100%;">Apply Style</button>
-                        <small class="setting-help">Enter a URL to a MapLibre GL style JSON file.</small>
+                            style="width: 100%; margin-bottom: 12px;">Apply Style</button>
+                        <label for="custom-style-name-modal">Save as (name):</label>
+                        <input type="text" id="custom-style-name-modal" placeholder="e.g. My Style"
+                            style="width: 100%; margin-bottom: 5px;">
+                        <button id="save-custom-style-modal" class="btn-secondary"
+                            style="width: 100%;">Save Style</button>
+                        <small class="setting-help">Enter a URL to a MapLibre GL style JSON file. Give it a
+                            name and click Save to keep it in the list above for next time.</small>
                     </div>
                 </div>
 

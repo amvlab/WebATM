@@ -1,6 +1,12 @@
 import type { Map } from 'maplibre-gl';
 import { storage } from '../../utils/StorageManager';
 import { logger } from '../../utils/Logger';
+import {
+    loadSavedStyles,
+    persistSavedStyles,
+    upsertStyle,
+    removeStyleByUrl,
+} from './customStyles';
 
 /**
  * Shape of the MapLibre 'error' events this manager inspects. MapLibre's
@@ -23,9 +29,11 @@ interface MapErrorEvent {
  * the remote basemap is unreachable.
  */
 export class MapStyleManager {
-    private readonly DEFAULT_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json';
+    private readonly DEFAULT_STYLE = 'https://tiles.openfreemap.org/styles/positron';
     private readonly OFFLINE_STYLE = '/static/map/offline-style.json';
     private readonly STORAGE_KEY_STYLE = 'webatm-map-style';
+    // DOM id of the runtime-injected <optgroup> that lists user-saved styles.
+    private readonly SAVED_GROUP_ID = 'saved-custom-styles-group';
 
     // Tracks whether we've already swapped to the offline style after a
     // network failure, so we only attempt the fallback once.
@@ -185,13 +193,28 @@ export class MapStyleManager {
         const styleSelect = document.getElementById('map-style-select-modal') as HTMLSelectElement;
         const customStyleControl = document.getElementById('custom-style-control-modal');
         const customStyleInput = document.getElementById('custom-style-url-modal') as HTMLInputElement;
+        const customStyleNameInput = document.getElementById('custom-style-name-modal') as HTMLInputElement;
         const applyCustomStyleBtn = document.getElementById('apply-custom-style-modal');
+        const saveCustomStyleBtn = document.getElementById('save-custom-style-modal');
         const applyMapStyleBtn = document.getElementById('apply-map-style-btn') as HTMLButtonElement;
+        const deleteSavedStyleBtn = document.getElementById('delete-saved-style-btn') as HTMLButtonElement;
 
         if (!styleSelect) {
             logger.warn('MapStyleManager', 'Map style select element not found');
             return;
         }
+
+        // Populate the dropdown with any styles the user has saved previously.
+        this.renderSavedStyles(styleSelect);
+
+        // Show the "Delete Saved Style" button only when a user-saved style is
+        // the current selection (saved options carry data-saved-style="true").
+        const updateDeleteButton = (): void => {
+            if (!deleteSavedStyleBtn) return;
+            const selected = styleSelect.selectedOptions[0];
+            const isSaved = selected?.dataset.savedStyle === 'true';
+            deleteSavedStyleBtn.style.display = isSaved ? 'block' : 'none';
+        };
 
         // Handle style select change - only toggle custom input visibility
         styleSelect.addEventListener('change', (e) => {
@@ -221,6 +244,8 @@ export class MapStyleManager {
                     applyMapStyleBtn.style.display = 'block';
                 }
             }
+
+            updateDeleteButton();
         });
 
         // Handle apply map style button - applies the selected style from dropdown
@@ -267,6 +292,51 @@ export class MapStyleManager {
             });
         }
 
+        // Handle "Save Style": persist the custom URL under a name, add it to
+        // the dropdown, select it, and apply it so it's usable immediately.
+        if (saveCustomStyleBtn) {
+            saveCustomStyleBtn.addEventListener('click', () => {
+                const url = customStyleInput?.value.trim() ?? '';
+                const name = customStyleNameInput?.value.trim() ?? '';
+
+                if (!url) {
+                    alert('Please enter a style URL to save.');
+                    return;
+                }
+                if (!name) {
+                    alert('Please enter a name for this style.');
+                    return;
+                }
+
+                persistSavedStyles(upsertStyle(loadSavedStyles(), name, url));
+                this.renderSavedStyles(styleSelect);
+
+                // Select and apply the newly-saved style; clear the name field.
+                styleSelect.value = url;
+                if (customStyleNameInput) customStyleNameInput.value = '';
+                this.changeStyle(url);
+                styleSelect.dispatchEvent(new Event('change'));
+            });
+        }
+
+        // Handle "Delete Saved Style": remove the selected user-saved style and
+        // reset the dropdown to the placeholder.
+        if (deleteSavedStyleBtn) {
+            deleteSavedStyleBtn.addEventListener('click', () => {
+                const selected = styleSelect.selectedOptions[0];
+                if (!selected || selected.dataset.savedStyle !== 'true') return;
+
+                const label = selected.textContent || 'this style';
+                if (!confirm(`Delete saved style "${label}"?`)) return;
+
+                persistSavedStyles(removeStyleByUrl(loadSavedStyles(), selected.value));
+                this.renderSavedStyles(styleSelect);
+
+                styleSelect.value = '';
+                styleSelect.dispatchEvent(new Event('change'));
+            });
+        }
+
         // Handle Enter key in custom style input
         if (customStyleInput) {
             customStyleInput.addEventListener('keypress', (e) => {
@@ -294,6 +364,39 @@ export class MapStyleManager {
         }
 
         logger.debug('MapStyleManager', 'Map style selector initialized');
+    }
+
+    /**
+     * (Re)build the "Saved Styles" optgroup in the style dropdown from the
+     * persisted custom-style list. The group is inserted just above the
+     * trailing "Custom Style JSON..." option, and each option carries
+     * data-saved-style="true" so the change handler can offer a delete action.
+     */
+    private renderSavedStyles(select: HTMLSelectElement): void {
+        // Drop any previously-rendered group before rebuilding.
+        select.querySelector(`#${this.SAVED_GROUP_ID}`)?.remove();
+
+        const styles = loadSavedStyles();
+        if (styles.length === 0) return;
+
+        const group = document.createElement('optgroup');
+        group.id = this.SAVED_GROUP_ID;
+        group.label = 'Saved Styles';
+
+        for (const s of styles) {
+            const opt = document.createElement('option');
+            opt.value = s.url;
+            opt.textContent = s.name;
+            opt.dataset.savedStyle = 'true';
+            group.appendChild(opt);
+        }
+
+        const customOption = select.querySelector('option[value="custom"]');
+        if (customOption) {
+            select.insertBefore(group, customOption);
+        } else {
+            select.appendChild(group);
+        }
     }
 
     /**
