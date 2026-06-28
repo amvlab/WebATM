@@ -91,14 +91,6 @@ export class Aircraft3DRenderer implements IEntityRenderer<AircraftData> {
         }
     }
 
-    setScaleFactor(scaleFactor: number): void {
-        this.customLayer.setScaleFactor(scaleFactor);
-    }
-
-    getScaleFactor(): number {
-        return this.customLayer.getScaleFactor();
-    }
-
     updateDisplayOptions(options: DisplayOptions): void {
         const oldModel = this.displayOptions.selectedAircraftModel;
         this.displayOptions = options;

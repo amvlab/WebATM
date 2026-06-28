@@ -677,6 +677,27 @@ export class MapOverlay {
      * Notifies aircraft renderers and routes to recreate layers
      */
     public onStyleChange(): void {
+        // A style reload (e.g. the automatic offline-basemap fallback in
+        // MapStyleManager after a transient tile/network error) tears down and
+        // rebuilds the Three.js 3D custom layer below. Re-initializing that
+        // layer disrupts MapLibre's viewport/projection and snaps the map back
+        // to its default view - the same disruption the enable/disable paths
+        // guard against. Unlike a user-driven toggle, a style reload is
+        // automatic, so without this the user sees the map "flicker and reset"
+        // for no apparent reason. Snapshot the camera here and restore it once
+        // the map settles, but only when the 3D overlay is active (the 2D
+        // layers don't disturb the camera).
+        const map = this.mapDisplay.getMap();
+        const restore3DView = map && this.is3DOverlayActive;
+        const savedView = restore3DView
+            ? {
+                  center: map.getCenter(),
+                  zoom: map.getZoom(),
+                  pitch: map.getPitch(),
+                  bearing: map.getBearing()
+              }
+            : null;
+
         // Re-create route layers FIRST so they appear below aircraft
         if (this.aircraftRoutes) {
             this.aircraftRoutes.setupLayers();
@@ -692,6 +713,15 @@ export class MapOverlay {
         // Re-create 3D route layer if active
         if (this.is3DOverlayActive && this.aircraftRoute3DRenderer) {
             this.aircraftRoute3DRenderer.onStyleChange();
+        }
+
+        // Restore the pre-reload camera once the map settles from rebuilding
+        // the 3D layer. Mirrors the enable/disable 3D-overlay restore.
+        if (map && savedView) {
+            map.once('idle', () => {
+                map.jumpTo(savedView);
+                this.mapDisplay.resize();
+            });
         }
     }
 

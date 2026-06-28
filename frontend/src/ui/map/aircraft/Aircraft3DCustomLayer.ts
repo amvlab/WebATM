@@ -3,16 +3,17 @@ import { CustomLayer3D } from '../rendering/CustomLayer3D';
 import type { Render3DArgs } from '../rendering/CustomLayer3D';
 import type { AircraftData, DisplayOptions } from '../../../data/types';
 import type { StateManager } from '../../../core/StateManager';
-import { AUTO_MODEL_SENTINEL, getModelForAircraftType } from '../../../data/aircraftCategories';
+import {
+    DEFAULT_FALLBACK_MODEL,
+    MODEL_DIR,
+    resolveAircraftModelPath,
+} from '../../../data/aircraftCategories';
 import { logger } from '../../../utils/Logger';
 import { isValidCoordinate } from '../../../utils/maplibre';
 import { Aircraft3DModelLoader } from './Aircraft3DModelLoader';
 import { Aircraft3DTransforms } from './Aircraft3DTransforms';
 import type { AircraftMeshData } from './Aircraft3DTransforms';
 import { Aircraft3DFleet } from './Aircraft3DFleet';
-
-const MODEL_DIR = '/static/models/aircraft/';
-const DEFAULT_FALLBACK_MODEL = 'A320.glb';
 
 /**
  * Custom MapLibre layer for 3D aircraft rendering.
@@ -127,9 +128,7 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
         }
 
         const activeIds = new Set<string>();
-        const selected = this.displayOptions.selectedAircraftModel || AUTO_MODEL_SENTINEL;
-        const useAutoPerType = selected === AUTO_MODEL_SENTINEL;
-        const forcedPath = useAutoPerType ? null : `${MODEL_DIR}${selected}`;
+        const selectedModel = this.displayOptions.selectedAircraftModel;
 
         for (let i = 0; i < aircraftData.id.length; i++) {
             const id = aircraftData.id[i];
@@ -145,11 +144,8 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
             activeIds.add(id);
 
             const actype = aircraftData.actype?.[i] ?? '';
-            // Per-aircraft override wins over auto and fixed-global selection
             const override = this.stateManager?.getAircraftModelOverride(id) ?? null;
-            const modelPath = override
-                ? `${MODEL_DIR}${override}`
-                : (forcedPath ?? `${MODEL_DIR}${getModelForAircraftType(actype, DEFAULT_FALLBACK_MODEL)}`);
+            const modelPath = resolveAircraftModelPath(selectedModel, actype, override);
 
             const data: AircraftMeshData = {
                 lat: aircraftData.lat[i],
@@ -213,9 +209,11 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
             if (!existing) return;
 
             const overrideFile = newOverrides[id];
-            const resolvedPath = overrideFile
-                ? `${MODEL_DIR}${overrideFile}`
-                : this.resolvePathForData(existing.data);
+            const resolvedPath = resolveAircraftModelPath(
+                this.displayOptions.selectedAircraftModel,
+                existing.data.actype,
+                overrideFile,
+            );
 
             if (resolvedPath === existing.modelPath) return;
 
@@ -231,26 +229,6 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
      */
     onScaleOverridesChanged(): void {
         this.fleet.reapplyAllTransforms();
-    }
-
-    /**
-     * Resolve the model path an aircraft should use when no override
-     * is set — mirrors the logic in `updateAircraft`.
-     */
-    private resolvePathForData(data: AircraftMeshData): string {
-        const selected = this.displayOptions.selectedAircraftModel || AUTO_MODEL_SENTINEL;
-        if (selected !== AUTO_MODEL_SENTINEL) {
-            return `${MODEL_DIR}${selected}`;
-        }
-        return `${MODEL_DIR}${getModelForAircraftType(data.actype, DEFAULT_FALLBACK_MODEL)}`;
-    }
-
-    private getDefaultModelFile(): string {
-        const selected = this.displayOptions.selectedAircraftModel;
-        if (!selected || selected === AUTO_MODEL_SENTINEL) {
-            return DEFAULT_FALLBACK_MODEL;
-        }
-        return selected;
     }
 
     /**
@@ -314,23 +292,6 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
     }
 
     /**
-     * Set the global scale factor for all aircraft models
-     */
-    setScaleFactor(scaleFactor: number): void {
-        this.transforms.setBaseScaleFactor(scaleFactor);
-
-        // Update all existing aircraft to use the new scale
-        this.fleet.reapplyAllTransforms();
-    }
-
-    /**
-     * Get the current scale factor
-     */
-    getScaleFactor(): number {
-        return this.transforms.getBaseScaleFactor();
-    }
-
-    /**
      * Update display options
      */
     updateDisplayOptions(options: DisplayOptions): void {
@@ -346,7 +307,9 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
      * types are rendered with their category-specific model.
      */
     updateModelPath(): void {
-        this.modelPath = `${MODEL_DIR}${this.getDefaultModelFile()}`;
+        // No actype/override here: resolves to the forced model, or the
+        // default fallback when auto-per-type selection is active.
+        this.modelPath = resolveAircraftModelPath(this.displayOptions.selectedAircraftModel, '');
         logger.debug('Aircraft3DCustomLayer', `Fallback model path updated to: ${this.modelPath}`);
     }
 
