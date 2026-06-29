@@ -64,8 +64,12 @@ def on_siminfo_received(
         proxy.tracked_nodes[sender_id_str].update(
             {"status": scenname or "init", "time": simt_str}
         )
-        # Emit updated node info occasionally (not every frame to avoid spam)
-        if int(simt or 0) % 5 == 0:  # Every 5 seconds
+        # Refresh the Nodes panel on a wall-clock cadence, not every frame. A
+        # sim-time throttle (int(simt) % 5) misbehaves when the sim is paused
+        # (spams or never fires, depending on the frozen value) or fast-forwarded
+        # (frames jump past the multiple), so throttle on real time instead.
+        if (current_time - proxy.last_node_info_emit) >= proxy.node_info_interval:
+            proxy.last_node_info_emit = current_time
             proxy._emit_node_info()
 
     # The header clock/rate/state must follow the ACTIVE node only, not

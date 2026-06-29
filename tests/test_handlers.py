@@ -5,6 +5,8 @@ These handlers fetch the process-global proxy via ``get_bluesky_proxy()``; the
 global, so the handlers operate against it directly.
 """
 
+import time
+
 from WebATM.proxy import set_bluesky_proxy
 from WebATM.proxy.handlers.commands import (
     on_stack_received,
@@ -116,6 +118,40 @@ class TestSiminfoActiveNodeFiltering:
         on_siminfo_received(1.0, 0.05, 5.0, "utc", 1, 1, "solo", sender_id=b"\x01\x02")
         assert proxy.sim_data["scenname"] == "solo"
         assert fake_socketio.count("siminfo") == 1
+
+
+class TestSiminfoNodeInfoThrottle:
+    """The Simulation Nodes panel is refreshed on a wall-clock cadence
+    (``node_info_interval``), not on a sim-time modulo. A sim-time throttle
+    spams while paused on a multiple, never fires while paused off-multiple, and
+    skips refreshes when fast-forwarding past the multiple."""
+
+    def _track(self, proxy, sender=b"\x01\x02"):
+        proxy.tracked_nodes[sender.hex()] = {"status": "init", "time": "00:00:00"}
+        return sender
+
+    def test_refreshes_when_interval_elapsed(self, proxy, fake_socketio):
+        sender = self._track(proxy)
+        proxy.last_node_info_emit = 0  # long ago -> interval has elapsed
+        # simt=3.0 is NOT a multiple of 5; the old throttle would stay silent.
+        on_siminfo_received(1.0, 0.05, 3.0, "utc", 1, 1, "run", sender_id=sender)
+        assert fake_socketio.count("node_info") == 1
+
+    def test_suppressed_within_interval(self, proxy, fake_socketio):
+        sender = self._track(proxy)
+        proxy.node_info_interval = 1.0
+        proxy.last_node_info_emit = time.time()  # just emitted
+        # simt=5.0 IS a multiple of 5; the old throttle would have spammed here.
+        on_siminfo_received(1.0, 0.05, 5.0, "utc", 1, 1, "run", sender_id=sender)
+        assert fake_socketio.count("node_info") == 0
+
+    def test_emit_advances_timestamp(self, proxy, fake_socketio):
+        sender = self._track(proxy)
+        proxy.last_node_info_emit = 0
+        before = time.time()
+        on_siminfo_received(1.0, 0.05, 7.0, "utc", 1, 1, "run", sender_id=sender)
+        assert fake_socketio.count("node_info") == 1
+        assert proxy.last_node_info_emit >= before
 
 
 class TestAcdataHandler:
