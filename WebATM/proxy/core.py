@@ -52,8 +52,10 @@ class BlueSkyProxy:
         self.last_siminfo_emit = 0
         self.last_acdata_emit = 0
         self.last_echo_emit = 0
+        self.last_node_info_emit = 0
         self.siminfo_interval = 0.1  # 10 Hz for sim info (faster updates)
         self.acdata_interval = 0.1  # 10 Hz for aircraft data (much faster updates!)
+        self.node_info_interval = 1.0  # 1 Hz periodic refresh of the Nodes panel
         self.echo_interval = (
             0.01  # 100 Hz for echo messages (near real-time for command responses)
         )

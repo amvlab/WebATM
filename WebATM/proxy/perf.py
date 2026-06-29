@@ -1,27 +1,21 @@
 """Opt-in performance instrumentation for the proxy ACDATA hot path.
 
-The proxy receives ACDATA at up to the 50 Hz network-timer rate, and
-serializing every frame (``make_json_serializable`` walks every aircraft field
-in pure Python) is the dominant per-frame CPU cost under heavy node load. This
-module measures that cost so you can tell whether the single ``-w 1`` worker is
-actually saturating, and it quantifies the saving from only serializing frames
-that are emitted (throttle-gated + filtered to the active node).
+Serializing every ACDATA frame (``make_json_serializable`` in pure Python) is
+the dominant per-frame CPU cost under heavy node load. This module measures it
+so you can see whether the single ``-w 1`` worker is saturating, and quantifies
+the saving from only serializing frames that are actually emitted.
 
-Disabled by default. Set ``WEBATM_PERF=1`` to turn it on; when off, every
-``record_*`` call is a single boolean check that returns immediately, so the hot
-path pays effectively nothing. A one-line summary is logged every
-``WEBATM_PERF_INTERVAL`` seconds (default 5), for example::
+Disabled by default; set ``WEBATM_PERF=1`` to enable. When off, each ``record_*``
+call is a single boolean check, so the hot path pays effectively nothing. A
+one-line summary is logged every ``WEBATM_PERF_INTERVAL`` seconds (default 5)::
 
     [Perf] acdata 5.0s | recv=250 filtered=200 emit=48 throttled=2 |
     serialize avg=3.10ms max=8.40ms | emit avg=0.90ms | datapath cpu=0.4% |
     projected pre-opt cpu~=15.8% | max emit gap=140ms
 
-(The ``[Perf]`` prefix is added by the shared logger from this module's name.)
-
-``datapath cpu`` is the share of wall-clock this worker spent serializing and
-emitting ACDATA; ``projected pre-opt cpu`` estimates what the old
-serialize-every-frame path would have cost (same emits, but one serialize per
-received frame) so a single run shows the before/after.
+``datapath cpu`` is the wall-clock share this worker spent serializing/emitting
+ACDATA; ``projected pre-opt cpu`` estimates the old serialize-every-frame cost
+(one serialize per received frame) so a single run shows the before/after.
 """
 
 from __future__ import annotations
