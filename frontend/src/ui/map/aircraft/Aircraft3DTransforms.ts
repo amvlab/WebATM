@@ -299,24 +299,16 @@ export class Aircraft3DTransforms {
                 const l = new THREE.Matrix4().fromArray(modelMatrix)
                     .scale(new THREE.Vector3(finalScale, finalScale, finalScale));
 
-                // Apply heading rotation - in globe space.
-                // Aviation convention: 0°=N, 90°=E, 180°=S, 270°=W.
                 // getMatrixForModel's frame is mirror-flipped (opposite
-                // handedness) relative to the corrected mercator group frame,
-                // so the heading angle is negated here to keep the nose pointing
-                // the correct compass direction (this is undone for geometry by
-                // the lateral mirror correction below).
+                // handedness) vs the corrected mercator group, so negate the
+                // heading to keep the nose on the right compass bearing
+                // (0°=N, 90°=E). The geometry flip is undone just below.
                 const rotationY = new THREE.Matrix4().makeRotationY(-headingRad + Math.PI / 2);
                 l.multiply(rotationY);
 
-                // Un-mirror the model. Because the globe frame reflects the
-                // model's lateral axis versus the (text-corrected) mercator
-                // path, on-fuselage text and liveries would otherwise render
-                // reversed in globe view — the model appears flipped. Reflect
-                // the model's lateral (Z) axis back so geometry matches
-                // mercator. The model's nose (+X) and up (+Y) axes are
-                // untouched, so heading and attitude are unchanged; only the
-                // handedness/chirality flips, fixing the mirrored appearance.
+                // Reflect the model's lateral (Z) axis back so on-fuselage text
+                // and liveries don't render mirrored in globe view. Nose (+X)
+                // and up (+Y) are untouched, so heading and attitude are kept.
                 const lateralMirrorFix = new THREE.Matrix4().makeScale(1, 1, -1);
                 l.multiply(lateralMirrorFix);
 

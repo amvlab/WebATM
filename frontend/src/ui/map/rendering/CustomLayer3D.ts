@@ -266,65 +266,6 @@ export abstract class CustomLayer3D implements CustomLayerInterface {
     }
 
     /**
-     * Create a projection-aware transformation matrix using MapLibre's transform
-     * Works with both mercator and globe projections
-     * @param lng - Longitude in degrees
-     * @param lat - Latitude in degrees
-     * @param altitude - Altitude in meters
-     * @param heading - Heading in radians (0 = North, clockwise)
-     * @param pitch - Pitch in radians (rotation around X axis)
-     * @param roll - Roll in radians (rotation around Y axis)
-     * @param scale - Additional scale factor
-     * @returns Three.js transformation matrix
-     */
-    protected createProjectionAwareMatrix(
-        lng: number,
-        lat: number,
-        altitude: number,
-        heading: number = 0,
-        pitch: number = 0,
-        roll: number = 0,
-        scale: number = 1
-    ): THREE.Matrix4 {
-        try {
-            // Check if getMatrixForModel is available
-            if (!this.map?.transform?.getMatrixForModel) {
-                // Fallback to traditional transform if projection-aware transform is not available
-                return this.createTransformMatrix(lng, lat, altitude, heading, pitch, roll, scale);
-            }
-
-            // Use MapLibre's projection-aware transform
-            const modelMatrix = this.map.transform.getMatrixForModel([lng, lat], altitude);
-            
-            // Create rotation matrices
-            const rotationX = new THREE.Matrix4().makeRotationAxis(
-                new THREE.Vector3(1, 0, 0),
-                pitch
-            );
-            const rotationY = new THREE.Matrix4().makeRotationAxis(
-                new THREE.Vector3(0, 1, 0),
-                roll
-            );
-            const rotationZ = new THREE.Matrix4().makeRotationAxis(
-                new THREE.Vector3(0, 0, 1),
-                heading
-            );
-
-            // Apply scale and rotations to the model matrix
-            const transform = new THREE.Matrix4().fromArray(modelMatrix)
-                .scale(new THREE.Vector3(scale, scale, scale))
-                .multiply(rotationZ)
-                .multiply(rotationY)
-                .multiply(rotationX);
-
-            return transform;
-        } catch {
-            // Fallback to traditional transform if there's any error
-            return this.createTransformMatrix(lng, lat, altitude, heading, pitch, roll, scale);
-        }
-    }
-
-    /**
      * Check if the current map projection is globe
      * @returns True if globe projection is active
      */
