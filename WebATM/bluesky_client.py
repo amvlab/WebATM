@@ -16,6 +16,7 @@ Key adaptations from BlueSky's networking components:
 - Subscription and signal handling patterns
 """
 
+import threading
 from collections import defaultdict, deque
 from collections.abc import Callable
 
@@ -28,6 +29,21 @@ logger = get_logger()
 
 # BlueSky network constants - adapted from bluesky.network.common
 IDLEN = 5
+
+# Socket-buffer high-water marks. BlueSky publishes ACDATA/SIMINFO in bursts —
+# especially under fast-forward, where many sim steps' worth of traffic frames
+# can arrive between two 20 ms network-timer ticks. A generous receive HWM lets
+# those bursts queue in ZMQ instead of being silently dropped (the default SUB
+# RCVHWM is only 1000). The send HWM bounds outbound commands (ADDWPT, DT, FF…)
+# so a flood of GUI commands can't grow without limit.
+RECV_HWM = 100000
+SEND_HWM = 100000
+
+# Maximum messages drained from a single socket per receive() call. The receive
+# loop pulls *every* currently-available message each tick (not just one) so a
+# burst doesn't take many ticks to clear; this cap stops a producer that floods
+# faster than we can consume from monopolising the network-timer thread.
+MAX_DRAIN_PER_SOCKET = 5000
 GROUPID_CLIENT = ord("C")
 GROUPID_SIM = ord("S")
 GROUPID_NOGROUP = ord("N")
@@ -230,6 +246,17 @@ class BlueSkyClient:
         self.sock_send = None
         self.poller = None
 
+        # ZMQ sockets are NOT thread-safe, and WebATM drives them from two
+        # threads at once: the network-timer thread (receive()/subscription
+        # discovery) and the Socket.IO command threads (send(), running under
+        # the "threading" async mode). Concurrent access to the same socket
+        # corrupts its internal state and can tear the connection down — exactly
+        # what happens when GUI commands (rapid ADDWPT, FF…) are sent while data
+        # streams in. This reentrant lock serialises every socket operation.
+        # It is reentrant because subscription callbacks fired during receive()
+        # (e.g. on_node_added_request_data → send()) re-enter the guarded path.
+        self._sock_lock = threading.RLock()
+
         # Network state tracking
         self.nodes = set()
         self.servers = set()
@@ -268,6 +295,17 @@ class BlueSkyClient:
             self.sock_send = self.zmq_context.socket(zmq.XPUB)
             self.poller = zmq.Poller()
 
+            # Tune buffers and shutdown behaviour BEFORE connecting (HWM/LINGER
+            # must be set before connect to take effect):
+            #  - RCVHWM/SNDHWM absorb bursty traffic instead of dropping it.
+            #  - LINGER=0 makes close()/reconnect return immediately rather than
+            #    blocking on undeliverable queued messages, so a disconnect can
+            #    never hang the timer/command threads.
+            self.sock_recv.setsockopt(zmq.RCVHWM, RECV_HWM)
+            self.sock_recv.setsockopt(zmq.LINGER, 0)
+            self.sock_send.setsockopt(zmq.SNDHWM, SEND_HWM)
+            self.sock_send.setsockopt(zmq.LINGER, 0)
+
             # Connect sockets
             recv_addr = f"{protocol}://{hostname}:{recv_port}"
             send_addr = f"{protocol}://{hostname}:{send_port}"
@@ -303,6 +341,15 @@ class BlueSkyClient:
         self.running = False
         self.connected = False
 
+        # Take the socket lock so teardown cannot race a receive()/send() in
+        # another thread (the timer thread may still be mid-poll when a command
+        # thread or shutdown triggers close()). RLock keeps this safe even if a
+        # close path is re-entered.
+        with self._sock_lock:
+            self._close_locked()
+
+    def _close_locked(self):
+        """Socket/context teardown; caller must hold ``_sock_lock``."""
         # Each step is guarded independently so a failure in one cannot abort
         # the rest and leak resources. In particular, a connect() that raised
         # mid-setup can leave a socket created but never registered with the
@@ -359,30 +406,44 @@ class BlueSkyClient:
             return False
 
     def receive(self, timeout=0):
-        """Receive and process incoming messages (following ZMQ recv pattern)."""
+        """Receive and process incoming messages (following ZMQ recv pattern).
+
+        Socket I/O (poll + recv) is done under ``_sock_lock`` so it cannot race
+        a concurrent send() from a command thread. Every currently-available
+        message is drained in one pass — a single recv per tick would let a
+        fast-forward burst back up for many ticks (stale map, growing latency).
+        Handler dispatch runs *outside* the lock: handlers can re-enter the
+        client (e.g. node discovery triggers a REQUEST send), and keeping the
+        lock hold short means command sends are never blocked by serialisation.
+        """
         if not self.running or not self.poller:
             return False
 
+        # (is_data_socket, msg) pairs collected under the lock, dispatched after.
+        collected: list[tuple[bool, list]] = []
+
         try:
-            # Poll for messages (like ZMQ C example with ZMQ_DONTWAIT)
-            events = dict(self.poller.poll(timeout))
+            with self._sock_lock:
+                if not self.poller:
+                    return False
 
-            for sock, event in events.items():
-                if event != zmq.POLLIN:
-                    continue
+                events = dict(self.poller.poll(timeout))
 
-                # Receive message
-                msg = sock.recv_multipart()
-                if not msg:
-                    continue
+                for sock, event in events.items():
+                    if event != zmq.POLLIN:
+                        continue
 
-                # Process message based on socket
-                if sock == self.sock_recv:
-                    self._process_data_message(msg)
-                elif sock == self.sock_send:
-                    self._process_subscription_message(msg)
+                    is_data_socket = sock is self.sock_recv
 
-            return True
+                    # Drain everything queued on this socket right now, bounded
+                    # so a flood can't pin the timer thread indefinitely.
+                    for _ in range(MAX_DRAIN_PER_SOCKET):
+                        try:
+                            msg = sock.recv_multipart(zmq.DONTWAIT)
+                        except zmq.Again:
+                            break
+                        if msg:
+                            collected.append((is_data_socket, msg))
 
         except zmq.Again:
             # No messages available (expected with timeout=0)
@@ -394,6 +455,15 @@ class BlueSkyClient:
             else:
                 logger.error(f"Error receiving: {e}")
                 return False
+
+        # Dispatch outside the socket lock.
+        for is_data_socket, msg in collected:
+            if is_data_socket:
+                self._process_data_message(msg)
+            else:
+                self._process_subscription_message(msg)
+
+        return True
 
     def _process_data_message(self, msg):
         """Process incoming data messages."""
@@ -572,10 +642,20 @@ class BlueSkyClient:
             header = bto_group.ljust(IDLEN, b"*") + btopic + self.node_id
             payload = msgpack.packb(data, use_bin_type=True)
 
-            self.sock_send.send_multipart([header, payload])
+            # Serialise socket access against the receive loop / other senders;
+            # ZMQ sockets are not thread-safe (see _sock_lock). DONTWAIT means a
+            # momentarily-full send buffer raises zmq.Again instead of blocking
+            # the caller (a Socket.IO command thread) on the socket.
+            with self._sock_lock:
+                if not self.sock_send:
+                    return False
+                self.sock_send.send_multipart([header, payload], zmq.DONTWAIT)
 
             return True
 
+        except zmq.Again:
+            logger.warning(f"Send buffer full, dropping '{topic}' command")
+            return False
         except Exception as e:
             logger.error(f"Error sending: {e}")
             return False
@@ -618,7 +698,9 @@ class BlueSkyClient:
             bto_group = asbytestr(to_group)
 
             subscribe_key = bto_group.ljust(IDLEN, b"*") + btopic + bfrom_group
-            self.sock_recv.setsockopt(zmq.SUBSCRIBE, subscribe_key)
+            with self._sock_lock:
+                if self.sock_recv:
+                    self.sock_recv.setsockopt(zmq.SUBSCRIBE, subscribe_key)
 
         except Exception as e:
             logger.error(f"Error subscribing to {topic}: {e}")
@@ -644,7 +726,9 @@ class BlueSkyClient:
             bto_group = asbytestr(to_group)
 
             subscribe_key = bto_group.ljust(IDLEN, b"*") + btopic + bfrom_group
-            self.sock_recv.setsockopt(zmq.UNSUBSCRIBE, subscribe_key)
+            with self._sock_lock:
+                if self.sock_recv:
+                    self.sock_recv.setsockopt(zmq.UNSUBSCRIBE, subscribe_key)
 
         except Exception as e:
             logger.error(f"Error unsubscribing from {topic}: {e}")
