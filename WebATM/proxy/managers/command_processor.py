@@ -67,7 +67,15 @@ class CommandProcessor:
     def _forward_command(self, cmdline):
         """Forward command to BlueSky server for validation and execution."""
         try:
-            self.proxy.bluesky_client.send("STACK", cmdline, self._resolve_target())
+            sent = self.proxy.bluesky_client.send(
+                "STACK", cmdline, self._resolve_target()
+            )
+            if not sent:
+                # send() returns False when the outbound ZMQ buffer is full
+                # (command flood) or the socket is gone — don't let the command
+                # vanish silently; tell the user it was dropped.
+                logger.warning(f"Command not sent (send failed): {cmdline}")
+                self._echo_response(f"Command dropped (server busy): {cmdline}", 1)
         except Exception as e:
             logger.error(f"Error forwarding command '{cmdline}': {e}")
             self._echo_response(f"Error sending command: {e}", 1)
