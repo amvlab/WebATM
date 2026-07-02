@@ -19,9 +19,6 @@ export class StateManager {
 
     constructor() {
         this.state = {
-            connected: false,
-            blueSkyConnected: false,
-            receivingData: false,
             simInfo: null,
             aircraftData: null,
             selectedAircraft: null,
@@ -252,18 +249,6 @@ export class StateManager {
         this.updateState('activeNode', nodeId);
     }
 
-    setConnectionStatus(connected: boolean): void {
-        this.updateState('connected', connected);
-    }
-
-    setBlueSkyConnectionStatus(connected: boolean): void {
-        this.updateState('blueSkyConnected', connected);
-    }
-
-    setReceivingDataStatus(receiving: boolean): void {
-        this.updateState('receivingData', receiving);
-    }
-
     updateShapeOptions(options: Partial<ShapeDisplayOptions>): void {
         const newShapeOptions = { ...this.state.shapeOptions, ...options };
         this.updateState('shapeOptions', newShapeOptions);
@@ -438,22 +423,16 @@ export class StateManager {
     reset(): void {
         const oldState = { ...this.state };
 
-        // IMPORTANT: Preserve connection state during reset!
-        // The RESET command only resets the simulation (removes aircraft, resets time, etc.)
-        // It does NOT disconnect from the BlueSky server - the connection remains active
-        const preservedConnected = this.state.connected;
-        const preservedBlueSkyConnected = this.state.blueSkyConnected;
-        const preservedReceivingData = this.state.receivingData;
+        // IMPORTANT: Server status is tracked independently of BlueSky connection
+        // state (which now lives solely in ConnectionStatusService) and is
+        // preserved here for the same reason: RESET only resets the simulation,
+        // it does not affect server/connection state.
         const preservedServerStatus = this.state.serverStatus;
         const preservedShapeOptions = { ...this.state.shapeOptions };
         const preservedDisplayOptions = { ...this.state.displayOptions };
         const preservedCmddict = this.state.cmddict;
 
         this.state = {
-            // Preserve connection state
-            connected: preservedConnected,
-            blueSkyConnected: preservedBlueSkyConnected,
-            receivingData: preservedReceivingData,
             serverStatus: preservedServerStatus,
 
             // Reset simulation state

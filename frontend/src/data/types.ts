@@ -127,30 +127,13 @@ export interface ConnectionStatus {
 }
 
 /**
- * Detail payloads for the connection-related CustomEvents dispatched on
+ * Detail payload for the `serverStatusUpdate` CustomEvent dispatched on
  * `document`. The event-name-to-payload mapping lives in the
  * DocumentEventMap augmentation in types/globals.d.ts.
  */
-export interface ConnectionUpdateDetail {
-  connected: boolean;
-}
-
 export interface ServerStatusUpdateDetail {
   status: ServerStatus;
   message: string;
-}
-
-export interface NodeInfoUpdateDetail {
-  nodeInfo: NodeInfo;
-}
-
-export interface ConnectionStatusChangedDetail {
-  type: 'web' | 'bluesky' | 'server' | 'nodes';
-  connected?: boolean;
-  status?: ServerStatus;
-  message?: string;
-  nodeInfo?: NodeInfo;
-  timestamp: Date;
 }
 
 export interface ServerConfig {
@@ -289,9 +272,6 @@ export interface ShapeDisplayOptions {
 //   Application State Types
 
 export interface AppState {
-  connected: boolean;
-  blueSkyConnected: boolean;
-  receivingData: boolean;
   simInfo: SimInfo | null;
   aircraftData: AircraftData | null;
   selectedAircraft: string | null;
