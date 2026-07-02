@@ -23,9 +23,7 @@ class NodeManager:
     def _get_safe_active_node(self):
         """Get the active node ID safely, returning None if disconnected or invalid."""
         if (
-            not self.proxy.running
-            or not self.proxy.was_connected
-            or len(self.proxy.tracked_nodes) == 0
+            not self.proxy.is_connected
             or not hasattr(self.proxy.bluesky_client, "act_id")
             or not self.proxy.bluesky_client.act_id
         ):
@@ -131,7 +129,7 @@ class NodeManager:
                     # else the stale start_client() timestamp times out at once.
                     self.proxy.last_successful_update = time.time()
                     logger.info(" Connection established")
-                    self.proxy.connection_mgr._emit_connection_status(True)
+                    self.proxy._emit_connection_status(True)
 
                 # The standalone proxy auto-selects the first node, so we don't need to do it manually here
                 # Emit updated node list to connected clients

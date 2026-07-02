@@ -199,7 +199,7 @@ class ConnectionManager:
                         logger.info(
                             "Connection established to BlueSky remote server hosted by amvlab"
                         )
-                        self._emit_connection_status(True)
+                        self.proxy._emit_connection_status(True)
                     elif not has_active_nodes and self.proxy.was_connected:
                         # Check if we should still wait for nodes or mark as disconnected
                         if (
@@ -210,7 +210,7 @@ class ConnectionManager:
                             logger.info(
                                 "No active nodes detected after timeout - BlueSky server disconnected"
                             )
-                            self._emit_connection_status(False)
+                            self.proxy._emit_connection_status(False)
                             self._handle_disconnection(
                                 "No nodes detected after timeout"
                             )
@@ -266,7 +266,7 @@ class ConnectionManager:
             logger.info(f"BlueSky server disconnected - Reason: {reason}")
             logger.debug(" Cleaning up connection state and closing sockets")
             self.proxy.was_connected = False
-            self._emit_connection_status(False)
+            self.proxy._emit_connection_status(False)
 
         # Don't try to reconnect - just stop running and close
         self.proxy.running = False
@@ -307,21 +307,6 @@ class ConnectionManager:
 
         logger.info("Disconnection cleanup complete - Ready for new connection")
         logger.info("Use web interface settings to reconnect to BlueSky server")
-
-    def _emit_connection_status(self, connected):
-        """Emit connection status to connected web clients."""
-        if self.proxy.socketio and self.proxy.connected_clients > 0:
-            try:
-                self.proxy.socketio.emit(
-                    "connection_status",
-                    {
-                        "connected": connected,
-                        "server_ip": self.proxy.server_ip,
-                        "timestamp": time.time(),
-                    },
-                )
-            except Exception:
-                pass
 
     def close(self):
         """Close all network connections and clear state like BlueSky's close() method."""

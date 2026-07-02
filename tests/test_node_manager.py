@@ -105,19 +105,18 @@ class TestNodeAddedConnectionClock:
 
 
 class TestUsesPersistentManagers:
-    """The node manager must reuse the proxy's persistent ``connection_mgr``
-    rather than constructing throwaway instances, so monkeypatching it takes
-    effect and no redundant objects are created."""
+    """The node manager must reuse the proxy's persistent manager instances
+    (``data_mgr``, ``connection_mgr``) rather than constructing throwaway
+    ones, so monkeypatching them takes effect and no redundant objects are
+    created."""
 
-    def test_first_node_emits_via_proxy_connection_mgr(
-        self, proxy, fake_client, monkeypatch
-    ):
+    def test_first_node_emits_via_proxy_data_mgr(self, proxy, fake_client, monkeypatch):
         proxy.bluesky_client = fake_client
         proxy.running = True
         proxy.was_connected = False
         statuses = []
         monkeypatch.setattr(
-            proxy.connection_mgr,
+            proxy.data_mgr,
             "_emit_connection_status",
             lambda connected: statuses.append(connected),
         )

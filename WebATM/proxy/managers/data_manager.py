@@ -200,9 +200,7 @@ class DataManager:
             "polyline_data": polyline_data,
             "cmddict": self.proxy.cmddict,
             "connection_status": {
-                "connected": self.proxy.was_connected
-                and self.proxy.running
-                and len(self.proxy.tracked_nodes) > 0,
+                "connected": self.proxy.is_connected,
                 "server_ip": self.proxy.server_ip,
                 "last_update": self.proxy.last_successful_update,
             },
