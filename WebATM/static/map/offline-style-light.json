@@ -13,7 +13,10 @@
         },
         "terrain-dem": {
             "type": "raster-dem",
-            "url": "https://tiles.mapterhorn.com/tilejson.json",
+            "tiles": ["https://tiles.mapterhorn.com/{z}/{x}/{y}.webp"],
+            "encoding": "terrarium",
+            "tileSize": 512,
+            "bounds": [-180, -85.0511287, 180, 85.0511287],
             "attribution": "<a href=\"https://mapterhorn.com/attribution/\" target=\"_blank\" rel=\"noopener\">© Mapterhorn</a>"
         }
     },
