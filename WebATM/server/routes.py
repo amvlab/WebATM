@@ -115,7 +115,7 @@ def register_basic_routes(app, session_manager):
                         current_app.bluesky_proxy, "server_ip", "localhost"
                     ),
                     "is_connected": getattr(
-                        current_app.bluesky_proxy, "running", False
+                        current_app.bluesky_proxy, "is_connected", False
                     ),
                 }
             )
@@ -476,10 +476,14 @@ def register_basic_routes(app, session_manager):
             bluesky_running = port_11000_listening or port_11001_listening
 
             # Additional check: if we have a proxy connection, see if it's receiving data
+            proxy_running = False
             proxy_connected = False
             has_active_nodes = False
             if hasattr(current_app, "bluesky_proxy"):
-                proxy_connected = getattr(current_app.bluesky_proxy, "running", False)
+                proxy_running = getattr(current_app.bluesky_proxy, "running", False)
+                proxy_connected = getattr(
+                    current_app.bluesky_proxy, "is_connected", False
+                )
                 tracked_nodes = getattr(current_app.bluesky_proxy, "tracked_nodes", [])
                 has_active_nodes = len(tracked_nodes) > 0
 
@@ -492,6 +496,7 @@ def register_basic_routes(app, session_manager):
                     "ports_accessible": bluesky_running,
                     "port_11000": port_11000_listening,
                     "port_11001": port_11001_listening,
+                    "proxy_running": proxy_running,
                     "proxy_connected": proxy_connected,
                     "has_active_nodes": has_active_nodes,
                 },

@@ -16,12 +16,7 @@ import type { LogStreamManager } from '../ui/LogStreamManager';
 import type { OutputFileBrowser } from '../ui/OutputFileBrowser';
 import type { PanelResizer } from '../ui/panels/PanelResizer';
 import type { AircraftClickEvent } from '../ui/map/aircraft/AircraftInteractionManager';
-import type {
-    ConnectionStatusChangedDetail,
-    ConnectionUpdateDetail,
-    NodeInfoUpdateDetail,
-    ServerStatusUpdateDetail,
-} from '../data/types';
+import type { ServerStatusUpdateDetail } from '../data/types';
 
 declare global {
     // Compile-time build flag injected by webpack's DefinePlugin. `true` only
@@ -55,11 +50,7 @@ declare global {
     // Typed payloads for the app's document-level CustomEvents, so
     // addEventListener callbacks get `e.detail` types without casts.
     interface DocumentEventMap {
-        'webConnectionUpdate': CustomEvent<ConnectionUpdateDetail>;
-        'blueSkyConnectionUpdate': CustomEvent<ConnectionUpdateDetail>;
         'serverStatusUpdate': CustomEvent<ServerStatusUpdateDetail>;
-        'nodeInfoUpdate': CustomEvent<NodeInfoUpdateDetail>;
-        'connectionStatusChanged': CustomEvent<ConnectionStatusChangedDetail>;
         'aircraft-single-click': CustomEvent<AircraftClickEvent>;
         'aircraft-double-click': CustomEvent<AircraftClickEvent>;
         'consoleMessage': CustomEvent<{ message: string; type: string }>;

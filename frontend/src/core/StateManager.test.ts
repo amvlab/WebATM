@@ -180,9 +180,11 @@ describe('StateManager.reset', () => {
         sm = new StateManager();
     });
 
-    it('preserves connection state and user preferences, clears simulation state', () => {
-        sm.setConnectionStatus(true);
-        sm.setBlueSkyConnectionStatus(true);
+    it('preserves server status and user preferences, clears simulation state', () => {
+        // BlueSky connection state itself lives solely in ConnectionStatusService
+        // now - StateManager no longer mirrors it. serverStatus (the BlueSky
+        // process lifecycle) is a distinct, still-preserved concern.
+        sm.updateServerStatus('running');
         sm.updateDisplayOptions({ speedUnit: 'km/h' });
         sm.updateAircraftData(aircraftData());
         sm.setSelectedAircraft('KL123');
@@ -192,8 +194,7 @@ describe('StateManager.reset', () => {
         sm.reset();
 
         const state = sm.getState();
-        expect(state.connected).toBe(true);
-        expect(state.blueSkyConnected).toBe(true);
+        expect(state.serverStatus).toBe('running');
         expect(state.displayOptions.speedUnit).toBe('km/h');
         expect(state.aircraftData).toBeNull();
         expect(state.selectedAircraft).toBeNull();
@@ -202,17 +203,17 @@ describe('StateManager.reset', () => {
     });
 
     it('notifies only the keys that actually changed', () => {
-        sm.setConnectionStatus(true);
+        sm.updateServerStatus('running');
         sm.setSelectedAircraft('KL123');
 
-        const connectedListener = vi.fn();
+        const serverStatusListener = vi.fn();
         const selectedListener = vi.fn();
-        sm.subscribe('connected', connectedListener);
+        sm.subscribe('serverStatus', serverStatusListener);
         sm.subscribe('selectedAircraft', selectedListener);
 
         sm.reset();
 
-        expect(connectedListener).not.toHaveBeenCalled();
+        expect(serverStatusListener).not.toHaveBeenCalled();
         expect(selectedListener).toHaveBeenCalledWith(null, 'KL123');
     });
 });

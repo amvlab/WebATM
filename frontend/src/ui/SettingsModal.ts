@@ -3,7 +3,6 @@ import {
     ServerConfigResponse,
     ServerControlResponse
 } from '../data/types';
-import { connectionManager } from './ConnectionManager';
 import { consoleManager } from './ConsoleManager';
 import { modalManager } from './ModalManager';
 import { serverManager } from './ServerManager';
@@ -458,9 +457,6 @@ export class SettingsModal {
                 // Note: Connection success message is automatically logged by ConnectionStatusService
                 this.close();
 
-                // Update BlueSky connection status based on nodes
-                this.updateBlueSkyConnectionStatus();
-
                 // Schedule auto-switch check after a brief delay to allow node info to arrive
                 setTimeout(() => {
                     // This would call the main app's auto-switch logic
@@ -476,12 +472,10 @@ export class SettingsModal {
             }
 
             this.addConsoleMessage(`Connection failed: ${result.error}`, 'console-error');
-            this.updateConnectionStatus(false);
             return false;
         } catch (error) {
             logger.error('SettingsModal', 'Error updating server settings:', error);
             this.addConsoleMessage(`Connection error: ${(error as Error).message}`, 'console-error');
-            this.updateConnectionStatus(false);
             return false;
         } finally {
             // Reset button state
@@ -514,7 +508,6 @@ export class SettingsModal {
             const result: ServerControlResponse = await response.json();
             if (result.success) {
                 // Note: Disconnection message is automatically logged by ConnectionStatusService
-                this.updateConnectionStatus(false);
                 this.clearSavedServerIP();
 
                 // Immediately update button visibility after disconnect
@@ -780,31 +773,6 @@ export class SettingsModal {
                 consoleManager.info(message);
                 break;
         }
-    }
-
-    /**
-     * Update connection status
-     */
-    private updateConnectionStatus(connected: boolean): void {
-        this.blueSkyConnected = connected;
-
-        // Use the TypeScript connection manager
-        connectionManager.updateBlueSkyConnection(connected);
-
-        // Update server IP in connection manager
-        connectionManager.setServerIP(this.currentServerIP);
-    }
-
-    /**
-     * Update BlueSky connection status
-     */
-    private updateBlueSkyConnectionStatus(): void {
-        // This can be extended to check actual BlueSky connection state
-        // For now, we'll emit a custom event that other components can listen to
-        const event = new CustomEvent('blueSkyConnectionUpdate', {
-            detail: { connected: this.blueSkyConnected }
-        });
-        document.dispatchEvent(event);
     }
 
     /**

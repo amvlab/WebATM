@@ -9,7 +9,6 @@ import { settingsModal } from '../ui/SettingsModal';
 import { serverManager } from '../ui/ServerManager';
 import { modals } from '../ui/Modals';
 import { modalManager } from '../ui/ModalManager';
-import { connectionManager } from '../ui/ConnectionManager';
 import { panelResizer } from '../ui/panels/PanelResizer';
 import { SimulationNodesPanel } from '../ui/panels/left/SimulationNodesPanel';
 import { MapControlsPanel } from '../ui/panels/left/MapControlsPanel';
@@ -891,7 +890,6 @@ export class App {
         // Clean up modals and their document-level listeners
         this.commandPaletteModal.destroy();
         modalManager.destroy();
-        connectionManager.destroy();
 
         // Clean up map overlay
         if (this.mapOverlay) {

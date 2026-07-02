@@ -105,6 +105,16 @@ class BlueSkyProxy:
     # Connection Management - Delegate to ConnectionManager
     # ========================================================================
 
+    @property
+    def is_connected(self) -> bool:
+        """Single source of truth for "are we connected to BlueSky".
+
+        True once the client is running, has previously detected at least one
+        node, and still has active nodes. Every consumer (Socket.IO payloads,
+        REST routes) should read this instead of re-deriving the formula.
+        """
+        return self.was_connected and self.running and len(self.tracked_nodes) > 0
+
     def _ensure_clean_zmq_context(self):
         """Ensure we have a clean environment for ZMQ connections."""
         return self.connection_mgr._ensure_clean_zmq_context()

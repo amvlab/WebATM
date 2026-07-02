@@ -72,27 +72,13 @@ export class SocketManager {
         // Set up automatic state updates when socket events are received
         this.setEventHandlers({
             onConnect: () => {
-                // Update ConnectionStatusService
                 connectionStatus.setWebSocketConnected(true);
-
-                // Keep StateManager in sync (for backwards compatibility)
-                this.stateManager.setConnectionStatus(true);
             },
             onDisconnect: () => {
-                // Update ConnectionStatusService
                 connectionStatus.setWebSocketConnected(false);
-
-                // Keep StateManager in sync (for backwards compatibility)
-                this.stateManager.setConnectionStatus(false);
-                this.stateManager.setBlueSkyConnectionStatus(false);
-                this.stateManager.setReceivingDataStatus(false);
             },
             onReconnect: () => {
-                // Update ConnectionStatusService
                 connectionStatus.setWebSocketConnected(true);
-
-                // Keep StateManager in sync (for backwards compatibility)
-                this.stateManager.setConnectionStatus(true);
             },
             onInitialData: (data: InitialData) => {
                 // Process simulation data from initial load
@@ -104,7 +90,6 @@ export class SocketManager {
                 if (data.siminfo) {
                     this.stateManager.updateSimInfo(data.siminfo);
                     connectionStatus.onSimInfoReceived();
-                    this.stateManager.setReceivingDataStatus(true);
                 }
                 if (data.acdata) {
                     this.stateManager.updateAircraftData(data.acdata);
@@ -134,17 +119,14 @@ export class SocketManager {
             onSimInfo: (data: SimInfo) => {
                 this.stateManager.updateSimInfo(data);
                 connectionStatus.onSimInfoReceived();
-                this.stateManager.setReceivingDataStatus(true);
             },
             onAircraftData: (data: AircraftData) => {
                 this.stateManager.updateAircraftData(data);
                 connectionStatus.onAircraftDataReceived();
-                this.stateManager.setReceivingDataStatus(true);
             },
             onNodeInfo: (data: NodeInfo) => {
                 // CRITICAL: Receiving nodeinfo means we're connected to BlueSky!
                 connectionStatus.onNodeInfoReceived();
-                this.stateManager.setBlueSkyConnectionStatus(true);
 
                 // Update active node in state if available
                 if (data.active_node) {
@@ -187,15 +169,12 @@ export class SocketManager {
                 if (!data.connected) {
                     // Only set disconnected state from connection_status
                     connectionStatus.setBlueSkyConnected(false);
-                    this.stateManager.setBlueSkyConnectionStatus(false);
                 }
                 // If connected is true, wait for nodeinfo to confirm actual connection
             },
             onServerDisconnected: () => {
                 connectionStatus.setBlueSkyConnected(false);
                 connectionStatus.setReceivingData(false);
-                this.stateManager.setBlueSkyConnectionStatus(false);
-                this.stateManager.setReceivingDataStatus(false);
             },
             onReset: () => {
                 // IMPORTANT: RESET only resets simulation data, NOT connection status!
