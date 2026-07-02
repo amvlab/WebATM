@@ -10,7 +10,9 @@ import {
     PolylineData,
     InitialData,
     CommandDictData,
-    EchoData
+    EchoData,
+    Shape,
+    ShapeBatchData
 } from '../data/types';
 import type { StateManager } from './StateManager';
 import { parseShapePayload } from './shapePayload';
@@ -114,73 +116,18 @@ export class SocketManager {
                     logger.debug('SocketManager', 'Command dictionary loaded from initial data');
                 }
 
-                // Handle poly/polyline data from initial load (for shape persistence)
-                // Process in batch mode to avoid triggering multiple render cycles
-                let shapeCount = 0;
+                // Handle poly/polyline data from initial load (for shape
+                // persistence). Add in batch mode (no per-shape notify), then
+                // render once so a full initial_data load triggers a single
+                // render cycle instead of one per shape.
+                const shapeCount =
+                    this.addInitialShapes(data.poly_data, (item, node) =>
+                        this.stateManager.convertServerPolyToClientShape(item, node)) +
+                    this.addInitialShapes(data.polyline_data, (item, node) =>
+                        this.stateManager.convertServerPolylineToClientShape(item, node));
 
-                if (data.poly_data) {
-                    const polyData = data.poly_data;
-                    logger.verbose('SocketManager', 'Processing polygon data from initial_data:', polyData);
-
-                    // Process the poly data - add shapes without notifying yet
-                    if (polyData && typeof polyData === 'object' && 'polys' in polyData) {
-                        const polysDict = polyData.polys;
-                        if (polysDict && typeof polysDict === 'object' && Object.keys(polysDict).length > 0) {
-                            const state = this.stateManager.getState();
-                            for (const shapeData of Object.values(polysDict)) {
-                                if (shapeData && typeof shapeData === 'object') {
-                                    const polyDataItem = shapeData as PolyData;
-                                    if (polyDataItem.lat && polyDataItem.lon &&
-                                        Array.isArray(polyDataItem.lat) && Array.isArray(polyDataItem.lon) &&
-                                        polyDataItem.lat.length > 0 && polyDataItem.lon.length > 0) {
-                                        // Convert and add shape without notifying (false parameter)
-                                        const shape = this.stateManager.convertServerPolyToClientShape(polyDataItem, state.activeNode || undefined);
-                                        this.stateManager.addShape(shape, false);
-                                        shapeCount++;
-                                    }
-                                }
-                            }
-                            logger.debug('SocketManager', `Added ${shapeCount} polygons from initial_data (no notification yet)`);
-
-                            // Mark BlueSky as connected since we received shape data
-                            connectionStatus.onShapeDataReceived();
-                        }
-                    }
-                }
-
-                if (data.polyline_data) {
-                    const polylineData = data.polyline_data;
-                    logger.verbose('SocketManager', 'Processing polyline data from initial_data:', polylineData);
-
-                    // Process the polyline data - add shapes without notifying yet
-                    if (polylineData && typeof polylineData === 'object' && 'polys' in polylineData) {
-                        const polylinesDict = polylineData.polys;
-                        if (polylinesDict && typeof polylinesDict === 'object' && Object.keys(polylinesDict).length > 0) {
-                            const state = this.stateManager.getState();
-                            for (const shapeData of Object.values(polylinesDict)) {
-                                if (shapeData && typeof shapeData === 'object') {
-                                    const polylineDataItem = shapeData as PolylineData;
-                                    if (polylineDataItem.lat && polylineDataItem.lon &&
-                                        Array.isArray(polylineDataItem.lat) && Array.isArray(polylineDataItem.lon) &&
-                                        polylineDataItem.lat.length > 0 && polylineDataItem.lon.length > 0) {
-                                        // Convert and add shape without notifying (false parameter)
-                                        const shape = this.stateManager.convertServerPolylineToClientShape(polylineDataItem, state.activeNode || undefined);
-                                        this.stateManager.addShape(shape, false);
-                                        shapeCount++;
-                                    }
-                                }
-                            }
-                            logger.debug('SocketManager', `Added ${shapeCount} polylines from initial_data (no notification yet)`);
-
-                            // Mark BlueSky as connected since we received shape data
-                            connectionStatus.onShapeDataReceived();
-                        }
-                    }
-                }
-
-                // Notify listeners once after all shapes are added
                 if (shapeCount > 0) {
-                    logger.debug('SocketManager', `All ${shapeCount} shapes added - notifying listeners once`);
+                    logger.debug('SocketManager', `Added ${shapeCount} shapes from initial_data - notifying listeners once`);
                     this.stateManager.notifyShapeListeners();
                 }
             },
@@ -335,6 +282,30 @@ export class SocketManager {
                 shape => this.handlers.onPolyline?.(shape)
             );
         });
+    }
+
+    /**
+     * Add shapes from an initial_data envelope in batch mode: converts each
+     * valid shape and stores it without notifying, so the caller can render
+     * once. Returns how many were added.
+     */
+    private addInitialShapes<T extends PolyData | PolylineData>(
+        payload: ShapeBatchData<T> | undefined,
+        convert: (item: T, activeNode: string | undefined) => Shape
+    ): number {
+        if (!payload) return 0;
+
+        const { validShapes } = parseShapePayload<T>(payload);
+        if (validShapes.length === 0) return 0;
+
+        const activeNode = this.stateManager.getState().activeNode || undefined;
+        for (const item of validShapes) {
+            this.stateManager.addShape(convert(item, activeNode), false);
+        }
+
+        // Receiving valid shape data means BlueSky is connected.
+        connectionStatus.onShapeDataReceived();
+        return validShapes.length;
     }
 
     /**
