@@ -347,6 +347,9 @@ describe('StateManager server shape conversion', () => {
         const shape = sm.convertServerPolyToClientShape({ name: 'bad' } as unknown as PolyData);
         expect(shape.coordinates).toEqual([]);
         expect(shape.name).toBe('bad');
+        // Invalid input uses the same fill opacity as valid input, so the
+        // display toggle (not per-shape data) governs fill visibility.
+        expect(shape.fillOpacity).toBe(0.2);
 
         const unnamed = sm.convertServerPolyToClientShape({} as unknown as PolyData);
         expect(unnamed.name).toBe('unnamed');

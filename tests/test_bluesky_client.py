@@ -171,6 +171,25 @@ class TestBlueSkySubscriber:
         sub.emit("T", "payload")
         assert ok == ["payload"]
 
+    def test_subscribe_is_idempotent(self):
+        # Subscribing the same callback twice must not double-register it, so
+        # emit() invokes it once (mirrors BlueSkySignal.connect's dedup guard).
+        sub = BlueSkySubscriber()
+        received = []
+        sub.subscribe("T", received.append)
+        sub.subscribe("T", received.append)
+        assert len(sub.subscribers["T"]) == 1
+        sub.emit("T", 7)
+        assert received == [7]
+
+    def test_distinct_callbacks_still_both_registered(self):
+        # The dedup guard is per-callback identity, not per-topic.
+        sub = BlueSkySubscriber()
+        a, b = [], []
+        sub.subscribe("T", a.append)
+        sub.subscribe("T", b.append)
+        assert len(sub.subscribers["T"]) == 2
+
 
 class TestBlueSkyStack:
     def test_stack_single_command(self):

@@ -40,6 +40,21 @@ class TestRegisterSubscribers:
         finally:
             set_bluesky_proxy(None)
 
+    def test_double_registration_does_not_duplicate_callbacks(self):
+        # A reconnect that re-runs register_subscribers on the same client must
+        # not stack duplicate callbacks (which would process every message twice).
+        proxy = BlueSkyProxy()
+        proxy.bluesky_client = BlueSkyClient()
+        set_bluesky_proxy(proxy)
+        try:
+            register_subscribers()
+            register_subscribers()
+            subs = proxy.bluesky_client.subscriber.subscribers
+            for topic, _, _ in SUBSCRIPTIONS:
+                assert len(subs[topic]) == 1
+        finally:
+            set_bluesky_proxy(None)
+
     def test_no_proxy_is_safe(self):
         set_bluesky_proxy(None)
         # Should log an error and return without raising.
