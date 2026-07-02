@@ -137,6 +137,11 @@ export class MapDisplay {
         // Set up event handlers
         this.setupEventHandlers();
 
+        // If the initial style is remote, probe its reachability so an
+        // air-gapped first load (where the CDN request hangs without ever
+        // erroring) still swaps to the bundled offline basemap in seconds.
+        this.styleManager.armFirstLoadFallback();
+
         // Keep the map transform synced to the container/canvas so cursor
         // positions (e.lngLat) always match the on-screen pointer.
         this.observeContainerResize();

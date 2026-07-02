@@ -40,6 +40,13 @@ export class MapStyleManager {
     private hasFallenBackToOffline = false;
     private currentStyle: string = '';
 
+    // How long the first-load reachability probe waits for the remote style
+    // document before declaring it unreachable. Generous enough that a slow
+    // but working connection never trips it (the style document is a few KB),
+    // short enough that an air-gapped first load recovers in seconds instead
+    // of hanging on the browser's connect timeout (which can be minutes).
+    private readonly FIRST_LOAD_PROBE_TIMEOUT_MS = 5000;
+
     constructor(private readonly getMap: () => Map | null) {}
 
     /**
@@ -94,6 +101,60 @@ export class MapStyleManager {
             logger.error('MapStyleManager', 'Error changing map style:', error);
             alert(`Error changing map style: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
+    }
+
+    /**
+     * Make the first-load offline fallback deterministic. Call once right
+     * after the map is constructed, when the initial style may be remote.
+     *
+     * The 'error'-event fallback in handleMapError only helps when the failed
+     * style fetch actually *rejects*. On an air-gapped network the request to
+     * the basemap CDN often just hangs (dropped packets, DNS blackhole, proxy
+     * sink) — no error event ever fires, the map never gets a style, and the
+     * user stares at a blank basemap until the OS connect timeout (minutes)
+     * finally rejects the fetch. Only then does the fallback fire and persist
+     * the offline style, which is why a later reload "fixed" it.
+     *
+     * So probe the same style document the map is fetching, with our own
+     * timeout. If the probe fails (network error, timeout, or HTTP error)
+     * while the map still has no loaded style, swap to the bundled offline
+     * basemap immediately. If the map's style loads first — or the user picks
+     * a different style meanwhile — the probe result is ignored.
+     */
+    public armFirstLoadFallback(): void {
+        const map = this.getMap();
+        if (!map) return;
+        if (!this.currentStyle.startsWith('http')) return;
+
+        const probedStyle = this.currentStyle;
+        let styleLoaded = false;
+        map.once('style.load', () => { styleLoaded = true; });
+
+        const controller = new AbortController();
+        const timer = window.setTimeout(
+            () => controller.abort(),
+            this.FIRST_LOAD_PROBE_TIMEOUT_MS
+        );
+
+        fetch(probedStyle, { signal: controller.signal })
+            .then((res) => (res.ok ? null : `HTTP ${res.status}`))
+            .catch((err: unknown) => (err instanceof Error && err.message) || 'network error')
+            .then((failure) => {
+                window.clearTimeout(timer);
+                if (!failure) return;
+                if (styleLoaded || this.hasFallenBackToOffline) return;
+                // The user switched styles while the probe was in flight —
+                // don't stomp their choice.
+                if (this.currentStyle !== probedStyle) return;
+                if (this.getMap()?.isStyleLoaded()) return;
+
+                this.hasFallenBackToOffline = true;
+                logger.warn(
+                    'MapStyleManager',
+                    `Remote style did not load (${failure}); switching to offline basemap.`
+                );
+                this.changeStyle(this.OFFLINE_STYLE);
+            });
     }
 
     /**
@@ -177,11 +238,15 @@ export class MapStyleManager {
         const message = (err.message || String(err)).toLowerCase();
 
         // status 0 = no response (offline / DNS / CORS preflight failure).
-        // "failed to fetch" is Chromium's TypeError for the same thing.
+        // "failed to fetch" is Chromium's TypeError for the same thing;
+        // "networkerror" is Firefox's. Timeouts (a proxy or the browser
+        // giving up on an unreachable host) mean the same: no basemap.
         return (
             status === 0 ||
             message.includes('failed to fetch') ||
-            message.includes('networkerror')
+            message.includes('networkerror') ||
+            message.includes('timeout') ||
+            message.includes('timed out')
         );
     }
 
