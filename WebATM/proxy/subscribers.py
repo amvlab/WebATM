@@ -42,15 +42,12 @@ SUBSCRIPTIONS = [
 ]
 
 
-def get_bluesky_proxy():
-    """Get the current BlueSky proxy instance."""
-    from . import get_bluesky_proxy as _get_proxy
-
-    return _get_proxy()
-
-
 def register_subscribers():
     """Register subscriber callbacks using standalone proxy."""
+    # Imported lazily: WebATM.proxy imports this module while it is still being
+    # initialised, so get_bluesky_proxy does not exist at module-load time yet.
+    from . import get_bluesky_proxy
+
     proxy = get_bluesky_proxy()
     if not proxy:
         logger.error("No proxy available for subscriber registration")

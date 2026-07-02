@@ -160,8 +160,9 @@ class BlueSkySubscriber:
         self.subscribers: dict[str, list] = defaultdict(list)
 
     def subscribe(self, topic: str, callback: Callable):
-        """Subscribe to a topic."""
-        self.subscribers[topic].append(callback)
+        """Subscribe to a topic (idempotent, like BlueSkySignal.connect)."""
+        if callback not in self.subscribers[topic]:
+            self.subscribers[topic].append(callback)
 
     def emit(self, topic: str, *args, **kwargs):
         """Emit data to subscribers of a topic."""
