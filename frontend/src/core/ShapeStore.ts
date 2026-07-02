@@ -4,15 +4,13 @@ import { logger } from '../utils/Logger';
 export type ShapeChangeListener = (shapes: Map<string, Shape>) => void;
 
 /**
- * Convert PolyData from server format to client PolygonShape format
- * Server sends: {name, lat[], lon[], color?, fill?}
- * Client uses: {type, name, coordinates: {lat, lng}[], ...styling}
+ * Convert server PolyData ({name, lat[], lon[], color?, fill?}) to a client
+ * PolygonShape ({type, name, coordinates: {lat, lng}[], ...styling}).
  */
 export function polyDataToShape(data: PolyData, nodeId?: string): PolygonShape {
-    // Defensive check: ensure lat and lon arrays exist
     if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
         logger.warn('ShapeStore', 'Invalid PolyData received - missing or invalid lat/lon arrays:', data);
-        // Return a minimal valid shape with empty coordinates
+        // Minimal valid shape with empty coordinates so callers never crash.
         return {
             type: 'polygon',
             name: data.name || 'unnamed',
@@ -20,7 +18,7 @@ export function polyDataToShape(data: PolyData, nodeId?: string): PolygonShape {
             nodeId,
             coordinates: [],
             fillColor: data.color,
-            fillOpacity: data.fill ? 0.2 : 0,
+            fillOpacity: 0.2,
             strokeColor: data.color,
             strokeWidth: 2
         };
@@ -47,15 +45,13 @@ export function polyDataToShape(data: PolyData, nodeId?: string): PolygonShape {
 }
 
 /**
- * Convert PolylineData from server format to client PolylineShape format
- * Server sends: {name, lat[], lon[], color?, width?}
- * Client uses: {type, name, coordinates: {lat, lng}[], ...styling}
+ * Convert server PolylineData ({name, lat[], lon[], color?, width?}) to a
+ * client PolylineShape ({type, name, coordinates: {lat, lng}[], ...styling}).
  */
 export function polylineDataToShape(data: PolylineData, nodeId?: string): PolylineShape {
-    // Defensive check: ensure lat and lon arrays exist
     if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
         logger.warn('ShapeStore', 'Invalid PolylineData received - missing or invalid lat/lon arrays:', data);
-        // Return a minimal valid shape with empty coordinates
+        // Minimal valid shape with empty coordinates so callers never crash.
         return {
             type: 'polyline',
             name: data.name || 'unnamed',
@@ -85,12 +81,9 @@ export function polylineDataToShape(data: PolylineData, nodeId?: string): Polyli
 
 /**
  * ShapeStore - name-indexed storage for simulation shapes (polygons,
- * polylines) with change notification.
- *
- * Extracted from StateManager; the StateManager facade delegates here so
- * existing callers keep their API. Shapes belong to the simulation: they
- * are cleared on node switches and resets, not preserved like user
- * preferences.
+ * polylines) with change notification. The StateManager facade delegates
+ * here. Shapes belong to the simulation, so they are cleared on node
+ * switches and resets rather than persisted like user preferences.
  */
 export class ShapeStore {
     private shapes: Map<string, Shape> = new Map();
@@ -147,7 +140,6 @@ export class ShapeStore {
      * Add or update shape from server PolyData format
      */
     addPolyData(data: PolyData, nodeId?: string): void {
-        // Validate data before converting
         if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
             logger.warn('ShapeStore', 'Skipping PolyData - missing or invalid lat/lon arrays');
             return;
@@ -164,7 +156,6 @@ export class ShapeStore {
      * Add or update shape from server PolylineData format
      */
     addPolylineData(data: PolylineData, nodeId?: string): void {
-        // Validate data before converting
         if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
             logger.warn('ShapeStore', 'Skipping PolylineData - missing or invalid lat/lon arrays');
             return;
