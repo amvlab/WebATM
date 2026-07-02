@@ -462,9 +462,11 @@ body {
     min-height: 200px;
 }
 
+/* Aircraft Info is a fixed height sized to fit its full field set with no
+   blank space; extra rows (conflict / 3D overrides) scroll internally. */
 .right-panel .aircraft-panel {
-    flex: 0 0 var(--aircraft-panel-basis, 200px);
-    min-height: 200px;
+    flex: 0 0 var(--aircraft-panel-basis, 262px);
+    min-height: 262px;
 }
 
 .aircraft-panel .panel-content,
@@ -472,9 +474,11 @@ body {
     overflow-y: auto;
 }
 
+/* Conflicts grows to fill the column's remaining height so it always reaches
+   the bottom (no gap); content scrolls internally. */
 .right-panel .conflicts-panel {
     flex: 1 1 var(--conflicts-panel-basis, auto);
-    min-height: 200px;
+    min-height: 160px;
     max-height: none;
 }
 
@@ -2473,6 +2477,10 @@ html.wa-open-threeD-controls #threeD-controls {
     display: flex;
     flex-direction: column;
     flex: 1;
+    /* Allow shrinking below intrinsic content height so the inner scroll
+       container (e.g. .traffic-list) owns the overflow and stays within the
+       fixed-height panel instead of bursting past its overflow:hidden clip. */
+    min-height: 0;
 }
 
 .panel-content.collapsed {
@@ -2524,7 +2532,6 @@ html.wa-open-threeD-controls #threeD-controls {
     overflow-y: auto;
     overflow-x: hidden;
     min-height: 0;
-    max-height: 250px;
     border: 1px solid var(--border-strong);
     border-radius: 4px;
     background-color: var(--border);
