@@ -100,3 +100,48 @@ class TestDelegation:
         monkeypatch.setattr(proxy.connection_mgr, "close", lambda: called.append(1))
         proxy.close()
         assert called == [1]
+
+
+class TestStartClientRecreatesClient:
+    def test_recreates_client_after_stopping_a_running_connection(self, monkeypatch):
+        # Regression: start_client() called while a connection is still running
+        # used to tear the client down (stop_client sets it to None) and then
+        # dereference it, crashing with AttributeError. The teardown must happen
+        # before the client is (re)created so connect() always has a live client.
+        import WebATM.proxy.managers.connection_manager as cm_mod
+
+        proxy = BlueSkyProxy()
+        cm = proxy.connection_mgr
+
+        # Simulate a live connection with a stale client instance.
+        proxy.running = True
+        proxy.bluesky_client = object()
+
+        def fake_stop(context="disconnect"):
+            proxy.running = False
+            proxy.bluesky_client = None  # mirrors _close_bluesky_client
+
+        monkeypatch.setattr(cm, "stop_client", fake_stop)
+
+        created = []
+
+        class FakeClient:
+            node_id = b"X"
+
+            def __init__(self):
+                created.append(self)
+
+            def connect(self, hostname=None):
+                return True
+
+        monkeypatch.setattr(cm_mod, "BlueSkyClient", FakeClient)
+        monkeypatch.setattr(cm, "_connect_bluesky_client_signals", lambda: None)
+        monkeypatch.setattr(cm, "_start_network_timer", lambda: None)
+        monkeypatch.setattr(proxy.data_mgr, "start_backup_timer", lambda: None)
+
+        # Must not raise (previously: None.connect()).
+        cm.start_client(hostname="127.0.0.1")
+
+        assert len(created) == 1
+        assert proxy.bluesky_client is created[0]
+        assert proxy.running is True

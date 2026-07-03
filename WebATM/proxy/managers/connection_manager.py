@@ -97,6 +97,15 @@ class ConnectionManager:
 
     def start_client(self, hostname=None):
         """Start the network client with fresh state - following ZMQ pattern."""
+        # Ensure we start from a clean state. stop_client() destroys the client
+        # instance, so this must run *before* we (re)create it below -- otherwise
+        # we would connect() on a client that was just torn down.
+        if self.proxy.running:
+            logger.info("Stopping existing connection before starting new one")
+            self.stop_client()
+            # Wait for cleanup to complete
+            time.sleep(0.2)
+
         # Following ZMQ pattern: create context and sockets when connecting
         if self.proxy.bluesky_client is None:
             logger.debug(" Creating BlueSky network client...")
@@ -107,13 +116,6 @@ class ConnectionManager:
             except Exception as e:
                 logger.error(f" Error creating BlueSky network client: {e}")
                 raise
-
-        # Ensure we start with a clean state
-        if self.proxy.running:
-            logger.info("Stopping existing connection before starting new one")
-            self.stop_client()
-            # Wait for cleanup to complete
-            time.sleep(0.2)
 
         if hostname:
             self.proxy.server_ip = hostname
