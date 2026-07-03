@@ -39,61 +39,37 @@ class ConnectionManager:
             # Continue anyway - the FixedClient might still work
 
     def _connect_bluesky_client_signals(self):
-        """Connect BlueSky client signals to our handlers."""
-        if self.proxy.bluesky_client is None:
+        """Connect BlueSky client signals to our node-manager handlers."""
+        client = self.proxy.bluesky_client
+        if client is None:
             logger.warning("Cannot connect signals - BlueSky client not initialized")
             return
 
+        node_mgr = self.proxy.node_mgr
+        # Each BlueSky client signal -> the node-manager handler it feeds.
+        signal_handlers = {
+            "node_added": node_mgr._on_node_added,
+            "server_added": node_mgr._on_server_added,
+            "node_removed": node_mgr._on_node_removed,
+            "server_removed": node_mgr._on_server_removed,
+            "actnode_changed": node_mgr._on_actnode_changed,
+        }
+
         try:
-            node_mgr = self.proxy.node_mgr
-
             logger.debug("Connecting BlueSky client signals...")
-
-            # Check which signals are available and connect them safely
-            if hasattr(self.proxy.bluesky_client, "node_added"):
-                self.proxy.bluesky_client.node_added.connect(node_mgr._on_node_added)
-                logger.debug("node_added signal connected")
-            else:
-                logger.warning("node_added signal not available")
-
-            if hasattr(self.proxy.bluesky_client, "server_added"):
-                self.proxy.bluesky_client.server_added.connect(
-                    node_mgr._on_server_added
-                )
-                logger.debug("server_added signal connected")
-            else:
-                logger.warning("server_added signal not available")
-
-            if hasattr(self.proxy.bluesky_client, "node_removed"):
-                self.proxy.bluesky_client.node_removed.connect(
-                    node_mgr._on_node_removed
-                )
-                logger.debug("node_removed signal connected")
-            else:
-                logger.warning("node_removed signal not available")
-
-            if hasattr(self.proxy.bluesky_client, "server_removed"):
-                self.proxy.bluesky_client.server_removed.connect(
-                    node_mgr._on_server_removed
-                )
-                logger.debug("server_removed signal connected")
-            else:
-                logger.warning("server_removed signal not available")
-
-            if hasattr(self.proxy.bluesky_client, "actnode_changed"):
-                self.proxy.bluesky_client.actnode_changed.connect(
-                    node_mgr._on_actnode_changed
-                )
-                logger.debug("actnode_changed signal connected")
-            else:
-                logger.warning("actnode_changed signal not available")
-
+            for name, handler in signal_handlers.items():
+                signal = getattr(client, name, None)
+                if signal is None:
+                    logger.warning(f"{name} signal not available")
+                    continue
+                signal.connect(handler)
+                logger.debug(f"{name} signal connected")
         except Exception as e:
+            # Continue without signals - basic functionality might still work.
             logger.error(f" Error connecting signals: {e}")
             logger.debug(
-                f"Available attributes: {[attr for attr in dir(self.proxy.bluesky_client) if not attr.startswith('_')]}"
+                f"Available attributes: {[attr for attr in dir(client) if not attr.startswith('_')]}"
             )
-            # Continue without signals - basic functionality might still work
 
     def start_client(self, hostname=None):
         """Start the network client with fresh state - following ZMQ pattern."""
@@ -191,12 +167,9 @@ class ConnectionManager:
                     if has_active_nodes and not self.proxy.was_connected:
                         self.proxy.was_connected = True
                         # Start the data-flow timeout clock from "first node
-                        # appeared", not from start_client(). Before this point
-                        # no sim/traffic data could arrive (no nodes existed),
-                        # so any wait between start_client() and the first node
-                        # spawning must not count against connection_timeout —
-                        # otherwise a slow cold-start (gVisor / capped CPU)
-                        # disconnects the moment nodes show up.
+                        # appeared", not from start_client() — no data can arrive
+                        # before nodes exist, so a slow cold-start must not count
+                        # against connection_timeout.
                         self.proxy.last_successful_update = current_time
                         logger.info(
                             "Connection established to BlueSky remote server hosted by amvlab"

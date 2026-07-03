@@ -102,6 +102,67 @@ class TestDelegation:
         assert called == [1]
 
 
+class _FakeSignal:
+    """Minimal stand-in for a BlueSky client signal that records connections."""
+
+    def __init__(self):
+        self.connected = []
+
+    def connect(self, handler):
+        self.connected.append(handler)
+
+
+class _FakeClient:
+    """Fake BlueSky client exposing only the requested signal attributes."""
+
+    def __init__(self, signal_names):
+        for name in signal_names:
+            setattr(self, name, _FakeSignal())
+
+
+ALL_SIGNALS = (
+    "node_added",
+    "server_added",
+    "node_removed",
+    "server_removed",
+    "actnode_changed",
+)
+
+
+class TestConnectBlueSkyClientSignals:
+    """The signal wiring is data-driven; verify it still connects every signal
+    to the matching node-manager handler and degrades gracefully."""
+
+    def test_connects_every_available_signal_to_its_handler(self):
+        proxy = BlueSkyProxy()
+        proxy.bluesky_client = _FakeClient(ALL_SIGNALS)
+
+        proxy._connect_bluesky_client_signals()
+
+        node_mgr = proxy.node_mgr
+        expected = {
+            "node_added": node_mgr._on_node_added,
+            "server_added": node_mgr._on_server_added,
+            "node_removed": node_mgr._on_node_removed,
+            "server_removed": node_mgr._on_server_removed,
+            "actnode_changed": node_mgr._on_actnode_changed,
+        }
+        for name, handler in expected.items():
+            assert getattr(proxy.bluesky_client, name).connected == [handler]
+
+    def test_missing_signal_is_skipped_without_blocking_others(self):
+        # A client missing one signal must still wire up the remaining four.
+        present = [n for n in ALL_SIGNALS if n != "server_removed"]
+        proxy = BlueSkyProxy()
+        proxy.bluesky_client = _FakeClient(present)
+
+        proxy._connect_bluesky_client_signals()
+
+        assert not hasattr(proxy.bluesky_client, "server_removed")
+        for name in present:
+            assert getattr(proxy.bluesky_client, name).connected
+
+
 class TestStartClientRecreatesClient:
     def test_recreates_client_after_stopping_a_running_connection(self, monkeypatch):
         # Regression: start_client() called while a connection is still running
