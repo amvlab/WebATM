@@ -100,3 +100,109 @@ class TestDelegation:
         monkeypatch.setattr(proxy.connection_mgr, "close", lambda: called.append(1))
         proxy.close()
         assert called == [1]
+
+
+class _FakeSignal:
+    """Minimal stand-in for a BlueSky client signal that records connections."""
+
+    def __init__(self):
+        self.connected = []
+
+    def connect(self, handler):
+        self.connected.append(handler)
+
+
+class _FakeClient:
+    """Fake BlueSky client exposing only the requested signal attributes."""
+
+    def __init__(self, signal_names):
+        for name in signal_names:
+            setattr(self, name, _FakeSignal())
+
+
+ALL_SIGNALS = (
+    "node_added",
+    "server_added",
+    "node_removed",
+    "server_removed",
+    "actnode_changed",
+)
+
+
+class TestConnectBlueSkyClientSignals:
+    """The signal wiring is data-driven; verify it still connects every signal
+    to the matching node-manager handler and degrades gracefully."""
+
+    def test_connects_every_available_signal_to_its_handler(self):
+        proxy = BlueSkyProxy()
+        proxy.bluesky_client = _FakeClient(ALL_SIGNALS)
+
+        proxy._connect_bluesky_client_signals()
+
+        node_mgr = proxy.node_mgr
+        expected = {
+            "node_added": node_mgr._on_node_added,
+            "server_added": node_mgr._on_server_added,
+            "node_removed": node_mgr._on_node_removed,
+            "server_removed": node_mgr._on_server_removed,
+            "actnode_changed": node_mgr._on_actnode_changed,
+        }
+        for name, handler in expected.items():
+            assert getattr(proxy.bluesky_client, name).connected == [handler]
+
+    def test_missing_signal_is_skipped_without_blocking_others(self):
+        # A client missing one signal must still wire up the remaining four.
+        present = [n for n in ALL_SIGNALS if n != "server_removed"]
+        proxy = BlueSkyProxy()
+        proxy.bluesky_client = _FakeClient(present)
+
+        proxy._connect_bluesky_client_signals()
+
+        assert not hasattr(proxy.bluesky_client, "server_removed")
+        for name in present:
+            assert getattr(proxy.bluesky_client, name).connected
+
+
+class TestStartClientRecreatesClient:
+    def test_recreates_client_after_stopping_a_running_connection(self, monkeypatch):
+        # Regression: start_client() called while a connection is still running
+        # used to tear the client down (stop_client sets it to None) and then
+        # dereference it, crashing with AttributeError. The teardown must happen
+        # before the client is (re)created so connect() always has a live client.
+        import WebATM.proxy.managers.connection_manager as cm_mod
+
+        proxy = BlueSkyProxy()
+        cm = proxy.connection_mgr
+
+        # Simulate a live connection with a stale client instance.
+        proxy.running = True
+        proxy.bluesky_client = object()
+
+        def fake_stop(context="disconnect"):
+            proxy.running = False
+            proxy.bluesky_client = None  # mirrors _close_bluesky_client
+
+        monkeypatch.setattr(cm, "stop_client", fake_stop)
+
+        created = []
+
+        class FakeClient:
+            node_id = b"X"
+
+            def __init__(self):
+                created.append(self)
+
+            def connect(self, hostname=None):
+                return True
+
+        monkeypatch.setattr(cm_mod, "BlueSkyClient", FakeClient)
+        monkeypatch.setattr(cm, "_connect_bluesky_client_signals", lambda: None)
+        monkeypatch.setattr(cm, "_start_network_timer", lambda: None)
+        monkeypatch.setattr(proxy.data_mgr, "start_backup_timer", lambda: None)
+
+        # Must not raise (previously: None.connect()).
+        cm.start_client(hostname="127.0.0.1")
+
+        assert len(created) == 1
+        assert proxy.bluesky_client is created[0]
+        assert proxy.running is True
