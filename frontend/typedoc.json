@@ -1,0 +1,25 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "plugin": ["typedoc-plugin-markdown"],
+  "name": "WebATM Frontend",
+  "entryPoints": ["src"],
+  "entryPointStrategy": "expand",
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.d.ts",
+    "**/node_modules/**"
+  ],
+  "out": "../docs/frontend/api",
+  "readme": "none",
+  "githubPages": false,
+  "outputFileStrategy": "modules",
+  "hidePageHeader": true,
+  "hideBreadcrumbs": true,
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "entryFileName": "index",
+  "fileExtension": ".md",
+  "useCodeBlocks": true,
+  "useCustomAnchors": true,
+  "sort": ["source-order"]
+}

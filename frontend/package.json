@@ -20,7 +20,8 @@
     "watch": "webpack --watch --mode=development",
     "watch:integrated": "INTEGRATED_BUILD=true webpack --watch --mode=development",
     "type-check": "tsc --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "docs:api": "typedoc"
   },
   "keywords": [],
   "author": "",
@@ -33,6 +34,8 @@
     "eslint": "^10.5.0",
     "happy-dom": "^20.10.2",
     "ts-loader": "^9.5.4",
+    "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.12.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.61.0",
     "vitest": "^4.1.8",
