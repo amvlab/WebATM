@@ -1,8 +1,8 @@
-"""
-WebATM server package.
+"""Provide the WebATM web server components.
 
-This package contains all web server components including routes,
-session management, Socket.IO handlers, and server status functionality.
+This package contains all web server components, including Flask routes,
+session management, Socket.IO handlers, and BlueSky server status
+functionality.
 """
 
 from .bluesky_server_status import register_server_status_routes

@@ -1,5 +1,4 @@
-"""
-BlueSky Web app developed by amvlab.
+"""BlueSky Web app developed by amvlab.
 
 This package provides a web-based interface for BlueSky - The Open Air Traffic
 Simulator developed by TU Delft (Delft University of Technology).
@@ -17,6 +16,10 @@ def _read_version() -> str:
     ``version`` field in ``pyproject.toml``). Fall back to parsing
     ``pyproject.toml`` directly when running from a source checkout that isn't
     installed (e.g. plain ``python WebATM.py``).
+
+    Returns:
+        str: The resolved version string, or ``"unknown"`` if it cannot be
+            determined.
     """
     try:
         return _pkg_version("webatm")

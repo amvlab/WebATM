@@ -10,7 +10,22 @@ logger = get_logger()
 
 
 def make_json_serializable(obj):
-    """Convert object to JSON-serializable format."""
+    """Convert an object to a JSON-serializable format.
+
+    Recursively converts numpy arrays and scalars, dictionaries (including
+    BlueSky's msgpack-serialized numpy arrays, identified by the ``numpy``,
+    ``data``, ``type`` and ``shape`` byte keys), lists, tuples, and arbitrary
+    objects (via ``vars()``) into plain Python types that ``json.dumps`` can
+    handle. Byte dictionary keys are decoded to strings.
+
+    Args:
+        obj (Any): The object to convert. May be a numpy array/scalar, dict, list,
+            tuple, or any object exposing ``__dict__``.
+
+    Returns:
+        Any: A JSON-serializable equivalent of ``obj`` (list, dict, int,
+            float, str, or the object itself if already serializable).
+    """
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, np.integer):
@@ -84,10 +99,25 @@ def make_json_serializable(obj):
 
 
 def i2txt(i, n):
-    """Convert integer to string with leading zeros to make it n chars long"""
+    """Convert an integer to a zero-padded string of fixed width.
+
+    Args:
+        i (int): The integer to format.
+        n (int): The total width of the resulting string.
+
+    Returns:
+        str: ``i`` rendered with leading zeros to exactly ``n`` characters.
+    """
     return f"{i:0{n}d}"
 
 
 def tim2txt(t):
-    """Convert time to timestring: HH:MM:SS.hh"""
+    """Convert a time value in seconds to an ``HH:MM:SS.hh`` string.
+
+    Args:
+        t (float): Time in seconds (e.g. simulation time).
+
+    Returns:
+        str: The formatted time string with hundredths of a second.
+    """
     return strftime("%H:%M:%S.", gmtime(t)) + i2txt(int((t - int(t)) * 100.0), 2)

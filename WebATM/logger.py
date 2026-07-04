@@ -1,7 +1,7 @@
-"""
-Centralized logging configuration for WebATM.
+"""Provide centralized logging configuration for WebATM.
 
 Provides standardized logging similar to TypeScript logging with:
+
 - Different log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 - Automatic filename prefixes: [FileName] log information
 - Consistent formatting across all Python modules
@@ -13,9 +13,20 @@ from pathlib import Path
 
 
 class FileNameFormatter(logging.Formatter):
-    """Custom formatter that adds filename prefix to log messages."""
+    """Custom formatter that adds a filename prefix to log messages."""
 
     def format(self, record):
+        """Format a log record, prefixing the message with its source filename.
+
+        Werkzeug (Flask's HTTP server) records are prefixed with ``[Werkzeug]``;
+        all other records use the CamelCased stem of the source file name.
+
+        Args:
+            record (logging.LogRecord): The log record to format.
+
+        Returns:
+            str: The formatted log message.
+        """
         # Special handling for werkzeug (Flask's HTTP server) logs
         if record.name == "werkzeug":
             filename = "Werkzeug"
@@ -43,13 +54,16 @@ def configure_logging(
     log_file: str | None = None,
     include_console: bool = True,
 ):
-    """
-    Configure global logging settings for WebATM.
+    """Configure global logging settings for WebATM.
+
+    Resets the ``WebATM`` root logger and any cached module loggers, then
+    attaches console and/or file handlers using the shared
+    :class:`FileNameFormatter`.
 
     Args:
-        level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file: Optional file path to write logs to
-        include_console: Whether to include console output (default: True)
+        level (int): Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+        log_file (str | None): Optional file path to write logs to.
+        include_console (bool): Whether to include console output.
     """
     global _log_level, _loggers
 
@@ -82,23 +96,23 @@ def configure_logging(
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
-    """
-    Get or create a logger for a module.
+    """Get or create a logger for a module.
 
-    This function automatically determines the calling module's name
-    and creates a logger with filename prefixes.
+    This function automatically determines the calling module's name and
+    creates a logger with filename prefixes. Loggers are cached, so repeated
+    calls with the same name return the same instance.
 
     Args:
-        name: Optional custom name for the logger. If not provided,
-              uses the calling module's filename.
+        name (str | None): Optional custom name for the logger. If not
+            provided, uses the calling module's filename.
 
     Returns:
-        A configured logger instance
+        logging.Logger: A configured logger instance.
 
     Example:
-        logger = get_logger()
-        logger.info("Starting process")
-        # Output: 2025-11-06 10:30:45 - INFO - [Main] Starting process
+        >>> logger = get_logger()
+        >>> logger.info("Starting process")
+        2025-11-06 10:30:45 - INFO - [Main] Starting process
     """
     global _loggers
 

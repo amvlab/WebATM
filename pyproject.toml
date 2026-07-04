@@ -23,9 +23,12 @@ prod = [
     "eventlet>=0.33.0",
 ]
 
-# Development tooling lives in a PEP 735 dependency group so that a bare
-# `uv sync` installs it automatically (great for testing/linting), while it is
-# never published as part of the package or pulled into production images.
+# Development tooling lives in PEP 735 dependency groups so that a bare
+# `uv sync` installs the `dev` group automatically (great for testing/linting),
+# while none of this is ever published as part of the package or pulled into
+# production images. Docs tooling is split into its own `docs` group (opt-in
+# via `uv run --group docs ...` or `uv sync --group docs`) since it's only
+# needed when building/serving the documentation site.
 [dependency-groups]
 dev = [
     "ruff>=0.1.0",
@@ -33,6 +36,11 @@ dev = [
     "pytest-cov>=4.0.0",
     "mypy>=1.0.0",
     "ipython>=8.0.0",
+]
+docs = [
+    "mkdocs-literate-nav>=0.6.3",
+    "mkdocs-material>=9.7.6",
+    "mkdocstrings[python]>=1.0.4",
 ]
 
 [tool.setuptools.packages.find]

@@ -1,4 +1,4 @@
-"""Node and server management for BlueSky proxy."""
+"""Node and server management for the BlueSky proxy."""
 
 import threading
 import time
@@ -10,13 +10,19 @@ logger = get_logger()
 
 
 class NodeManager:
-    """Manages BlueSky nodes and servers."""
+    """Track BlueSky simulation nodes and servers.
+
+    Reacts to node/server discovery and removal callbacks from the network
+    client, keeps the proxy's ``tracked_nodes``/``tracked_servers`` maps in
+    sync, detects server shutdown when all nodes disappear, and emits
+    ``node_info`` updates to connected web clients.
+    """
 
     def __init__(self, proxy):
-        """Initialize NodeManager with reference to parent proxy.
+        """Initialize the node manager.
 
         Args:
-            proxy: Parent BlueSkyProxy instance
+            proxy (BlueSkyProxy): Parent proxy instance.
         """
         self.proxy = proxy
 
@@ -239,13 +245,35 @@ class NodeManager:
                 traceback.print_exc()
 
     def actnode(self, node_id):
-        """Delegate actnode call to network proxy."""
+        """Select the active simulation node via the network client.
+
+        Args:
+            node_id (bytes): ID of the node to make active.
+
+        Returns:
+            Any: The result of ``BlueSkyClient.actnode``.
+
+        Raises:
+            RuntimeError: If the network client is not initialized.
+        """
         if self.proxy.bluesky_client is None:
             raise RuntimeError("Network client not initialized")
         return self.proxy.bluesky_client.actnode(node_id)
 
     def addnodes(self, count, server_id=None):
-        """Delegate addnodes call to network proxy."""
+        """Request new simulation nodes from a BlueSky server.
+
+        Args:
+            count (int): Number of nodes to add.
+            server_id (bytes | None): Server to add the nodes on. When None,
+                the network client picks its default server.
+
+        Returns:
+            Any: The result of ``BlueSkyClient.addnodes``.
+
+        Raises:
+            RuntimeError: If the network client is not initialized.
+        """
         if self.proxy.bluesky_client is None:
             raise RuntimeError("Network client not initialized")
         return self.proxy.bluesky_client.addnodes(count, server_id=server_id)

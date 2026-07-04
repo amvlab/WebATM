@@ -1,18 +1,18 @@
-"""
-BlueSky-compatible network client adapted from BlueSky ATM simulator.
+"""Provide a BlueSky-compatible network client adapted from the BlueSky simulator.
 
 This module contains networking code adapted from the BlueSky Air Traffic
-Management simulator's network infrastructure (bluesky.network package).
-It replicates essential BlueSky Client/Node functionality without requiring
-the full BlueSky framework dependency, following ZMQ best practices.
+Management simulator's network infrastructure (the ``bluesky.network`` package).
+It replicates essential BlueSky Client/Node functionality without requiring the
+full BlueSky framework dependency, following ZMQ best practices.
 
 Original BlueSky project: https://github.com/TUDelft-CNS-ATM/bluesky
-BlueSky is developed by TU Delft (Delft University of Technology)
+BlueSky is developed by TU Delft (Delft University of Technology).
 
 Key adaptations from BlueSky's networking components:
-- Node ID generation algorithms (from bluesky.network.common)
-- ZMQ socket management patterns (from bluesky.network.client)
-- Message serialization/deserialization (from bluesky.network)
+
+- Node ID generation algorithms (from ``bluesky.network.common``)
+- ZMQ socket management patterns (from ``bluesky.network.client``)
+- Message serialization/deserialization (from ``bluesky.network``)
 - Subscription and signal handling patterns
 """
 
@@ -53,7 +53,21 @@ MSG_UNSUBSCRIBE = 0
 
 
 def genid(group_id=GROUPID_NOGROUP, seqidx=1):
-    """Generate a node ID - adapted from bluesky.network.common.genid()."""
+    """Generate a unique node identifier.
+
+    Adapted from ``bluesky.network.common.genid()``. Builds an ID of ``IDLEN``
+    bytes: the group prefix, padded with random bytes if needed (avoiding the
+    ``*`` wildcard byte), followed by a one-byte encoding of the sequence index.
+
+    Args:
+        group_id (int | str | bytes): Group identifier used as the ID prefix.
+            Integers and strings are encoded via the charmap codec; bytes are
+            used as-is.
+        seqidx (int): Sequence index encoded as the final byte of the ID.
+
+    Returns:
+        bytes: A node ID of ``IDLEN`` bytes.
+    """
     from os import urandom
 
     # Convert group_id to bytes
@@ -77,7 +91,18 @@ def genid(group_id=GROUPID_NOGROUP, seqidx=1):
 
 
 def asbytestr(data):
-    """Convert to bytes - adapted from bluesky.network.common.asbytestr()."""
+    """Convert a value to a byte string.
+
+    Adapted from ``bluesky.network.common.asbytestr()``. Integers are encoded as
+    a single character via the charmap codec, strings are charmap-encoded, and
+    any other value is returned unchanged.
+
+    Args:
+        data (int | str | bytes): Value to convert.
+
+    Returns:
+        bytes: The byte-string representation of ``data``.
+    """
     if isinstance(data, int):
         return chr(data).encode("charmap")
     elif isinstance(data, str):
@@ -87,19 +112,52 @@ def asbytestr(data):
 
 
 def seqid2idx(seqid_byte):
-    """Convert sequence ID byte to index - adapted from bluesky.network.common."""
+    """Convert a sequence ID byte to a sequence index.
+
+    Adapted from ``bluesky.network.common``. The index is the byte value offset
+    by -128, clamped to a minimum of -1.
+
+    Args:
+        seqid_byte (int | str): Sequence ID byte, as an integer value or a
+            one-character string.
+
+    Returns:
+        int: The sequence index (at least -1).
+    """
     val = seqid_byte if isinstance(seqid_byte, int) else ord(seqid_byte)
     ret = val - 128
     return max(-1, ret)
 
 
 def seqidx2id(seqidx):
-    """Convert index to sequence ID byte - adapted from bluesky.network.common."""
+    """Convert a sequence index to a sequence ID byte.
+
+    Adapted from ``bluesky.network.common``. Inverse of ``seqid2idx``: the byte
+    value is the index offset by +128.
+
+    Args:
+        seqidx (int): Sequence index to encode.
+
+    Returns:
+        bytes: A single charmap-encoded byte representing the index.
+    """
     return chr(128 + seqidx).encode("charmap")
 
 
 def safe_decode(data):
-    """Safely decode bytes to string."""
+    """Decode bytes to a readable string without raising.
+
+    Attempts UTF-8 decoding first and returns the result only if it consists
+    entirely of printable ASCII characters; otherwise falls back to ASCII
+    decoding, and finally to an uppercase hexadecimal representation. Non-bytes
+    input is converted with ``str()``.
+
+    Args:
+        data (bytes | object): Value to decode or stringify.
+
+    Returns:
+        str: A printable string representation of ``data``.
+    """
     if isinstance(data, bytes):
         try:
             # First try utf-8 decoding
@@ -122,24 +180,58 @@ def safe_decode(data):
 
 
 class BlueSkySignal:
-    """Simple signal/slot implementation - adapted from BlueSky's signal patterns."""
+    """Provide a simple signal/slot implementation.
+
+    Adapted from BlueSky's signal patterns.
+
+    Attributes:
+        name (str): Human-readable signal name, used in warning logs.
+        callbacks (list): Callbacks currently connected to this signal.
+    """
 
     def __init__(self, name):
+        """Initialize the signal.
+
+        Args:
+            name (str): Human-readable signal name, used in warning logs.
+        """
         self.name = name
         self.callbacks = []
 
     def connect(self, callback):
-        """Connect a callback to this signal."""
+        """Connect a callback to this signal.
+
+        Idempotent: a callback that is already connected is not added again.
+
+        Args:
+            callback (Callable): Callable invoked whenever the signal is
+                emitted.
+        """
         if callback not in self.callbacks:
             self.callbacks.append(callback)
 
     def disconnect(self, callback):
-        """Disconnect a callback from this signal."""
+        """Disconnect a callback from this signal.
+
+        A callback that is not connected is silently ignored.
+
+        Args:
+            callback (Callable): Callback to remove.
+        """
         if callback in self.callbacks:
             self.callbacks.remove(callback)
 
     def emit(self, *args, **kwargs):
-        """Emit the signal to all connected callbacks."""
+        """Emit the signal to all connected callbacks.
+
+        Iterates over a snapshot of the callback list so callbacks may connect
+        or disconnect during emission. Exceptions raised by a callback are
+        logged and do not stop delivery to the remaining callbacks.
+
+        Args:
+            *args (Any): Positional arguments forwarded to each callback.
+            **kwargs (Any): Keyword arguments forwarded to each callback.
+        """
         callbacks_snapshot = self.callbacks[
             :
         ]  # Make a copy to avoid concurrency issues
@@ -154,18 +246,44 @@ class BlueSkySignal:
 
 
 class BlueSkySubscriber:
-    """Simple subscriber system - adapted from BlueSky's subscriber patterns."""
+    """Provide a simple topic-based subscriber system.
+
+    Adapted from BlueSky's subscriber patterns.
+
+    Attributes:
+        subscribers (dict[str, list]): Mapping of topic name to the callbacks
+            subscribed to that topic.
+    """
 
     def __init__(self):
+        """Initialize the subscriber registry with no subscriptions."""
         self.subscribers: dict[str, list] = defaultdict(list)
 
     def subscribe(self, topic: str, callback: Callable):
-        """Subscribe to a topic (idempotent, like BlueSkySignal.connect)."""
+        """Subscribe a callback to a topic.
+
+        Idempotent, like ``BlueSkySignal.connect``: a callback already
+        subscribed to the topic is not added again.
+
+        Args:
+            topic (str): Topic name to subscribe to.
+            callback (Callable): Callable invoked when data is emitted on the
+                topic.
+        """
         if callback not in self.subscribers[topic]:
             self.subscribers[topic].append(callback)
 
     def emit(self, topic: str, *args, **kwargs):
-        """Emit data to subscribers of a topic."""
+        """Emit data to all subscribers of a topic.
+
+        Exceptions raised by a callback are logged and do not stop delivery to
+        the remaining callbacks. Topics without subscribers are ignored.
+
+        Args:
+            topic (str): Topic name to emit on.
+            *args (Any): Positional arguments forwarded to each callback.
+            **kwargs (Any): Keyword arguments forwarded to each callback.
+        """
         for callback in self.subscribers.get(topic, []):
             try:
                 callback(*args, **kwargs)
@@ -180,15 +298,34 @@ class BlueSkySubscriber:
 
 
 class BlueSkyStack:
-    """Simple stack implementation - adapted from BlueSky's command stack patterns."""
+    """Provide a simple command stack.
+
+    Adapted from BlueSky's command stack patterns.
+
+    Attributes:
+        cmdstack (collections.deque): Queued ``(command, sender_id)`` pairs.
+        sender_id: Sender ID of the command currently being processed, or None.
+        current (str): Command currently being processed, or an empty string.
+    """
 
     def __init__(self):
+        """Initialize an empty command stack."""
         self.cmdstack = deque()
         self.sender_id = None
         self.current = ""
 
     def stack(self, *cmdlines, sender_id=None):
-        """Stack one or more commands."""
+        """Queue one or more command lines.
+
+        Each command line is stripped of surrounding whitespace; empty lines are
+        ignored. Semicolon-separated compound lines are split into individual
+        commands, each queued with the given sender ID.
+
+        Args:
+            *cmdlines (str): One or more command lines to queue.
+            sender_id (bytes | str | None): Identifier of the command originator, stored
+                alongside each queued command.
+        """
         for cmdline in cmdlines:
             cmdline = cmdline.strip()
             if cmdline:
@@ -196,7 +333,15 @@ class BlueSkyStack:
                     self.cmdstack.append((line.strip(), sender_id))
 
     def commands(self):
-        """Generator for commands with sender tracking."""
+        """Iterate over queued commands with sender tracking.
+
+        Pops commands from the front of the stack, exposing each one through the
+        ``current`` and ``sender_id`` attributes while it is being processed.
+        Both attributes are reset when the stack is exhausted.
+
+        Yields:
+            str: The next queued command.
+        """
         while self.cmdstack:
             self.current, self.sender_id = self.cmdstack.popleft()
             yield self.current
@@ -205,9 +350,22 @@ class BlueSkyStack:
 
 
 class BlueSkyContext:
-    """Simple context object - adapted from BlueSky's simulation context patterns."""
+    """Provide a simple simulation context object.
+
+    Adapted from BlueSky's simulation context patterns. Tracks the shared-state
+    action and sender of the message currently being processed.
+
+    Attributes:
+        action: Action type of the message being processed (e.g. "RESET"), or
+            None.
+        sender_id: Node ID of the message sender, or None.
+        Reset (str): BlueSky action constant for a simulation reset ("RESET").
+        ActChange (str): BlueSky action constant for an active-node change
+            ("ACTCHANGE").
+    """
 
     def __init__(self):
+        """Initialize the context with no active action or sender."""
         self.action = None
         self.sender_id = None
         # BlueSky action constants
@@ -216,19 +374,47 @@ class BlueSkyContext:
 
 
 class BlueSkyClient:
-    """
-    BlueSky-compatible network client - adapted from bluesky.network.client.Client.
+    """Provide a BlueSky-compatible network client.
 
-    This class replicates essential BlueSky Client/Node functionality including:
+    Adapted from ``bluesky.network.client.Client``. Replicates essential BlueSky
+    Client/Node functionality with proper ZMQ lifecycle management, including:
+
     - ZMQ socket management and lifecycle
     - Node discovery and server communication
     - Message subscription and publishing patterns
     - Command stacking and processing
 
-    Adapted from BlueSky's networking infrastructure with proper ZMQ lifecycle management.
+    Attributes:
+        node_id (bytes): Unique identifier of this client node.
+        group_id (bytes): Group prefix derived from the node ID.
+        server_id (bytes): Derived ID of the server this client belongs to.
+        act_id (bytes | None): ID of the active simulation node, or None.
+        connected (bool): Whether the client is connected to a server.
+        running (bool): Whether the client is running (accepting I/O).
+        nodes (set): Known simulation node IDs.
+        servers (set): Known server IDs.
+        node_added (BlueSkySignal): Emitted when a new simulation node appears.
+        node_removed (BlueSkySignal): Emitted when a simulation node disappears.
+        server_added (BlueSkySignal): Emitted when a new server appears.
+        server_removed (BlueSkySignal): Emitted when a server disappears.
+        actnode_changed (BlueSkySignal): Emitted when the active node changes.
+        subscriber (BlueSkySubscriber): Topic subscription registry.
+        stack (BlueSkyStack): Command stack.
+        context (BlueSkyContext): Shared-state processing context.
     """
 
     def __init__(self, group_id=GROUPID_CLIENT):
+        """Initialize the client and its identifiers, signals, and state.
+
+        Generates the node/group/server IDs, sets up the socket lock and network
+        state tracking, and auto-connects the ``node_added`` signal to active-node
+        selection and initial data requests. No network resources are created
+        until ``connect()`` is called.
+
+        Args:
+            group_id (int): Group identifier for node ID generation. Defaults to
+                ``GROUPID_CLIENT``.
+        """
         logger.debug("Initializing...")
 
         # Node identification
@@ -286,7 +472,23 @@ class BlueSkyClient:
     def connect(
         self, hostname="localhost", recv_port=11000, send_port=11001, protocol="tcp"
     ):
-        """Connect to BlueSky server following ZMQ pattern."""
+        """Connect to a BlueSky server following the ZMQ pattern.
+
+        Creates the ZMQ context, SUB (data) and XPUB (command) sockets, tunes
+        buffer and shutdown options, connects both sockets, registers them with a
+        poller, and subscribes to messages targeted at this node so the server
+        can discover it. On failure all partially-created resources are released
+        via ``close()``.
+
+        Args:
+            hostname (str): BlueSky server hostname or IP address.
+            recv_port (int): Port for receiving simulation data.
+            send_port (int): Port for sending commands and events.
+            protocol (str): ZMQ transport protocol (e.g. "tcp").
+
+        Returns:
+            bool: True if the connection was established, False otherwise.
+        """
         logger.info(f"Connecting to {hostname}:{recv_port}/{send_port}...")
 
         try:

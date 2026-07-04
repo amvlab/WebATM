@@ -1,4 +1,4 @@
-"""Connection management for BlueSky proxy."""
+"""Connection management for the BlueSky proxy."""
 
 import gc
 import threading
@@ -11,13 +11,18 @@ logger = get_logger()
 
 
 class ConnectionManager:
-    """Manages BlueSky client connections and reconnections."""
+    """Manage the BlueSky client connection lifecycle.
+
+    Owns creation and teardown of the network client, the 20 ms network
+    update timer, data-flow timeout detection, and disconnection cleanup,
+    following the ZMQ create-on-connect / destroy-on-close pattern.
+    """
 
     def __init__(self, proxy):
-        """Initialize ConnectionManager with reference to parent proxy.
+        """Initialize the connection manager.
 
         Args:
-            proxy: Parent BlueSkyProxy instance
+            proxy (BlueSkyProxy): Parent proxy instance.
         """
         self.proxy = proxy
 
@@ -72,7 +77,21 @@ class ConnectionManager:
             )
 
     def start_client(self, hostname=None):
-        """Start the network client with fresh state - following ZMQ pattern."""
+        """Start the network client with fresh state, following the ZMQ pattern.
+
+        Stops any existing connection first, creates the BlueSky network
+        client if needed, wires its node/server signals to the node manager,
+        connects to the server, and starts the network update and backup
+        emission timers.
+
+        Args:
+            hostname (str | None): BlueSky server hostname/IP. When None, the
+                proxy's currently configured ``server_ip`` is used.
+
+        Raises:
+            RuntimeError: If the connection to the BlueSky server fails.
+            Exception: If the network client cannot be created.
+        """
         # Ensure we start from a clean state. stop_client() destroys the client
         # instance, so this must run *before* we (re)create it below -- otherwise
         # we would connect() on a client that was just torn down.
@@ -145,7 +164,13 @@ class ConnectionManager:
             raise
 
     def _start_network_timer(self):
-        """Start the network update timer (exactly like web client's timer does)."""
+        """Start the recurring 20 ms network update timer.
+
+        Each tick pumps ``BlueSkyClient.update()``, tracks connection health
+        (node presence, data-flow timeout, consecutive failures), and
+        reschedules itself while the proxy is running. On timeout or repeated
+        failures it triggers disconnection handling and stops rescheduling.
+        """
 
         def network_timer_callback():
             if (
@@ -236,7 +261,12 @@ class ConnectionManager:
         self.proxy.network_timer.start()
 
     def _handle_disconnection(self, reason="Unknown"):
-        """Handle disconnection - close connections and clean up state."""
+        """Close connections and clean up state after a detected disconnect.
+
+        Args:
+            reason (str): Human-readable reason logged and used for
+                diagnostics (e.g. "Connection timeout").
+        """
         if self.proxy.was_connected:
             logger.info(f"BlueSky server disconnected - Reason: {reason}")
             logger.debug(" Cleaning up connection state and closing sockets")
@@ -284,7 +314,13 @@ class ConnectionManager:
         logger.info("Use web interface settings to reconnect to BlueSky server")
 
     def close(self):
-        """Close all network connections and clear state like BlueSky's close() method."""
+        """Close all network connections and clear cached proxy state.
+
+        Mirrors BlueSky's own ``close()``: shuts the network client's sockets
+        (the ZMQ context is left to the client), resets connection monitoring,
+        and clears tracked nodes/servers, data caches, emission timestamps,
+        and the pending command dictionary.
+        """
         # Disable reconnection first
         self.proxy.allow_reconnection = False
 
@@ -339,10 +375,15 @@ class ConnectionManager:
         logger.debug(" Client state cleared and connections closed")
 
     def stop_client(self, context="disconnect"):
-        """Stop the client with improved cleanup and proper ZMQ error handling.
+        """Stop the client with full cleanup and proper ZMQ error handling.
+
+        Cancels the network/backup timers, closes and destroys the network
+        client, and clears remaining proxy state.
 
         Args:
-            context: 'disconnect' for reconnection, 'manual' for user disconnect, 'shutdown' for app termination
+            context (str): Cleanup context — ``"disconnect"`` for
+                reconnection, ``"manual"`` for a user-initiated disconnect,
+                ``"shutdown"`` for app termination.
         """
         if self.proxy.running:
             logger.info("Stopping BlueSky client connection")
@@ -405,7 +446,18 @@ class ConnectionManager:
                 logger.info("Network client instance destroyed")
 
     def reconnect(self, hostname=None):
-        """Reconnect to BlueSky server following ZMQ pattern."""
+        """Reconnect to the BlueSky server with fresh ZMQ resources.
+
+        Stops the current client, clears state, then starts a new connection
+        via ``start_client``.
+
+        Args:
+            hostname (str | None): BlueSky server hostname/IP to reconnect
+                to. When None, the previously configured host is reused.
+
+        Raises:
+            Exception: Propagated from ``start_client`` if reconnection fails.
+        """
         logger.info("Reconnecting to BlueSky server...")
 
         # Following ZMQ pattern: close sockets and destroy context first

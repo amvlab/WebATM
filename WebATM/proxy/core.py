@@ -11,9 +11,33 @@ logger = get_logger()
 
 
 class BlueSkyProxy:
-    """BlueSky proxy gateway that bridges the web interface with BlueSky network client."""
+    """Bridge between the web interface and the BlueSky network client.
+
+    Owns the network client lifecycle, caches incoming simulation data, and
+    relays it to connected web clients over Socket.IO. The actual work is
+    delegated to four focused managers following a composition pattern.
+
+    Attributes:
+        bluesky_client (BlueSkyClient | None): Active network client; created
+            when connecting and destroyed on close.
+        running (bool): Whether the network update loop is active.
+        socketio: Flask-SocketIO instance used to emit events to web clients.
+        traffic_data (dict): Latest ACDATA payload, cached for new clients.
+        sim_data (dict): Latest SIMINFO payload, cached for new clients.
+        echo_data (dict): Latest echo message, cached for new clients.
+        tracked_nodes (dict): Known simulation nodes keyed by hex node ID.
+        tracked_servers (dict): Known servers keyed by raw server ID.
+        cmddict (dict): Command dictionary mapping command names to their
+            comma-separated argument signatures (seeded locally, replaced by
+            BlueSky's STACKCMDS broadcast).
+        connection_mgr (ConnectionManager): Connection lifecycle manager.
+        node_mgr (NodeManager): Node/server tracking manager.
+        command_proc (CommandProcessor): Command processing manager.
+        data_mgr (DataManager): Data emission and state manager.
+    """
 
     def __init__(self):
+        """Initialize the proxy with empty caches and its manager modules."""
         logger.debug("Initializing BlueSkyProxy()...")
 
         # Don't initialize BlueSky client in __init__ - create when needed
@@ -98,7 +122,7 @@ class BlueSkyProxy:
         # Connection callbacks will be set up when BlueSky client is initialized
 
     def _safe_decode(self, data):
-        """Helper to safely decode bytes to string."""
+        """Safely decode bytes to a string."""
         return safe_decode(data)
 
     # ========================================================================
@@ -112,6 +136,9 @@ class BlueSkyProxy:
         True once the client is running, has previously detected at least one
         node, and still has active nodes. Every consumer (Socket.IO payloads,
         REST routes) should read this instead of re-deriving the formula.
+
+        Returns:
+            bool: True when connected to a BlueSky server with active nodes.
         """
         return self.was_connected and self.running and len(self.tracked_nodes) > 0
 
@@ -124,11 +151,24 @@ class BlueSkyProxy:
         return self.connection_mgr._connect_bluesky_client_signals()
 
     def start_client(self, hostname=None):
-        """Start the network client with fresh state - following ZMQ pattern."""
+        """Start the network client with fresh state, following the ZMQ pattern.
+
+        Args:
+            hostname (str, optional): BlueSky server hostname or IP address.
+                Defaults to the previously configured server address.
+
+        Raises:
+            RuntimeError: If the connection to the BlueSky server fails.
+        """
         return self.connection_mgr.start_client(hostname)
 
     def stop_client(self, context="disconnect"):
-        """Stop the client with improved cleanup and proper ZMQ error handling."""
+        """Stop the client with improved cleanup and proper ZMQ error handling.
+
+        Args:
+            context (str): Reason for stopping — "disconnect" for reconnection,
+                "manual" for user disconnect, or "shutdown" for app termination.
+        """
         return self.connection_mgr.stop_client(context)
 
     def _start_network_timer(self):

@@ -1,7 +1,8 @@
-"""
-BlueSky server status routes.
+"""Provide BlueSky server status monitoring routes.
 
-This module handles the  monitoring BlueSky servers.
+This module checks whether a BlueSky server is reachable by probing its
+command (11000) and data (11001) ports, and registers the Flask route that
+exposes this status to the web client.
 """
 
 import socket
@@ -14,16 +15,16 @@ logger = get_logger()
 
 
 def is_port_listening(port: int, timeout: float = 1.0, hostname: str = None) -> bool:
-    """
-    Check if a port is listening for connections.
+    """Check if a TCP port is listening for connections.
 
     Args:
-        port: Port number to check
-        hostname: Hostname to check (defaults to localhost)
-        timeout: Connection timeout in seconds
+        port (int): Port number to check.
+        timeout (float): Connection timeout in seconds.
+        hostname (str): Hostname to check. Defaults to ``localhost`` when
+            ``None``.
 
     Returns:
-        bool: True if port is listening, False otherwise
+        bool: True if the port is listening, False otherwise.
     """
     if hostname is None:
         hostname = "localhost"
@@ -39,11 +40,15 @@ def is_port_listening(port: int, timeout: float = 1.0, hostname: str = None) -> 
 
 
 def check_bluesky_running() -> tuple[bool, str]:
-    """
-    Check if BlueSky server is running with improved reliability.
+    """Check if a local BlueSky server is running.
+
+    Probes the BlueSky command (11000) and data (11001) ports on localhost; the
+    server is considered running when at least one port is listening.
 
     Returns:
-        tuple: (is_running, status_message)
+        tuple[bool, str]: A ``(is_running, status_message)`` pair, where the
+            message lists the listening ports or explains that the server is
+            not accessible.
     """
 
     # Check if BlueSky ports are accessible (same logic as routes.py)
@@ -65,19 +70,28 @@ def check_bluesky_running() -> tuple[bool, str]:
 
 
 def register_server_status_routes(app):
-    """
-    Register BlueSky server status routes with the Flask app.
+    """Register BlueSky server status routes with the Flask app.
 
     Args:
-        app: Flask application instance
+        app (Flask): Flask application instance.
     """
 
     @app.route("/api/server/status", methods=["GET", "POST"])
     def get_server_status():
-        """
-        Get current server status with improved reliability.
-        Accepts optional hostname parameter via query string (GET) or JSON body (POST).
-        If no hostname provided, uses the currently configured server.
+        """Report whether the BlueSky server is reachable.
+
+        Handles ``GET``/``POST /api/server/status``. Accepts an optional
+        ``hostname`` via query string (GET) or JSON body (POST); when omitted,
+        falls back to the proxy's currently configured server IP, then to
+        ``localhost``. Probes the BlueSky command (11000) and data (11001)
+        ports on that host.
+
+        Returns:
+            Response: JSON with ``status`` (``"success"``), ``running`` (bool),
+                ``message`` (listening ports or failure reason), and
+                ``hostname`` (the host that was probed). On unexpected errors,
+                JSON with ``status`` (``"error"``) and ``message``, with HTTP
+                500.
         """
         try:
             # Get hostname from request (supports both GET query param and POST JSON body)

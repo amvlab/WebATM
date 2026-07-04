@@ -9,7 +9,12 @@ import time
 
 
 def get_bluesky_proxy():
-    """Return the current BlueSky proxy instance, or None if unset."""
+    """Return the globally registered BlueSky proxy instance.
+
+    Returns:
+        BlueSkyProxy | None: The current proxy, or None if no proxy has been
+        registered yet.
+    """
     from .. import get_bluesky_proxy as _get_proxy
 
     return _get_proxy()
@@ -18,8 +23,14 @@ def get_bluesky_proxy():
 def active_proxy():
     """Return the connected proxy, refreshing its last-update timestamp.
 
-    Returns None when no proxy is registered or the client is disconnected
-    (``allow_reconnection`` is False) so handlers can simply early-return.
+    Looks up the global proxy and, when it is present and reconnection is
+    allowed, records the current wall-clock time as its last successful update
+    so connection-liveness monitoring stays accurate.
+
+    Returns:
+        BlueSkyProxy | None: The connected proxy, or None when no proxy is
+        registered or the client is disconnected (``allow_reconnection`` is
+        False) so handlers can simply early-return.
     """
     proxy = get_bluesky_proxy()
     if not proxy or not proxy.allow_reconnection:

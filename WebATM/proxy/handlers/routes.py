@@ -10,7 +10,16 @@ logger = get_logger()
 
 
 def on_routedata_received(data):
-    """Handle route data updates for aircraft."""
+    """Handle ROUTEDATA events carrying an aircraft's route.
+
+    Filters to the active node's traffic (ignoring routes for unknown
+    aircraft to prevent flicker when switching nodes), serializes the route,
+    and emits a ``routedata`` event to connected web clients.
+
+    Args:
+        data (Any): ROUTEDATA payload with the aircraft ID (``acid``) and route
+            waypoints; supports both attribute- and dict-style access.
+    """
     proxy = get_bluesky_proxy()
     if not proxy:
         return

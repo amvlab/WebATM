@@ -1,8 +1,8 @@
-"""
-Basic Flask routes for WebATM.
+"""Basic Flask routes for WebATM.
 
-This module contains routes for the main page, simulation commands,
-server configuration, health/status endpoints, and BlueSky file uploads.
+Contains routes for the main page, simulation commands, server
+configuration, health/status endpoints, and BlueSky file management
+(uploads, listings, directory browsing, downloads, and deletion).
 """
 
 import json
@@ -20,11 +20,16 @@ logger = get_logger()
 
 
 def get_webpack_assets():
-    """
-    Read webpack manifest and return script tags for all bundles in correct order.
+    """Read the webpack manifest and build script tags in load order.
+
+    Reads ``static/dist/manifest.json`` and returns one ``<script>`` tag per
+    bundle — a single bundle in development builds, or the split
+    runtime/vendor/app/main chunks in the correct order for production
+    builds. Falls back to ``bundle.js`` when the manifest is missing or
+    unreadable.
 
     Returns:
-        list: Script tags for webpack bundles
+        list[str]: HTML ``<script>`` tags for the webpack bundles.
     """
     try:
         # Go up one level from server/ to WebATM/ to find static/
@@ -72,17 +77,22 @@ def get_webpack_assets():
 
 
 def register_basic_routes(app, session_manager):
-    """
-    Register basic Flask routes with the application.
+    """Register the basic Flask routes with the application.
 
     Args:
-        app: Flask application instance
-        session_manager: SessionManager instance for capacity checking
+        app (Flask): Flask application instance.
+        session_manager (SessionManager): Session manager used by the status
+            endpoint for capacity information.
     """
 
     @app.route("/")
     def index():
-        """Main page."""
+        """Serve the main web interface page (GET /).
+
+        Returns:
+            The rendered ``index.html`` template with webpack script tags and
+            the WebATM version, or a 500 error message on failure.
+        """
         try:
             from .. import __version__
 
@@ -97,7 +107,15 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/simulation/command", methods=["POST"])
     def send_command():
-        """Send command to simulation."""
+        """Send a stack command to the simulation (POST /api/simulation/command).
+
+        Expects a JSON body with a ``command`` string, which is forwarded to
+        the BlueSky proxy.
+
+        Returns:
+            JSON with ``success`` and the echoed ``command``, or a 500 error
+            payload on failure.
+        """
         try:
             command = request.json.get("command", "") if request.json else ""
             success = current_app.bluesky_proxy.send_command(command)
@@ -107,7 +125,12 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/server/config", methods=["GET"])
     def get_server_config():
-        """Get current server configuration."""
+        """Get the current server configuration (GET /api/server/config).
+
+        Returns:
+            JSON with the proxy's ``server_ip`` and ``is_connected`` state,
+            or a 500 error payload on failure.
+        """
         try:
             return jsonify(
                 {
@@ -124,7 +147,20 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/server/config", methods=["POST"])
     def update_server_config():
-        """Update server configuration and reconnect."""
+        """Update server config and reconnect (POST /api/server/config).
+
+        Expects a JSON body with ``server_ip``. Tears down the existing
+        BlueSky proxy completely (stop, close, delete, garbage-collect),
+        creates a fresh proxy instance preserving the Socket.IO wiring,
+        connects it to the requested server, re-registers the data
+        subscribers, then waits up to 10 seconds for BlueSky nodes to be
+        detected before confirming.
+
+        Returns:
+            JSON with ``success: True`` and the ``server_ip`` once nodes are
+            detected, or a 500 error payload if the connection fails or no
+            nodes appear before the timeout.
+        """
         try:
             data = request.json if request.json else {}
             server_ip = data.get("server_ip", "localhost").strip() or "localhost"
@@ -251,7 +287,15 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/server/disconnect", methods=["POST"])
     def disconnect_server():
-        """Disconnect from current server."""
+        """Disconnect from the BlueSky server (POST /api/server/disconnect).
+
+        Stops the proxy's client with the ``"manual"`` context; the BlueSky
+        server itself is left running.
+
+        Returns:
+            JSON with ``success`` and a message, or a 500 error payload on
+            failure.
+        """
         try:
             if current_app.bluesky_proxy.running:
                 logger.info("User requested manual disconnection from BlueSky server")
@@ -274,7 +318,16 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/aircraft/models", methods=["GET"])
     def get_aircraft_models():
-        """Get available 3D aircraft models."""
+        """List available 3D aircraft models (GET /api/aircraft/models).
+
+        Scans ``static/models/aircraft`` for ``.gltf``/``.glb`` files and
+        maps known filenames to friendly display names.
+
+        Returns:
+            JSON with ``models`` (filename, displayName, description,
+            fileSize, isDefault) sorted with the default model first, or a
+            404/500 error payload.
+        """
         try:
             models_dir = Path(__file__).parent.parent / "static" / "models" / "aircraft"
 
@@ -345,13 +398,22 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/navdata/search", methods=["GET"])
     def search_navdata():
-        """Search airports and waypoints by identifier for the map "go to" box.
+        """Search airports and waypoints by identifier (GET /api/navdata/search).
 
-        Backed by the SQLite index built offline from X-Plane data
-        (see scripts/navdata/). Query params:
-            q:     identifier prefix to match (min 1 char), required
-            limit: max results (default 10, capped at 50)
-            kind:  optional filter, "airport" or "waypoint"
+        Powers the map "go to" box. Backed by the SQLite FTS5 index built
+        offline from X-Plane data (see ``scripts/navdata/``). Query
+        parameters:
+
+        - ``q``: identifier/name prefix to match (required).
+        - ``limit``: maximum results (default 10, capped at 50).
+        - ``kind``: optional filter — ``airport``, ``heliport`` or
+          ``waypoint``.
+
+        Returns:
+            JSON with ``results`` (kind, ident, name, lat, lon, rank, score,
+            iata) ordered by exact match, kind, and importance; a 503 payload
+            when the navdata index has not been built; or a 500 payload on
+            search failure.
         """
         try:
             query = (request.args.get("q") or "").strip()
@@ -441,7 +503,12 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/health")
     def health_check():
-        """Health check endpoint for Traefik - always returns 200 if Flask is running."""
+        """Health check endpoint for Traefik (GET /health).
+
+        Returns:
+            A 200 JSON payload whenever Flask is running, or 503 with the
+            error if the handler itself fails.
+        """
         try:
             response_data = {
                 "status": "healthy",
@@ -456,7 +523,17 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/status")
     def status_check():
-        """Status endpoint with capacity information - returns 503 when at capacity."""
+        """Report server, BlueSky and session status (GET /status).
+
+        Probes the BlueSky command/data ports (11000/11001) with a short
+        socket timeout, inspects the proxy's connection state and tracked
+        nodes, and includes session/capacity information from the session
+        manager.
+
+        Returns:
+            A 200 JSON payload with ``bluesky_server``, ``session_info`` and
+            ``config`` sections, or 503 with the error on failure.
+        """
         try:
             # Check BlueSky connectivity using the same approach as check_bluesky_running
             def is_port_listening(port):
@@ -514,7 +591,17 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/bluesky/configure-base-path", methods=["POST"])
     def configure_bluesky_base_path():
-        """Configure BlueSky base directory path."""
+        """Configure the BlueSky base directory (POST /api/bluesky/configure-base-path).
+
+        Expects a JSON body with ``base_path``. Validates that the path
+        exists, is a directory and is writable, stores it on the app, and
+        creates the ``scenario/`` and ``plugins/`` subdirectories if needed.
+
+        Returns:
+            JSON with the accepted ``base_path`` and ``derived_paths``
+            (scenario, plugins, settings, output), or a 400/500 error
+            payload.
+        """
         try:
             data = request.json if request.json else {}
             base_path = data.get("base_path", "").strip()
@@ -586,7 +673,21 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/bluesky/upload/<file_type>", methods=["POST"])
     def upload_bluesky_file(file_type):
-        """Upload files to BlueSky directories."""
+        """Upload a file to a BlueSky directory (POST /api/bluesky/upload/<file_type>).
+
+        Accepts a multipart upload for one of the configured file types —
+        ``scenario`` (``.scn``), ``plugins`` (``.py``) or ``settings``
+        (``settings.cfg``). Validates the extension and size (50 MB for
+        scenarios, 10 MB otherwise), sanitizes the filename, and
+        auto-renames on conflicts for types that allow multiple files.
+
+        Args:
+            file_type (str): One of ``scenario``, ``plugins``, ``settings``.
+
+        Returns:
+            JSON with the stored ``filename`` and ``target_path``, or a
+            400/500 error payload.
+        """
         try:
             # Check if base path is configured
             if not hasattr(current_app, "bluesky_base_path"):
@@ -709,7 +810,19 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/bluesky/list/<file_type>", methods=["GET"])
     def list_bluesky_files(file_type):
-        """List files in BlueSky directories."""
+        """List files in a BlueSky directory (GET /api/bluesky/list/<file_type>).
+
+        Lists folders and files (extension matched case-insensitively) for
+        ``scenario``, ``plugins``, ``settings`` or ``output``.
+
+        Args:
+            file_type (str): One of ``scenario``, ``plugins``, ``settings``,
+                ``output``.
+
+        Returns:
+            JSON with ``files`` entries (filename, size, modified, type),
+            or a 400/500 error payload.
+        """
         try:
             # Check if base path is configured
             if not hasattr(current_app, "bluesky_base_path"):
@@ -803,7 +916,23 @@ def register_basic_routes(app, session_manager):
     @app.route("/api/bluesky/browse/<file_type>", methods=["GET"])
     @app.route("/api/bluesky/browse/<file_type>/<path:subpath>", methods=["GET"])
     def browse_bluesky_directory(file_type, subpath=""):
-        """Browse files and folders in BlueSky directories with subdirectory navigation."""
+        """Browse a BlueSky directory tree (GET /api/bluesky/browse/<file_type>[/<subpath>]).
+
+        Like the list endpoint but with subdirectory navigation and
+        breadcrumbs. The subpath is sanitized (no ``..`` components) and
+        resolved paths are verified to stay inside the allowed base
+        directory to prevent traversal.
+
+        Args:
+            file_type (str): One of ``scenario``, ``plugins``, ``settings``,
+                ``output``.
+            subpath (str): Optional subdirectory path below the file type's
+                base directory.
+
+        Returns:
+            JSON with ``files``, ``current_path`` and ``breadcrumbs``, or a
+            400/403/500 error payload.
+        """
         try:
             # Check if base path is configured
             if not hasattr(current_app, "bluesky_base_path"):
@@ -983,8 +1112,17 @@ def register_basic_routes(app, session_manager):
     def _validate_output_path(filepath):
         """Validate and resolve a filepath within the output directory.
 
-        Returns (resolved_path, error_response) tuple. If validation fails,
-        resolved_path is None and error_response contains the Flask response.
+        Sanitizes the path (no ``..`` components) and verifies the resolved
+        target stays inside the output directory and points to an existing
+        file.
+
+        Args:
+            filepath (str): Requested path relative to the output directory.
+
+        Returns:
+            tuple: ``(resolved_path, error_response)``. On failure
+                ``resolved_path`` is None and ``error_response`` holds the
+                Flask (json, status) response to return.
         """
         if not hasattr(current_app, "bluesky_base_path"):
             return None, (
@@ -1045,7 +1183,15 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/bluesky/output/download/<path:filepath>", methods=["GET"])
     def download_output_file(filepath):
-        """Download a file from the BlueSky output directory."""
+        """Download an output file (GET /api/bluesky/output/download/<filepath>).
+
+        Args:
+            filepath (str): Path of the file relative to the output
+                directory; validated against traversal.
+
+        Returns:
+            The file as an attachment, or a 400/403/404/500 error payload.
+        """
         try:
             resolved_path, error = _validate_output_path(filepath)
             if error:
@@ -1065,11 +1211,23 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/bluesky/output/content/<path:filepath>", methods=["GET"])
     def get_output_file_content(filepath):
-        """Read content from an output file for log streaming.
+        """Read output-file content (GET /api/bluesky/output/content/<filepath>).
 
-        Query params:
-            offset: byte offset to read from (0 = use tail mode for initial load)
-            lines: max lines for initial tail load (default 200)
+        Supports log streaming: with ``offset`` > 0 the file is read
+        incrementally from that byte offset to the end; with offset 0 the
+        last ``lines`` lines are tailed for the initial load. Query
+        parameters:
+
+        - ``offset``: byte offset to read from (0 = tail mode).
+        - ``lines``: maximum lines for the initial tail load (default 200).
+
+        Args:
+            filepath (str): Path of the file relative to the output
+                directory; validated against traversal.
+
+        Returns:
+            JSON with ``content``, the new ``offset``, ``total_size`` and
+            ``filename``, or a 400/403/404/500 error payload.
         """
         try:
             resolved_path, error = _validate_output_path(filepath)
@@ -1112,7 +1270,16 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/bluesky/<file_type>/<filename>", methods=["DELETE"])
     def delete_bluesky_file(file_type, filename):
-        """Delete files from BlueSky directories."""
+        """Delete a BlueSky file (DELETE /api/bluesky/<file_type>/<filename>).
+
+        Args:
+            file_type (str): One of ``scenario``, ``plugins``, ``settings``.
+                For ``settings`` only ``settings.cfg`` may be deleted.
+            filename (str): Name of the file to delete (sanitized).
+
+        Returns:
+            JSON confirming the deletion, or a 400/404/500 error payload.
+        """
         try:
             # Check if base path is configured
             if not hasattr(current_app, "bluesky_base_path"):
@@ -1180,7 +1347,13 @@ def register_basic_routes(app, session_manager):
 
     @app.route("/api/bluesky/filestatus", methods=["GET"])
     def get_bluesky_file_status():
-        """Get BlueSky file system configuration status."""
+        """Get file-management configuration status (GET /api/bluesky/filestatus).
+
+        Returns:
+            JSON with ``configured``, the ``base_path`` and its
+            ``derived_paths``, plus existence/writability flags, or a 500
+            error payload.
+        """
         try:
             if not hasattr(current_app, "bluesky_base_path"):
                 return jsonify(
