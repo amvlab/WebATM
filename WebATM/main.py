@@ -1,4 +1,4 @@
-"""Main entry point for WebATM."""
+"""Start the WebATM web server and manage its lifecycle."""
 
 import os
 
@@ -9,7 +9,23 @@ logger = get_logger()
 
 
 def start_WebATM(hostname=None, port=8082, debug=False):
-    """Start WebATM."""
+    """Start the WebATM web server.
+
+    Creates the Flask/Socket.IO application, sets the default BlueSky server IP
+    on the proxy (without connecting), and runs the web server until it exits,
+    at which point the proxy client is stopped.
+
+    The web server bind address is taken from the ``WEB_HOST`` environment
+    variable (default ``"localhost"``).
+
+    Args:
+        hostname (str | None): BlueSky server hostname/IP to use as the default.
+            Falls back to the ``BLUESKY_SERVER_HOST`` environment variable, then
+            ``"localhost"``.
+        port (int): Web server port. The ``WEB_PORT`` environment variable, if
+            set, takes precedence.
+        debug (bool): Whether to run the Socket.IO server in debug mode.
+    """
     # Get BlueSky server hostname from environment variable or parameter
     bluesky_host = hostname or os.environ.get("BLUESKY_SERVER_HOST", "localhost")
     web_port = int(os.environ.get("WEB_PORT", port))

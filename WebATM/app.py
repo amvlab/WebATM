@@ -1,10 +1,10 @@
-"""
-Flask web server and Socket.IO handlers for WebATM.
+"""Build the Flask web server and Socket.IO application for WebATM.
 
-This web application provides a browser-based interface for BlueSky - The Open Air Traffic
-Simulator developed by TU Delft (Delft University of Technology).
+This web application provides a browser-based interface for BlueSky - The Open
+Air Traffic Simulator developed by TU Delft (Delft University of Technology).
 
 This module is separated into different focused modules in the server/ package:
+
 - server/session_manager.py: Session tracking and capacity management
 - server/routes.py: Basic Flask routes (index, commands, config, health)
 - server/server_status.py: BlueSky server status
@@ -30,7 +30,20 @@ from .server import (
 
 
 def create_app():
-    """Create and configure Flask application with all routes and handlers."""
+    """Create and configure the Flask application with all routes and handlers.
+
+    Sets up logging (including Werkzeug HTTP access logs), the session manager,
+    the Socket.IO server, and the global BlueSky proxy, then registers the
+    Flask routes, server-status routes, and Socket.IO event handlers. When the
+    ``WEBATM_INTEGRATED`` environment variable is ``"1"``, the optional
+    ``webatm_integrated`` extensions are registered as well (best-effort; a
+    failure never breaks the core app).
+
+    Returns:
+        tuple: A ``(app, socketio)`` pair with the configured
+            :class:`flask.Flask` application and its
+            :class:`flask_socketio.SocketIO` instance.
+    """
 
     # Create Flask app
     app = Flask(
@@ -84,8 +97,11 @@ def create_app():
     # === Error Handlers ===
     @app.errorhandler(Exception)
     def handle_exception(e):
-        """Return 500 for unexpected errors, but let HTTP errors keep their
-        status (404, 405, ...) instead of masking them all as 500."""
+        """Return 500 for unexpected errors while preserving HTTP error codes.
+
+        HTTP errors keep their status (404, 405, ...) instead of being masked
+        as 500.
+        """
         if isinstance(e, HTTPException):
             return e
         return jsonify({"error": "Internal server error"}), 500

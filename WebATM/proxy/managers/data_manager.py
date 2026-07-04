@@ -1,4 +1,4 @@
-"""Data emission and state management for BlueSky proxy."""
+"""Data emission and state management for the BlueSky proxy."""
 
 import threading
 import time
@@ -10,18 +10,27 @@ logger = get_logger()
 
 
 class DataManager:
-    """Manages data emission, backup timers, and state clearing."""
+    """Manage Socket.IO data emission, backup timers, and state clearing.
+
+    Emits connection status, cleared-state payloads and periodic backup data
+    to connected web clients, and provides the initial-page-load snapshot of
+    the proxy's cached simulation state.
+    """
 
     def __init__(self, proxy):
-        """Initialize DataManager with reference to parent proxy.
+        """Initialize the data manager.
 
         Args:
-            proxy: Parent BlueSkyProxy instance
+            proxy (BlueSkyProxy): Parent proxy instance.
         """
         self.proxy = proxy
 
     def _emit_connection_status(self, connected):
-        """Emit connection status to connected web clients."""
+        """Emit a ``connection_status`` event to connected web clients.
+
+        Args:
+            connected (bool): Whether the proxy is connected to BlueSky.
+        """
         if self.proxy.socketio and self.proxy.connected_clients > 0:
             try:
                 self.proxy.socketio.emit(
@@ -36,7 +45,12 @@ class DataManager:
                 pass
 
     def _emit_cleared_data(self):
-        """Emit cleared data to remove all aircraft and simulation info from the map."""
+        """Emit empty payloads to clear aircraft, sim info and shapes.
+
+        Sends empty ``acdata``, ``siminfo``, ``poly`` and ``polyline`` events
+        plus a ``server_disconnected`` event so the map fully resets when the
+        BlueSky server goes away.
+        """
         if self.proxy.socketio and self.proxy.connected_clients > 0:
             try:
                 # Emit empty traffic data to clear all aircraft from the map
@@ -87,7 +101,7 @@ class DataManager:
                 logger.error(f" Error emitting cleared data: {e}")
 
     def start_backup_timer(self):
-        """Start backup timer to ensure data gets sent regularly."""
+        """Start (or restart) the 0.5 s backup emission timer."""
         if self.proxy.backup_timer:
             self.proxy.backup_timer.cancel()
         self.proxy.backup_timer = threading.Timer(
@@ -97,7 +111,12 @@ class DataManager:
         self.proxy.backup_timer.start()
 
     def backup_data_emit(self):
-        """Backup method to emit data if subscribers haven't."""
+        """Re-emit cached sim/traffic data and reschedule the backup timer.
+
+        Safety net for web clients that connect between subscriber emissions:
+        pushes the latest cached ``siminfo`` and ``acdata`` payloads, then
+        schedules the next backup tick while the proxy is running.
+        """
         if not self.proxy.running:
             return
 
@@ -116,10 +135,13 @@ class DataManager:
         self.start_backup_timer()
 
     def _clear_state(self, context="disconnect"):
-        """Clear all client state data.
+        """Clear all cached client state after a stop or disconnect.
 
         Args:
-            context: 'disconnect' for reconnection, 'manual' for user disconnect, 'shutdown' for app termination
+            context (str): Cleanup context — ``"disconnect"`` for
+                reconnection, ``"manual"`` for a user-initiated disconnect,
+                ``"shutdown"`` for app termination. Only affects the final
+                log message.
         """
         # Reset connection monitoring
         self.proxy.was_connected = False
@@ -167,7 +189,16 @@ class DataManager:
             logger.info(" Client stopped - Ready for new connection")
 
     def get_current_data(self) -> dict[str, Any]:
-        """Get current simulation data for initial page load."""
+        """Build the simulation state snapshot for an initial page load.
+
+        Shapes (polygons/polylines) are only included for the currently
+        active node.
+
+        Returns:
+            dict[str, Any]: Snapshot with ``traffic_data``, ``sim_data``,
+                ``echo_data``, ``poly_data``, ``polyline_data``, ``cmddict``,
+                ``connection_status``, ``node_info`` and a ``timestamp``.
+        """
         active_node_id = self.proxy.node_mgr._get_safe_active_node()
 
         poly_data = {}

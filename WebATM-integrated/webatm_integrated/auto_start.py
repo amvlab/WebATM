@@ -40,9 +40,13 @@ _DEFAULT_MARKER = "/dev/shm/webatm_autostart.done"
 
 
 def auto_start_enabled() -> bool:
-    """Whether to auto-start BlueSky + auto-connect on boot.
+    """Report whether to auto-start BlueSky and auto-connect on boot.
 
     On by default; set ``WEBATM_AUTO_START=0`` to disable.
+
+    Returns:
+        bool: True unless the ``WEBATM_AUTO_START`` environment variable is
+            set to ``"0"``.
     """
     return os.environ.get("WEBATM_AUTO_START", "1") != "0"
 
@@ -50,10 +54,22 @@ def auto_start_enabled() -> bool:
 def claim_first_boot(marker_path: str | None = None) -> bool:
     """Atomically claim the one-shot auto-start for this boot.
 
-    Returns True for the first caller to create the marker file and False
-    thereafter (e.g. a replaced gunicorn worker re-running ``register()``), so
-    auto-start never fights the manual Start/Stop controls. If the marker cannot
-    be created (e.g. no /dev/shm on a dev box) it degrades to True.
+    Creates the marker file with ``O_CREAT | O_EXCL`` so only the first caller
+    per boot wins; every later caller (e.g. a replaced gunicorn worker re-running
+    ``register()``) stands down, and auto-start never fights the manual
+    Start/Stop controls. The default marker lives on tmpfs (``/dev/shm``) so it
+    survives worker replacement but clears on a fresh container start.
+
+    Args:
+        marker_path (str | None): Marker file location. Defaults to the
+            ``WEBATM_AUTOSTART_MARKER`` environment variable, falling back to
+            ``/dev/shm/webatm_autostart.done``.
+
+    Returns:
+        bool: True for the first caller to create the marker file, False
+            thereafter. If the marker cannot be created at all (e.g. no
+            ``/dev/shm`` on a dev box) it degrades to True, proceeding without
+            the once-per-boot guard.
     """
     path = marker_path or os.environ.get("WEBATM_AUTOSTART_MARKER", _DEFAULT_MARKER)
     try:
@@ -82,12 +98,27 @@ def schedule_auto_start(socketio, manager, bluesky_proxy) -> None:
     Backgrounded so ``register()`` (which runs during app creation) returns
     immediately: waiting for BlueSky's ports can take several seconds on a cold
     start, and we must not block the worker from beginning to serve requests.
+
+    Args:
+        socketio (flask_socketio.SocketIO): Socket.IO instance whose
+            ``start_background_task`` runs the sequence.
+        manager (BlueSkyProcessManager): Process manager used to start the
+            BlueSky server.
+        bluesky_proxy (BlueSkyProxy | None): Core proxy to connect once
+            BlueSky is ready, or None to skip the auto-connect.
     """
     socketio.start_background_task(_run_auto_start, manager, bluesky_proxy)
 
 
 def _run_auto_start(manager, bluesky_proxy) -> None:
-    """Start the BlueSky process tree, then connect the proxy once it is ready."""
+    """Start the BlueSky process tree, then connect the proxy once it is ready.
+
+    Args:
+        manager (BlueSkyProcessManager): Process manager used to start the
+            BlueSky server.
+        bluesky_proxy: Core BlueSkyProxy to connect, or None to skip the
+            auto-connect.
+    """
     result = manager.start()
     if not result.get("success"):
         logger.error(
@@ -123,8 +154,24 @@ def connect_proxy_when_ready(
     The port probe, subscriber registration and sleep are injectable so this can
     be unit-tested without a real BlueSky server or wall-clock delays.
 
+    Args:
+        bluesky_proxy (BlueSkyProxy): Core proxy to connect.
+        host (str | None): BlueSky server host. Defaults to the proxy's
+            ``server_ip``, then the ``BLUESKY_SERVER_HOST`` environment
+            variable, then ``"localhost"``.
+        ready_timeout (float): Maximum seconds to wait for a BlueSky port to
+            start listening.
+        poll_interval (float): Seconds to sleep between port probes.
+        is_port_listening (Callable | None): Port probe taking
+            ``(port, timeout, host)``. Defaults to
+            ``WebATM.server.bluesky_server_status.is_port_listening``.
+        register_subscribers (Callable | None): Subscriber-registration hook.
+            Defaults to ``WebATM.proxy.register_subscribers``.
+        sleep (Callable | None): Sleep function. Defaults to ``time.sleep``.
+
     Returns:
-        True if the proxy connect was attempted, False if BlueSky never came up.
+        bool: True if the proxy connect succeeded, False if BlueSky never came
+            up within the timeout or the connect attempt raised.
     """
     # Deferred imports: keep this module light for unit tests and avoid pulling
     # the Flask/ZMQ-laden core packages unless we actually connect.

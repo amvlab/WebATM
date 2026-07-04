@@ -1,4 +1,10 @@
-"""Data handlers for BlueSky network events."""
+"""Expose the BlueSky data-event handlers as a single package namespace.
+
+Re-exports the handler callables for each BlueSky network topic (SIMINFO,
+ACDATA, STATECHANGE, ROUTEDATA, ECHO, POLY/POLYLINE, STACK, STACKCMDS, RESET,
+REQUEST, PLOT, TRAILS, SHOWDIALOG, SIMSETTINGS, and DEFWPT) so that
+``proxy.subscribers`` can register them all from one place.
+"""
 
 from .commands import on_stack_received, on_stackcmds_received
 from .echo import echo

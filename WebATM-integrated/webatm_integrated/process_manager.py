@@ -29,7 +29,11 @@ def _default_spawn(target: Callable, *args) -> threading.Thread:
 
 
 class BlueSkyProcessManager:
-    """Thread-safe lifecycle manager for the ``bluesky --headless`` process tree."""
+    """Thread-safe lifecycle manager for the ``bluesky --headless`` process tree.
+
+    Tracks only the parent process; signals (stop/kill) address the whole
+    process group so node children are reaped together with the server.
+    """
 
     def __init__(
         self,
@@ -38,6 +42,19 @@ class BlueSkyProcessManager:
         spawn: Callable | None = None,
         cmd: list[str] | None = None,
     ):
+        """Initialize the process manager.
+
+        Args:
+            on_line: Callback invoked with each output line of the process
+                tree (newline stripped).
+            on_exit: Callback invoked with the return code when the server
+                process exits.
+            spawn: Spawn primitive for the reader task (e.g.
+                ``socketio.start_background_task``); defaults to a plain
+                daemon thread.
+            cmd (list[str] | None): Command to launch; defaults to
+                ``["bluesky", "--headless"]``.
+        """
         self._lock = threading.RLock()
         self._proc: subprocess.Popen | None = None
         self._on_line = on_line
@@ -51,7 +68,17 @@ class BlueSkyProcessManager:
     # ---- lifecycle ------------------------------------------------------
 
     def start(self) -> dict:
-        """Spawn the headless server (in its own process group) and a reader."""
+        """Spawn the headless server (in its own process group) and a reader.
+
+        The process is started in a new session with merged, line-buffered
+        stdout/stderr so the reader receives one ordered stream for the
+        server and all node children. A no-op if the server is already
+        running.
+
+        Returns:
+            dict: Result with ``success``, ``status``, ``pid`` and
+                ``message`` (plus ``error`` on failure).
+        """
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 return {
@@ -117,7 +144,16 @@ class BlueSkyProcessManager:
                 self._on_exit(return_code)
 
     def stop(self, sig: int = signal.SIGTERM, escalate_after: float = 5.0) -> dict:
-        """Signal the whole process group, escalating to SIGKILL if needed."""
+        """Signal the whole process group, escalating to SIGKILL if needed.
+
+        Args:
+            sig (int): Signal sent to the process group first.
+            escalate_after (float): Seconds to wait for exit before
+                force-killing the group with SIGKILL.
+
+        Returns:
+            dict: Result with ``success``, ``status`` and ``message``.
+        """
         with self._lock:
             proc = self._proc
             if proc is None or proc.poll() is not None:
@@ -171,14 +207,23 @@ class BlueSkyProcessManager:
         }
 
     def kill(self) -> dict:
-        """Force-kill the whole process group immediately (no graceful wait)."""
+        """Force-kill the whole process group immediately (no graceful wait).
+
+        Returns:
+            dict: Result with ``success``, ``status`` and ``message``.
+        """
         result = self.stop(sig=signal.SIGKILL, escalate_after=2.0)
         if result.get("success") and result.get("status") == "stopped":
             result["message"] = "BlueSky server killed"
         return result
 
     def restart(self) -> dict:
-        """Stop the current tree (if any) and start a fresh one."""
+        """Stop the current tree (if any) and start a fresh one.
+
+        Returns:
+            dict: The ``start()`` result, with the message adjusted to
+                "restarted" on success.
+        """
         self.stop()
         result = self.start()
         if result.get("success"):
@@ -186,7 +231,12 @@ class BlueSkyProcessManager:
         return result
 
     def status(self) -> dict:
-        """Report whether the server is running, with its pid and state."""
+        """Report whether the server is running, with its pid and state.
+
+        Returns:
+            dict: Result with ``success``, ``running``, ``status`` and
+                ``pid`` (None when stopped).
+        """
         with self._lock:
             running = self._proc is not None and self._proc.poll() is None
             return {

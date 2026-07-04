@@ -29,7 +29,16 @@ logger = get_logger()
 
 
 class DataPathPerf:
-    """Accumulates ACDATA serialize/emit timings and logs periodic summaries."""
+    """Accumulate ACDATA serialize/emit timings and log periodic summaries.
+
+    All ``record_*`` methods are cheap no-ops unless ``WEBATM_PERF=1`` is set
+    in the environment, so instrumentation can stay in the hot path.
+
+    Attributes:
+        enabled (bool): Whether instrumentation is active (``WEBATM_PERF=1``).
+        interval (float): Seconds between logged summaries
+            (``WEBATM_PERF_INTERVAL``, minimum 1.0, default 5.0).
+    """
 
     def __init__(self) -> None:
         self.enabled = os.environ.get("WEBATM_PERF") == "1"
@@ -53,14 +62,21 @@ class DataPathPerf:
     # --- recording (cheap no-ops when disabled) --------------------------
 
     def record_received(self) -> None:
+        """Count one ACDATA frame arriving at the handler (any node)."""
         if self.enabled:
             self.received += 1
 
     def record_filtered(self) -> None:
+        """Count one frame dropped by the active-node filter."""
         if self.enabled:
             self.filtered += 1
 
     def record_serialize(self, seconds: float) -> None:
+        """Accumulate the wall-clock time of one frame serialization.
+
+        Args:
+            seconds (float): Time spent in ``make_json_serializable``.
+        """
         if not self.enabled:
             return
         self.serialize_s += seconds
@@ -68,6 +84,14 @@ class DataPathPerf:
             self.serialize_max_s = seconds
 
     def record_emit(self, seconds: float) -> None:
+        """Accumulate the wall-clock time of one Socket.IO emit.
+
+        Also tracks the maximum gap between consecutive emits, which surfaces
+        stalls in the data path.
+
+        Args:
+            seconds (float): Time spent emitting the serialized frame.
+        """
         if not self.enabled:
             return
         self.emits += 1
@@ -82,6 +106,11 @@ class DataPathPerf:
     # --- periodic summary ------------------------------------------------
 
     def maybe_log(self) -> None:
+        """Log a one-line summary and reset counters when the window elapsed.
+
+        Called from the data path after each frame; does nothing until
+        ``interval`` seconds have passed since the last summary.
+        """
         if not self.enabled:
             return
         now = time.time()

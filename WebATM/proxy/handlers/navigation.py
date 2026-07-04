@@ -7,7 +7,16 @@ logger = get_logger()
 
 
 def on_defwpt_received(data, *args, **kwargs):
-    """Handle DEFWPT (Define Waypoint) messages from BlueSky server."""
+    """Handle DEFWPT (define waypoint) events from the BlueSky server.
+
+    Currently only logs the payload; waypoint rendering in the web client is
+    not yet implemented.
+
+    Args:
+        data (Any): The DEFWPT payload describing the waypoint.
+        *args (Any): Additional positional payload items (unused).
+        **kwargs (Any): Additional keyword payload items (unused).
+    """
     if not active_proxy():
         return
 

@@ -9,7 +9,18 @@ logger = get_logger()
 
 
 def on_reset_received(data=None, *args, **kwargs):
-    """Handle RESET messages from BlueSky server."""
+    """Handle RESET events from the BlueSky server.
+
+    Clears the stored polygon/polyline shapes for the node that sent the
+    reset (and the active node, if different), then emits empty ``poly`` and
+    ``polyline`` payloads plus a ``reset`` event so web clients clear their
+    maps.
+
+    Args:
+        data (Any): Optional RESET payload (unused).
+        *args (Any): Additional positional payload items (unused).
+        **kwargs (Any): Additional keyword payload items (unused).
+    """
     proxy = active_proxy()
     if not proxy:
         return
@@ -63,7 +74,16 @@ def on_reset_received(data=None, *args, **kwargs):
 
 
 def on_request_received(data, *args, **kwargs):
-    """Handle REQUEST messages from BlueSky server."""
+    """Handle REQUEST events from the BlueSky server.
+
+    Currently only logs the payload; specific request handling is not yet
+    implemented.
+
+    Args:
+        data (Any): The REQUEST payload.
+        *args (Any): Additional positional payload items (unused).
+        **kwargs (Any): Additional keyword payload items (unused).
+    """
     if not active_proxy():
         return
 

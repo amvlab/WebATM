@@ -1,4 +1,4 @@
-"""WebATM integrated extensions.
+"""Provide the WebATM integrated extensions.
 
 Shipped ONLY in the ``webatm-integrated`` build variant. Adds BlueSky server
 lifecycle control (start/stop/restart/kill), live, in-order log streaming of the
@@ -7,9 +7,8 @@ this same container -- pre-wires WebATM's file management directly to BlueSky's
 own scenario / plugins / output directories (no manual base-path step).
 
 The core ``webatm`` package never imports this package. It is wired in through a
-single env-guarded hook in ``WebATM.app.create_app`` that calls
-:func:`register` only when ``WEBATM_INTEGRATED=1`` and this package is
-installed.
+single env-guarded hook in ``WebATM.app.create_app`` that calls ``register``
+only when ``WEBATM_INTEGRATED=1`` and this package is installed.
 """
 
 from __future__ import annotations
@@ -29,16 +28,29 @@ __all__ = [
 def register(app, socketio, *, session_manager=None, bluesky_proxy=None):
     """Wire the integrated features into an existing WebATM app.
 
-    Called by ``WebATM.app.create_app`` when ``WEBATM_INTEGRATED=1``.
+    Called by ``WebATM.app.create_app`` when ``WEBATM_INTEGRATED=1``. Points the
+    file-management routes at BlueSky's fixed working directory, creates the
+    process manager and log streamer (stashed on ``app`` as
+    ``bluesky_process_manager`` / ``bluesky_log_streamer``), registers the
+    integrated REST routes and Socket.IO handlers, and arranges for the whole
+    BlueSky process group to be reaped when the worker exits. On the first boot
+    only (guarded by ``claim_first_boot()``, so a replaced gunicorn worker never
+    resurrects a manually-stopped server) it also schedules the background
+    auto-start of the bundled BlueSky server; disable that with
+    ``WEBATM_AUTO_START=0``.
 
     Args:
-        app: Flask application instance.
-        socketio: Flask-SocketIO instance (async_mode="threading").
-        session_manager: Core SessionManager (accepted for forward-compat).
-        bluesky_proxy: Core BlueSkyProxy (accepted for forward-compat).
+        app (flask.Flask): Flask application instance.
+        socketio (flask_socketio.SocketIO): Flask-SocketIO instance
+            (``async_mode="threading"``).
+        session_manager (SessionManager): Core session manager (accepted for
+            forward-compat; currently unused).
+        bluesky_proxy (BlueSkyProxy): Core proxy, used for the first-boot
+            auto-connect.
 
     Returns:
-        dict with the created ``manager`` and ``streamer`` (handy for tests).
+        dict: The created ``manager`` (BlueSkyProcessManager) and ``streamer``
+            (LogStreamer), handy for tests.
     """
     # Imported lazily so `import webatm_integrated.process_manager` /
     # `.log_streamer` stay Flask-free (importable for unit tests). They are only

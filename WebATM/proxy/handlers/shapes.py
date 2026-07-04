@@ -1,4 +1,10 @@
-"""Shape handlers for POLY and POLYLINE data."""
+"""Handle BlueSky POLY shape events and split them into polygons and polylines.
+
+BlueSky publishes all drawn shapes on a single POLY topic. This module stores
+them per sending node on the proxy, separates polygons from polylines by their
+``shape`` field, and forwards the active node's shapes to browsers as the
+``poly`` and ``polyline`` Socket.IO events.
+"""
 
 from ...logger import get_logger
 from ...utils import make_json_serializable
@@ -8,7 +14,23 @@ logger = get_logger()
 
 
 def on_poly_received(data, *args, **kwargs):
-    """Handle polygon data updates from BlueSky server."""
+    """Process a BlueSky POLY event and emit ``poly``/``polyline`` to web clients.
+
+    Resolves the sending node from the BlueSky network context, splits the
+    incoming shapes into polygons and polylines, and stores them per node on
+    the proxy. Reset/replace/change action types ("R", "X", "C") overwrite the
+    node's stored shapes; other messages merge into them. At most the five most
+    recent polygons and five most recent polylines are kept per node. The
+    complete stored shape sets are emitted only when the sender is the
+    currently active node.
+
+    Args:
+        data (dict | list): POLY payload from the BlueSky server, typically a
+            dict with a ``polys`` mapping; list payloads may carry a leading
+            action-type marker.
+        *args (Any): Extra positional arguments from the network dispatch (unused).
+        **kwargs (Any): Extra keyword arguments from the network dispatch (unused).
+    """
     proxy = active_proxy()
     if not proxy:
         return
@@ -133,7 +155,23 @@ def on_poly_received(data, *args, **kwargs):
 
 
 def _separate_poly_and_polyline_data(poly_data):
-    """Separate polygons and polylines from combined POLY data based on shape field."""
+    """Split combined POLY data into polygons and polylines by ``shape`` field.
+
+    Shapes marked ``LINE`` become polylines; ``POLYALT`` shapes are rewritten
+    as ``POLY`` polygons; everything else is treated as a polygon. Flat
+    ``coordinates`` arrays (``[lat1, lon1, lat2, lon2, ...]``) are converted to
+    separate ``lat``/``lon`` lists for web-client compatibility. On errors or
+    unexpected formats the whole payload is treated as polygons.
+
+    Args:
+        poly_data (dict): JSON-serializable POLY payload, expected to contain a
+            ``polys`` mapping of shape name to shape info.
+
+    Returns:
+        dict: ``{"polygons": ..., "polylines": ...}`` where each value is a
+        ``{"polys": {...}}`` structure (or empty when no shapes of that kind
+        were present).
+    """
     polygons_data = {}
     polylines_data = {}
 

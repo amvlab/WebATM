@@ -1,4 +1,4 @@
-"""Command processing and forwarding for BlueSky proxy."""
+"""Command processing and forwarding for the BlueSky proxy."""
 
 import time
 
@@ -8,18 +8,35 @@ logger = get_logger()
 
 
 class CommandProcessor:
-    """Handles command processing, forwarding, and echo responses."""
+    """Handle command processing, forwarding, and echo responses.
+
+    Queues user/GUI commands on the network client's stack, forwards them to
+    the BlueSky server (answering HELP/? locally), and emits echo responses
+    back to connected web clients.
+    """
 
     def __init__(self, proxy):
-        """Initialize CommandProcessor with reference to parent proxy.
+        """Initialize the command processor.
 
         Args:
-            proxy: Parent BlueSkyProxy instance
+            proxy (BlueSkyProxy): Parent proxy instance.
         """
         self.proxy = proxy
 
     def send_command(self, command: str) -> bool:
-        """Send a command to the simulation using stack processing."""
+        """Send a command to the simulation using stack processing.
+
+        Queues the command on the client stack and immediately processes the
+        queue, forwarding to the BlueSky server as appropriate.
+
+        Args:
+            command (str): The stack command line to send (e.g. ``"CRE KL123
+                A320 52.3 4.7 90 FL100 250"``).
+
+        Returns:
+            bool: True if the command was queued and processed, False if the
+                BlueSky client is not running or an error occurred.
+        """
         try:
             if self.proxy.bluesky_client and self.proxy.bluesky_client.running:
                 self.proxy.bluesky_client.stack.stack(command)
@@ -81,11 +98,16 @@ class CommandProcessor:
             self._echo_response(f"Error sending command: {e}", 1)
 
     def forward(self, *cmdlines, target_id=None):
-        """Forward one or more stack commands to BlueSky server.
+        """Forward one or more stack commands to the BlueSky server.
 
-        Mirrors BlueSky's stack.forward(): sends to the given target_id, the
-        active node, or the server. Multiple commands may be passed as separate
-        arguments and/or semicolon-separated within a single string.
+        Mirrors BlueSky's ``stack.forward()``: sends to the given target, the
+        active node, or the server. Multiple commands may be passed as
+        separate arguments and/or semicolon-separated within a single string.
+
+        Args:
+            *cmdlines (str): One or more stack command lines to forward.
+            target_id (bytes | None): Explicit node/server ID to address. When
+                None, falls back to the active node, then the server.
         """
         if not cmdlines:
             return

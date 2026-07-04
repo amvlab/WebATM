@@ -10,7 +10,18 @@ logger = get_logger()
 
 
 def echo(text, flags=None, sender_id=None):
-    """Handle echo messages from simulation."""
+    """Handle ECHO messages (command responses) from the simulation.
+
+    Stores the message on the proxy and emits an ``echo`` event to connected
+    web clients immediately — command responses are never throttled.
+
+    Args:
+        text (str): The echo text; newlines and formatting are preserved.
+        flags (int | None): BlueSky echo flags (e.g. error indication).
+            Defaults to 0 when None.
+        sender_id (bytes | str | None): ID of the node that sent the echo;
+            decoded to a readable string for the client.
+    """
     proxy = active_proxy()
     if not proxy:
         return

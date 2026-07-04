@@ -1,4 +1,9 @@
-"""Subscriber registration for BlueSky network events."""
+"""Subscriber registration for BlueSky network events.
+
+Maps BlueSky data topics (SIMINFO, ACDATA, ECHO, ...) to the handler
+functions in :mod:`WebATM.proxy.handlers` and registers them with the
+active BlueSky network client.
+"""
 
 from ..logger import get_logger
 from .handlers import (
@@ -43,7 +48,16 @@ SUBSCRIPTIONS = [
 
 
 def register_subscribers():
-    """Register subscriber callbacks using standalone proxy."""
+    """Register all handler callbacks with the proxy's BlueSky client.
+
+    Iterates over ``SUBSCRIPTIONS`` and subscribes each (topic, callback,
+    actonly) triple on the global proxy's network client. Topics flagged
+    ``actonly`` only deliver data for the active node and are re-subscribed
+    when the active node changes.
+
+    Logs an error and returns early if no global proxy is set, or a warning
+    if the proxy has no connected BlueSky client yet.
+    """
     # Imported lazily: WebATM.proxy imports this module while it is still being
     # initialised, so get_bluesky_proxy does not exist at module-load time yet.
     from . import get_bluesky_proxy

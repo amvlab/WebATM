@@ -39,6 +39,9 @@ def resolve_bluesky_workdir() -> Path:
     -- BlueSky uses ``~/bluesky`` as its working directory. We deliberately
     mirror that exact rule (rather than expose a separate, overridable setting)
     so WebATM and the BlueSky server can never point at different directories.
+
+    Returns:
+        Path: BlueSky's working directory (``~/bluesky``).
     """
     return Path.home() / "bluesky"
 
@@ -54,10 +57,10 @@ def configure_file_management(app) -> str:
     before the BlueSky server's first start.
 
     Args:
-        app: Flask application instance.
+        app (flask.Flask): Flask application instance.
 
     Returns:
-        The configured base path (BlueSky's working directory) as a string.
+        str: The configured base path (BlueSky's working directory).
     """
     workdir = resolve_bluesky_workdir()
     base_path = str(workdir)

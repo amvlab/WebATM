@@ -1,4 +1,11 @@
-"""Simulation data handlers for SIMINFO and ACDATA events."""
+"""Handle BlueSky simulation-state events (SIMINFO, ACDATA, STATECHANGE).
+
+These handlers receive the core simulation feed from the BlueSky server: the
+per-node simulation clock and state (SIMINFO), the aircraft traffic frames
+(ACDATA), and explicit run-state transitions (STATECHANGE). They cache the data
+on the proxy and forward it to connected browsers over Socket.IO as the
+``siminfo``, ``acdata``, and ``statechange`` events.
+"""
 
 import time
 
@@ -13,7 +20,26 @@ logger = get_logger()
 def on_siminfo_received(
     speed, simdt, simt, simutc, ntraf, state, scenname, sender_id=None
 ):
-    """Handle simulation info updates."""
+    """Process a BlueSky SIMINFO event and emit ``siminfo`` to web clients.
+
+    Updates the per-node status/clock tracking for every sending node (feeding
+    the Simulation Nodes panel via a throttled ``node_info`` emission), but only
+    caches and emits the header simulation info for the active node so the
+    displayed clock does not jump between nodes. Emissions to browsers are
+    throttled to ``proxy.siminfo_interval``.
+
+    Args:
+        speed (float): Simulation speed multiplier.
+        simdt (float): Simulation timestep in seconds.
+        simt (float): Elapsed simulation time in seconds.
+        simutc (str): Simulation UTC time string.
+        ntraf (int): Number of aircraft currently in the simulation.
+        state (int): Simulation run-state code.
+        scenname (str): Name of the currently loaded scenario.
+        sender_id (bytes | str | None): Identifier of the sending node; bytes
+            are converted to a hex string. Falls back to the BlueSky network
+            context when not provided.
+    """
     proxy = get_bluesky_proxy()
     if not proxy:
         logger.debug("on_siminfo_received called but no proxy available")
@@ -102,13 +128,22 @@ def on_siminfo_received(
 
 
 def on_acdata_received(data):
-    """Handle aircraft data updates.
+    """Process a BlueSky ACDATA traffic frame and emit ``acdata`` to web clients.
+
+    On a simulation reset or active-node change (detected via the BlueSky
+    network context), clears the cached traffic data and immediately emits an
+    empty ``acdata`` payload so browsers drop stale aircraft.
 
     Hot path: the network timer delivers ACDATA at up to 50 Hz, but it is only
     emitted to browsers at ``acdata_interval`` (10 Hz) and only for the active
     node. ``make_json_serializable`` is the dominant per-frame cost, so it is
     deferred until after the active-node filter and the emit throttle decide the
     frame is actually sent. Set WEBATM_PERF=1 (WebATM.proxy.perf) to measure it.
+
+    Args:
+        data (dict): Aircraft state arrays keyed by field (``id``, ``lat``,
+            ``lon``, ``alt``, ``tas``, ``trk``, ``vs``, conflict counters, ...)
+            as sent by the BlueSky server.
     """
     try:
         proxy = get_bluesky_proxy()
@@ -224,7 +259,18 @@ def on_acdata_received(data):
 
 
 def on_statechange_received(data, sender_id=None):
-    """Handle simulation state transitions from BlueSky (STATECHANGE topic)."""
+    """Process a BlueSky STATECHANGE event and emit ``statechange`` to web clients.
+
+    Updates the cached simulation state (``proxy.sim_data['state']``) and
+    immediately forwards the new run-state and sending node to connected
+    browsers, without throttling.
+
+    Args:
+        data (dict): Event payload; the ``simstate`` key holds the new
+            run-state code. Payloads without ``simstate`` are ignored.
+        sender_id (bytes | str | None): Identifier of the sending node; bytes
+            are converted to a hex string.
+    """
     proxy = get_bluesky_proxy()
     if not proxy or not proxy.allow_reconnection:
         return
