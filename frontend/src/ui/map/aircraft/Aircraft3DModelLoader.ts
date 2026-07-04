@@ -71,17 +71,42 @@ export class Aircraft3DModelLoader {
     }
 
     /**
-     * Drop cached models so stale assets reload fresh. In-flight loads
-     * are kept; their completions re-populate the cache.
+     * Drop cached models so stale assets reload fresh, disposing each
+     * model's GPU resources. In-flight loads are kept; their completions
+     * re-populate the cache.
      */
     public clearCache(): void {
+        this.disposeCachedModels();
         this.loadedModels.clear();
     }
 
-    /** Full teardown: drop the cache and forget in-flight loads. */
+    /** Full teardown: dispose and drop the cache, forget in-flight loads. */
     public clearAll(): void {
+        this.disposeCachedModels();
         this.loadedModels.clear();
         this.loadingModels.clear();
+    }
+
+    /**
+     * Dispose the geometry and materials of every cached model. Aircraft
+     * meshes are clones that share these resources, so callers must detach
+     * all live meshes before clearing the cache. Materials may be a single
+     * instance or an array (multi-material meshes), so handle both.
+     */
+    private disposeCachedModels(): void {
+        this.loadedModels.forEach((model) => {
+            model.traverse((child) => {
+                if (child instanceof THREE.Mesh) {
+                    child.geometry.dispose();
+                    const material = child.material;
+                    if (Array.isArray(material)) {
+                        material.forEach((m) => m.dispose());
+                    } else if (material instanceof THREE.Material) {
+                        material.dispose();
+                    }
+                }
+            });
+        });
     }
 
     /**

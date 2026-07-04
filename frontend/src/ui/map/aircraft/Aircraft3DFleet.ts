@@ -140,21 +140,21 @@ export class Aircraft3DFleet {
     }
 
     /**
-     * Remove aircraft mesh and dispose its resources
+     * Detach an aircraft mesh from its group. The mesh is a clone that
+     * shares the cached model's geometry/materials, so those GPU resources
+     * are NOT disposed here — the model loader owns and disposes them when
+     * its cache is cleared. Disposing per-clone would tear down resources
+     * still used by every other aircraft of the same type.
      */
     remove(id: string): void {
         const aircraftMesh = this.aircraft.get(id);
         if (!aircraftMesh) return;
 
-        // Remove from the appropriate group based on current tracking
         const group = aircraftMesh.currentGroup === 'globe'
             ? this.deps.getGlobeGroup()
             : this.deps.getMercatorGroup();
-        if (group) {
-            group.remove(aircraftMesh.mesh);
-        }
+        group?.remove(aircraftMesh.mesh);
 
-        this.disposeMeshResources(aircraftMesh.mesh);
         this.aircraft.delete(id);
         logger.verbose('Aircraft3DFleet', `Removed 3D mesh for aircraft ${id}`);
     }
@@ -282,8 +282,9 @@ export class Aircraft3DFleet {
     }
 
     /**
-     * Detach every live mesh from its group, dispose its resources, and
-     * empty the registry. Shared by reload and full-teardown paths.
+     * Detach every live mesh from its group and empty the registry. Shared
+     * by reload and full-teardown paths. Like remove(), this only detaches;
+     * the cached model's shared geometry/materials are disposed by the loader.
      */
     private removeAllMeshes(): void {
         this.aircraft.forEach((aircraftMesh, id) => {
@@ -291,28 +292,8 @@ export class Aircraft3DFleet {
                 ? this.deps.getGlobeGroup()
                 : this.deps.getMercatorGroup();
             group?.remove(aircraftMesh.mesh);
-            this.disposeMeshResources(aircraftMesh.mesh);
             logger.verbose('Aircraft3DFleet', `Removed 3D mesh for aircraft ${id}`);
         });
         this.aircraft.clear();
-    }
-
-    /**
-     * Dispose of Three.js geometry + material resources inside a mesh
-     * hierarchy. Materials may be a single instance or an array (multi-
-     * material meshes), so handle both.
-     */
-    private disposeMeshResources(mesh: THREE.Object3D): void {
-        mesh.traverse((child) => {
-            if (child instanceof THREE.Mesh) {
-                child.geometry.dispose();
-                const material = child.material;
-                if (Array.isArray(material)) {
-                    material.forEach((m) => m.dispose());
-                } else if (material instanceof THREE.Material) {
-                    material.dispose();
-                }
-            }
-        });
     }
 }
