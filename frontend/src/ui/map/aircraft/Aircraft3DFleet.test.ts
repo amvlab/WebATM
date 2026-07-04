@@ -1,6 +1,8 @@
 /**
- * Tests for Aircraft3DFleet mesh lifecycle, focused on resource disposal
- * (single- and multi-material meshes) and group detachment.
+ * Tests for Aircraft3DFleet mesh lifecycle, focused on group detachment and
+ * the shared-resource contract: aircraft meshes are clones of the cached
+ * model, so the fleet only detaches them — the model loader owns disposal of
+ * the shared geometry/materials.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as THREE from 'three';
@@ -44,7 +46,7 @@ function makeFleet(model: THREE.Group) {
     return { fleet: new Aircraft3DFleet(deps), mercatorGroup };
 }
 
-describe('Aircraft3DFleet disposal', () => {
+describe('Aircraft3DFleet lifecycle', () => {
     beforeEach(() => vi.restoreAllMocks());
 
     it('adds a created mesh to the mercator group', () => {
@@ -57,7 +59,37 @@ describe('Aircraft3DFleet disposal', () => {
         expect(mercatorGroup.children.length).toBe(1);
     });
 
-    it('disposes geometry and every material in a multi-material mesh on clear()', () => {
+    it('detaches the mesh from its group on remove()', () => {
+        const { model } = multiMaterialModel();
+        const { fleet, mercatorGroup } = makeFleet(model);
+
+        fleet.create('AC1', DATA, 'A320.glb');
+        fleet.remove('AC1');
+
+        expect(fleet.size).toBe(0);
+        expect(mercatorGroup.children.length).toBe(0);
+    });
+
+    it('does NOT dispose shared model resources when one aircraft is removed', () => {
+        // Two aircraft cloned from the same cached model share its geometry
+        // and materials. Removing one must not dispose resources the other
+        // still uses — the loader owns disposal of the cached model.
+        const { model, geometry, materials } = multiMaterialModel();
+        const geomSpy = vi.spyOn(geometry, 'dispose');
+        const matSpies = materials.map((m) => vi.spyOn(m, 'dispose'));
+        const { fleet, mercatorGroup } = makeFleet(model);
+
+        fleet.create('AC1', DATA, 'A320.glb');
+        fleet.create('AC2', DATA, 'A320.glb');
+        fleet.remove('AC1');
+
+        expect(geomSpy).not.toHaveBeenCalled();
+        matSpies.forEach((spy) => expect(spy).not.toHaveBeenCalled());
+        expect(fleet.size).toBe(1);
+        expect(mercatorGroup.children.length).toBe(1);
+    });
+
+    it('clear() detaches all meshes without disposing shared resources', () => {
         const { model, geometry, materials } = multiMaterialModel();
         const geomSpy = vi.spyOn(geometry, 'dispose');
         const matSpies = materials.map((m) => vi.spyOn(m, 'dispose'));
@@ -66,22 +98,8 @@ describe('Aircraft3DFleet disposal', () => {
         fleet.create('AC1', DATA, 'A320.glb');
         fleet.clear();
 
-        expect(geomSpy).toHaveBeenCalledTimes(1);
-        // The bug: array materials were skipped, leaking the GPU resources.
-        matSpies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1));
-        expect(fleet.size).toBe(0);
-        expect(mercatorGroup.children.length).toBe(0);
-    });
-
-    it('disposes resources and detaches the mesh on remove()', () => {
-        const { model, geometry } = multiMaterialModel();
-        const geomSpy = vi.spyOn(geometry, 'dispose');
-        const { fleet, mercatorGroup } = makeFleet(model);
-
-        fleet.create('AC1', DATA, 'A320.glb');
-        fleet.remove('AC1');
-
-        expect(geomSpy).toHaveBeenCalledTimes(1);
+        expect(geomSpy).not.toHaveBeenCalled();
+        matSpies.forEach((spy) => expect(spy).not.toHaveBeenCalled());
         expect(fleet.size).toBe(0);
         expect(mercatorGroup.children.length).toBe(0);
     });
