@@ -49,6 +49,6 @@
     "maplibre-gl": "^5.8.0",
     "pmtiles": "^4.4.1",
     "socket.io-client": "^4.8.1",
-    "three": "^0.184.0"
+    "three": "^0.185.1"
   }
 }
