@@ -45,40 +45,36 @@ export class Aircraft3DRenderer implements IEntityRenderer<AircraftData> {
 
     initialize(map: MapLibreMap): void {
         this.map = map;
+        this.whenStyleLoaded(map, () => this.addLayerToMap(map));
+    }
 
-        // Check if layer already exists and remove it first
-        if (map.getLayer(this.customLayer.id)) {
-            logger.warn('Aircraft3DRenderer', `Layer ${this.customLayer.id} already exists, removing first`);
-            map.removeLayer(this.customLayer.id);
-        }
-
-        // Wait for style to load before adding custom layer
-        if (map.isStyleLoaded()) {
-            this.addLayerToMap(map);
-        } else {
-            // Poll for style to be loaded using requestAnimationFrame
-            // This is more reliable than style.load event which may have already fired
-            const waitForStyle = () => {
-                if (map.isStyleLoaded()) {
-                    this.addLayerToMap(map);
-                } else {
-                    requestAnimationFrame(waitForStyle);
-                }
-            };
-            requestAnimationFrame(waitForStyle);
-        }
+    /**
+     * Run `callback` once the map style is loaded, polling with
+     * requestAnimationFrame (the style.load event may have already fired).
+     * Aborts if the renderer is destroyed or re-initialized on another map
+     * while waiting, so a stale wait can't act on a dead renderer.
+     */
+    private whenStyleLoaded(map: MapLibreMap, callback: () => void): void {
+        const poll = () => {
+            if (this.map !== map) return;
+            if (map.isStyleLoaded()) {
+                callback();
+            } else {
+                requestAnimationFrame(poll);
+            }
+        };
+        poll();
     }
 
     private addLayerToMap(map: MapLibreMap): void {
         try {
-            // Remove any existing layer with the same ID first
-            // This ensures the NEW custom layer instance gets onAdd called
+            // Remove any stale layer with the same ID so the new custom
+            // layer instance gets its onAdd called.
             if (map.getLayer(this.customLayer.id)) {
                 map.removeLayer(this.customLayer.id);
-                logger.debug('Aircraft3DRenderer', 'Removed stale 3D layer before adding new one');
             }
             map.addLayer(this.customLayer);
-            logger.debug('Aircraft3DRenderer', '3D layer added to map at top of layer stack');
+            logger.debug('Aircraft3DRenderer', '3D layer added to map');
         } catch (error) {
             logger.error('Aircraft3DRenderer', `Failed to add 3D layer: ${error}`);
         }
@@ -105,46 +101,27 @@ export class Aircraft3DRenderer implements IEntityRenderer<AircraftData> {
     }
 
     onStyleChange(): void {
-        if (!this.map) return;
+        const map = this.map;
+        if (!map) return;
 
-        // For 3D layers, we need to completely reinitialize to ensure proper rendering order
+        // A style change invalidates the custom layer's GL state, so rebuild
+        // the layer from scratch instead of re-adding the old instance.
         const reinitializeLayer = () => {
-            if (!this.map) return;
-
             try {
-                // Remove existing layer if it exists
-                if (this.map.getLayer(this.customLayer.id)) {
-                    this.map.removeLayer(this.customLayer.id);
-                    logger.debug('Aircraft3DRenderer', 'Removed existing 3D layer before style change');
+                if (map.getLayer(this.customLayer.id)) {
+                    map.removeLayer(this.customLayer.id);
                 }
-
-                // Force cleanup and recreation of the custom layer
                 this.customLayer.cleanup();
                 this.customLayer = new Aircraft3DCustomLayer(this.displayOptions, this.stateManager);
-
-                // Re-add the layer
-                this.addLayerToMap(this.map);
-
+                this.addLayerToMap(map);
                 logger.debug('Aircraft3DRenderer', '3D layer reinitialized after style change');
             } catch (error) {
                 logger.error('Aircraft3DRenderer', `Failed to reinitialize 3D layer after style change: ${error}`);
             }
         };
 
-        // Wait for style to be fully loaded before reinitializing
-        // Use requestAnimationFrame polling which is more reliable than style.load event
-        if (this.map.isStyleLoaded()) {
-            requestAnimationFrame(reinitializeLayer);
-        } else {
-            const waitAndReinitialize = () => {
-                if (this.map && this.map.isStyleLoaded()) {
-                    reinitializeLayer();
-                } else if (this.map) {
-                    requestAnimationFrame(waitAndReinitialize);
-                }
-            };
-            requestAnimationFrame(waitAndReinitialize);
-        }
+        // Defer a frame so MapLibre finishes its own style bookkeeping first.
+        requestAnimationFrame(() => this.whenStyleLoaded(map, reinitializeLayer));
     }
 
     destroy(): void {
