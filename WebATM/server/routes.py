@@ -1006,14 +1006,15 @@ def register_basic_routes(app, session_manager):
             else:
                 target_dir = target_base
 
-            # Security check: ensure the target directory is within the allowed base
+            # Security check: ensure the target directory is within the allowed
+            # base. Resolve symlinks first, then compare on path components
+            # (not string prefixes, which would wrongly accept a sibling like
+            # ".../scenario_evil").
             try:
-                # Resolve to absolute paths and check containment
                 resolved_target = target_dir.resolve()
                 resolved_base = target_base.resolve()
 
-                # Check if target is within the allowed directory
-                if not str(resolved_target).startswith(str(resolved_base)):
+                if not resolved_target.is_relative_to(resolved_base):
                     return jsonify(
                         {
                             "success": False,
@@ -1153,11 +1154,13 @@ def register_basic_routes(app, session_manager):
         for part in path_parts:
             target = target / part
 
-        # Security check
+        # Security check: resolve symlinks, then verify containment by path
+        # components rather than string prefix (which would accept a sibling
+        # like ".../output_evil").
         try:
             resolved_target = target.resolve()
             resolved_base = output_base.resolve()
-            if not str(resolved_target).startswith(str(resolved_base)):
+            if not resolved_target.is_relative_to(resolved_base):
                 return None, (
                     jsonify(
                         {

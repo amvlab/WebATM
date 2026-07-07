@@ -98,6 +98,48 @@ class TestListAndBrowse:
         # Either sanitized to the scenario root or rejected - never a 500.
         assert resp.status_code in (200, 400, 403)
 
+    def test_browse_nested_subdirectory(self, client):
+        # A legitimate subdirectory under the base must still be browsable
+        # (guards against the containment check over-rejecting).
+        nested = client.base_path / "scenario" / "sub"
+        nested.mkdir(parents=True)
+        (nested / "inner.scn").write_text("x")
+        resp = client.get("/api/bluesky/browse/scenario/sub")
+        assert resp.status_code == 200
+        names = {f["filename"] for f in resp.get_json()["files"]}
+        assert "inner.scn" in names
+
+    def test_browse_symlink_to_sibling_is_blocked(self, client):
+        # A symlink whose resolved target is a *sibling* sharing the base name
+        # as a string prefix (".../scenario_evil") must be rejected. A naive
+        # str.startswith containment check would wrongly allow it.
+        evil = client.base_path / "scenario_evil"
+        evil.mkdir()
+        (evil / "secret.scn").write_text("secret")
+        scenario_dir = client.base_path / "scenario"
+        scenario_dir.mkdir(exist_ok=True)
+        (scenario_dir / "link").symlink_to(evil, target_is_directory=True)
+
+        resp = client.get("/api/bluesky/browse/scenario/link")
+        assert resp.status_code == 403
+        # The outside file must never leak into the listing.
+        body = resp.get_json()
+        assert "secret.scn" not in {f["filename"] for f in body.get("files", [])}
+
+    def test_output_symlink_escape_is_blocked(self, client):
+        # An output symlink resolving to a sibling directory sharing the base
+        # name prefix (".../output_evil") must not be readable.
+        evil = client.base_path / "output_evil"
+        evil.mkdir()
+        (evil / "secret.txt").write_text("top secret")
+        output_dir = client.base_path / "output"
+        output_dir.mkdir(exist_ok=True)
+        (output_dir / "leak.txt").symlink_to(evil / "secret.txt")
+
+        resp = client.get("/api/bluesky/output/content/leak.txt")
+        assert resp.status_code == 403
+        assert "top secret" not in (resp.get_json().get("content") or "")
+
 
 class TestCaseInsensitiveExtension:
     """Listing/browsing match extensions case-insensitively so uppercase
