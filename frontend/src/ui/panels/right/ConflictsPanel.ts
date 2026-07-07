@@ -1,12 +1,10 @@
 /**
  * ConflictsPanel - Manages the Conflicts panel
  *
- * This panel handles:
- * - Displaying aircraft currently in conflict (inconf === true)
- * - TCPA (Time to Closest Point of Approach) display
- * - Aircraft selection with single/double click support
- * - Scrollable conflict list
- * - Real-time updates with change detection optimization
+ * Displays aircraft currently in conflict (inconf === true) with their
+ * TCPA (Time to Closest Point of Approach). The list DOM is only rebuilt
+ * when the set of conflicting aircraft changes; the TCPA values are
+ * refreshed in place on every data update so they keep counting down.
  */
 
 import { BasePanel } from '../BasePanel';
@@ -15,6 +13,11 @@ import { AircraftData } from '../../../data/types';
 import { StateManager } from '../../../core/StateManager';
 import { logger } from '../../../utils/Logger';
 import { escapeHtml } from '../../../utils/dom';
+
+interface ConflictEntry {
+    id: string;
+    tcpa: number | null;
+}
 
 export class ConflictsPanel extends BasePanel {
     private conflictsInfoElement: HTMLElement | null = null;
@@ -45,16 +48,14 @@ export class ConflictsPanel extends BasePanel {
     public setStateManager(stateManager: StateManager): void {
         this.stateManager = stateManager;
 
-        // Subscribe to selected aircraft changes
         this.stateManager.subscribe('selectedAircraft', (newAircraft) => {
             this.selectedAircraft = newAircraft;
             this.updateSelectionVisuals();
         });
 
-        // Subscribe to aircraft data updates
         this.stateManager.subscribe('aircraftData', (newData) => {
             this.currentAircraftData = newData;
-            this.updateConflictsListIfChanged();
+            this.updateConflictsDisplay();
         });
     }
 
@@ -65,88 +66,72 @@ export class ConflictsPanel extends BasePanel {
         if (data) {
             this.currentAircraftData = data;
         }
-        this.updateConflictsListIfChanged();
+        this.updateConflictsDisplay();
     }
 
     /**
-     * Only update conflicts list if conflicts actually changed (optimization)
+     * Collect the aircraft currently in conflict from the latest data.
      */
-    private updateConflictsListIfChanged(): void {
-        if (!this.currentAircraftData?.id || !this.currentAircraftData?.inconf) {
-            if (this.lastConflictIds.length > 0) {
-                // Had conflicts before, now have none - update
-                this.updateConflictsList();
-                this.lastConflictIds = [];
-            }
-            return;
-        }
+    private getConflictAircraft(): ConflictEntry[] {
+        const data = this.currentAircraftData;
+        if (!data?.id || !data?.inconf) return [];
 
-        // Find current aircraft in conflict
-        const currentConflictIds: string[] = [];
-        for (let i = 0; i < this.currentAircraftData.id.length; i++) {
-            if (this.currentAircraftData.id[i] &&
-                this.currentAircraftData.id[i].trim() !== '' &&
-                this.currentAircraftData.inconf[i]) {
-                currentConflictIds.push(this.currentAircraftData.id[i]);
-            }
-        }
-
-        // Check if conflicts changed
-        const conflictsChanged =
-            this.lastConflictIds.length !== currentConflictIds.length ||
-            !this.lastConflictIds.every(id => currentConflictIds.includes(id)) ||
-            !currentConflictIds.every(id => this.lastConflictIds.includes(id));
-
-        if (conflictsChanged) {
-            this.updateConflictsList();
-            this.lastConflictIds = currentConflictIds;
-        }
-    }
-
-    /**
-     * Update conflicts list display
-     */
-    private updateConflictsList(): void {
-        if (!this.conflictsInfoElement) return;
-
-        if (!this.currentAircraftData?.id || !this.currentAircraftData?.inconf) {
-            this.conflictsInfoElement.innerHTML = '<div class="no-conflicts">No conflicts detected</div>';
-            return;
-        }
-
-        // Find all aircraft in conflict
-        const conflictAircraft: Array<{ id: string; index: number; tcpa: number | null }> = [];
-
-        for (let i = 0; i < this.currentAircraftData.id.length; i++) {
-            const aircraftId = this.currentAircraftData.id[i];
-            if (aircraftId && aircraftId.trim() !== '' && this.currentAircraftData.inconf[i]) {
-                const tcpa = this.currentAircraftData.tcpamax && this.currentAircraftData.tcpamax[i]
-                    ? this.currentAircraftData.tcpamax[i]
-                    : null;
-
-                conflictAircraft.push({
+        const conflicts: ConflictEntry[] = [];
+        for (let i = 0; i < data.id.length; i++) {
+            const aircraftId = data.id[i];
+            if (aircraftId && aircraftId.trim() !== '' && data.inconf[i]) {
+                const tcpa = data.tcpamax?.[i];
+                conflicts.push({
                     id: aircraftId,
-                    index: i,
-                    tcpa: tcpa
+                    tcpa: typeof tcpa === 'number' && Number.isFinite(tcpa) ? tcpa : null,
                 });
             }
         }
+        return conflicts;
+    }
 
-        if (conflictAircraft.length === 0) {
+    /**
+     * Rebuild the list only when the conflicting aircraft changed;
+     * otherwise just refresh the TCPA values in place.
+     */
+    private updateConflictsDisplay(): void {
+        const conflicts = this.getConflictAircraft();
+        const currentIds = conflicts.map(c => c.id);
+
+        const changed =
+            currentIds.length !== this.lastConflictIds.length ||
+            currentIds.some((id, i) => id !== this.lastConflictIds[i]);
+
+        if (changed) {
+            this.renderConflictsList(conflicts);
+            this.lastConflictIds = currentIds;
+        } else if (conflicts.length > 0) {
+            this.updateTcpaValues(conflicts);
+        }
+    }
+
+    private formatTcpa(tcpa: number | null): string {
+        return tcpa !== null ? `TCPA: ${tcpa.toFixed(1)}s` : '';
+    }
+
+    /**
+     * Rebuild the conflicts list DOM and reattach click handlers.
+     */
+    private renderConflictsList(conflicts: ConflictEntry[]): void {
+        if (!this.conflictsInfoElement) return;
+
+        if (conflicts.length === 0) {
             this.conflictsInfoElement.innerHTML = '<div class="no-conflicts">No conflicts detected</div>';
             return;
         }
 
-        // Build conflicts list HTML
         let html = '<div class="conflicts-list">';
-        conflictAircraft.forEach(conflict => {
-            const tcpaStr = conflict.tcpa !== null ? `TCPA: ${conflict.tcpa.toFixed(1)}s` : '';
+        conflicts.forEach(conflict => {
             const safeId = escapeHtml(conflict.id);
-
             html += `
-                <div class="conflict-item" data-aircraft-id="${safeId}" data-index="${conflict.index}">
+                <div class="conflict-item" data-aircraft-id="${safeId}">
                     <div class="conflict-pair"><strong>${safeId}</strong></div>
-                    <div class="conflict-tcpa">${tcpaStr}</div>
+                    <div class="conflict-tcpa">${this.formatTcpa(conflict.tcpa)}</div>
                 </div>
             `;
         });
@@ -154,21 +139,31 @@ export class ConflictsPanel extends BasePanel {
 
         this.conflictsInfoElement.innerHTML = html;
 
-        // Add click handlers to conflict items
-        const conflictItems = this.conflictsInfoElement.querySelectorAll('.conflict-item');
-        conflictItems.forEach(item => {
+        this.conflictsInfoElement.querySelectorAll('.conflict-item').forEach(item => {
             const htmlItem = item as HTMLElement;
-            const aircraftId = htmlItem.getAttribute('data-aircraft-id');
-            const indexAttr = htmlItem.getAttribute('data-index');
-
-            if (aircraftId && indexAttr) {
-                const index = parseInt(indexAttr);
-                this.clickSelector.attach(htmlItem, aircraftId, index);
+            const aircraftId = htmlItem.dataset.aircraftId;
+            if (aircraftId) {
+                this.clickSelector.attach(htmlItem, aircraftId);
             }
         });
 
-        // Update selection state after rebuilding
         this.updateSelectionVisuals();
+    }
+
+    /**
+     * Refresh the TCPA text of the existing items without rebuilding them.
+     */
+    private updateTcpaValues(conflicts: ConflictEntry[]): void {
+        if (!this.conflictsInfoElement) return;
+
+        const tcpaById = new Map(conflicts.map(c => [c.id, c.tcpa]));
+        this.conflictsInfoElement.querySelectorAll('.conflict-item').forEach(item => {
+            const aircraftId = (item as HTMLElement).dataset.aircraftId;
+            const tcpaElement = item.querySelector('.conflict-tcpa');
+            if (aircraftId && tcpaElement) {
+                tcpaElement.textContent = this.formatTcpa(tcpaById.get(aircraftId) ?? null);
+            }
+        });
     }
 
     /**
@@ -177,16 +172,9 @@ export class ConflictsPanel extends BasePanel {
     private updateSelectionVisuals(): void {
         if (!this.conflictsInfoElement) return;
 
-        const conflictItems = this.conflictsInfoElement.querySelectorAll('.conflict-item');
-        conflictItems.forEach(item => {
+        this.conflictsInfoElement.querySelectorAll('.conflict-item').forEach(item => {
             const htmlItem = item as HTMLElement;
-            const aircraftId = htmlItem.getAttribute('data-aircraft-id');
-
-            if (this.selectedAircraft === aircraftId) {
-                htmlItem.classList.add('selected');
-            } else {
-                htmlItem.classList.remove('selected');
-            }
+            htmlItem.classList.toggle('selected', this.selectedAircraft === htmlItem.dataset.aircraftId);
         });
     }
 

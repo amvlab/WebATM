@@ -1,98 +1,44 @@
-import type { Socket } from 'socket.io-client';
 import { modalManager } from './ModalManager';
-import { settingsModal } from './SettingsModal';
-import { serverManager } from './ServerManager';
 import { blueSkyFileManager } from './BlueSkyFileManager';
 import { logger } from '../utils/Logger';
 import { onDOMReady } from '../utils/dom';
 
 /**
- * Central Modals System
- * Coordinates all modal components and provides a unified interface
- * This replaces the generic modal methods from app.js
+ * Wires the header/footer buttons of the standard modals to the modal manager.
+ *
+ * Modal registration and close ("X") buttons are handled by ModalManager
+ * itself (it auto-registers every `[id$="-modal"]` element on DOM ready and
+ * wires their `.modal-close` buttons); this class only adds the wiring that
+ * is specific to individual modals.
  */
 export class Modals {
     private initialized = false;
 
     constructor() {
-        this.init();
-    }
-
-    private init(): void {
-        if (this.initialized) return;
         onDOMReady(() => this.initializeModals());
     }
 
     private initializeModals(): void {
-        // Register all standard modals with the modal manager
-        const standardModals = [
-            'upload-files-modal',
-            'create-aircraft-modal',
-            'polygon-name-modal',
-            'route-constraints-modal'
-        ];
-
-        standardModals.forEach(modalId => {
-            modalManager.registerModal(modalId);
-        });
-
-        // Setup event handlers for standard modals
-        this.setupStandardModalHandlers();
-
+        if (this.initialized) return;
+        this.setupModalButtons();
         this.initialized = true;
     }
 
-    private setupStandardModalHandlers(): void {
-        logger.debug('Modals', 'Setting up standard modal handlers...');
+    private setupModalButtons(): void {
+        // Open button: routed through the file manager so it can reset its
+        // browse state before the modal opens.
+        const uploadBtn = document.getElementById('upload-files-btn');
+        if (uploadBtn) {
+            uploadBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                blueSkyFileManager.openModal();
+            });
+        } else {
+            logger.warn('Modals', 'Button not found: upload-files-btn');
+        }
 
-        // Button handlers to open modals
-        const modalButtons = [
-            { buttonId: 'upload-files-btn', modalId: 'upload-files-modal' }
-        ];
-
-        modalButtons.forEach(({ buttonId, modalId }) => {
-            const button = document.getElementById(buttonId);
-            if (button) {
-                logger.debug('Modals', `Modal handler attached: ${buttonId} -> ${modalId}`);
-                button.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    logger.debug('Modals', `Opening modal: ${modalId}`);
-
-                    if (modalId === 'upload-files-modal') {
-                        blueSkyFileManager.openModal();
-                    } else {
-                        this.openModal(modalId);
-                    }
-                });
-            } else {
-                logger.warn('Modals', `✗ Button not found: ${buttonId}`);
-            }
-        });
-
-        // Close button handlers
-        const closeButtons = [
-            { buttonId: 'upload-files-close', modalId: 'upload-files-modal' },
-            { buttonId: 'create-aircraft-modal-close', modalId: 'create-aircraft-modal' },
-            { buttonId: 'polygon-name-modal-close', modalId: 'polygon-name-modal' }
-        ];
-
-        closeButtons.forEach(({ buttonId, modalId }) => {
-            const button = document.getElementById(buttonId);
-            if (button) {
-                button.addEventListener('click', () => {
-                    if (modalId === 'upload-files-modal') {
-                        blueSkyFileManager.closeModal();
-                    } else {
-                        this.closeModal(modalId);
-                    }
-                });
-            }
-        });
-
-
-        // Cancel button handlers for aircraft and polygon modals
-        // Note: These modals have special functionality managed by their respective managers
-        // but we still register basic close handlers here
+        // Cancel buttons just close; their owning managers clear the form
+        // fields on the next open.
         const cancelButtons = [
             { buttonId: 'cancel-aircraft-btn', modalId: 'create-aircraft-modal' },
             { buttonId: 'cancel-polygon-btn', modalId: 'polygon-name-modal' }
@@ -100,104 +46,18 @@ export class Modals {
 
         cancelButtons.forEach(({ buttonId, modalId }) => {
             const button = document.getElementById(buttonId);
-            if (button) {
-                button.addEventListener('click', () => this.closeModal(modalId));
-            }
+            button?.addEventListener('click', () => modalManager.close(modalId));
         });
     }
 
     /**
-     * Generic modal methods (replacing the ones from app.js)
-     */
-    public openModal(modalId: string): boolean {
-        return modalManager.open(modalId);
-    }
-
-    public closeModal(modalId: string): boolean {
-        return modalManager.close(modalId);
-    }
-
-    /**
-     * Close all modals
-     */
-    public closeAllModals(): void {
-        modalManager.closeAll();
-    }
-
-    /**
-     * Check if a modal is open
-     */
-    public isModalOpen(modalId: string): boolean {
-        return modalManager.isOpen(modalId);
-    }
-
-    /**
-     * Get the currently open modal, if any
-     */
-    public getOpenModal(): string | null {
-        return modalManager.getOpenModal();
-    }
-
-    /**
-     * Specific modal access methods
-     */
-    public getSettingsModal() {
-        return settingsModal;
-    }
-
-    public getServerManager() {
-        return serverManager;
-    }
-
-    public getModalManager() {
-        return modalManager;
-    }
-
-    /**
-     * Integration methods for main application
-     */
-
-    /**
-     * Set socket for server manager integration
-     */
-    public setSocket(socket: Socket | null): void {
-        serverManager.setSocket(socket);
-    }
-
-    /**
-     * Update server status across all components
-     */
-    public updateServerStatus(_status: string): void {
-        // This can be called by the main app to update server status
-        // The server manager will handle the actual status updates
-    }
-
-    /**
-     * Set BlueSky connection status for settings modal
-     */
-    public setBlueSkyConnected(connected: boolean): void {
-        settingsModal.setBlueSkyConnected(connected);
-    }
-
-    /**
-     * Check if the modal system is initialized
-     */
-    public isInitialized(): boolean {
-        return this.initialized;
-    }
-
-    /**
-     * Manual initialization (if needed)
+     * Idempotent manual initialization, called from App in case the DOM-ready
+     * callback has not fired yet.
      */
     public forceInitialize(): void {
-        if (!this.initialized) {
-            this.initializeModals();
-        }
+        this.initializeModals();
     }
 }
 
 // Export singleton instance
 export const modals = new Modals();
-
-// Also export individual components for direct access
-export { modalManager, settingsModal, serverManager, blueSkyFileManager };

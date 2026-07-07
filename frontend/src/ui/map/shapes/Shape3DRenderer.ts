@@ -100,20 +100,19 @@ export class Shape3DRenderer {
             });
         });
 
-        const source = map.getSource(this.SOURCE_ID) as GeoJSONSource;
+        // Re-create the layers once if the source is missing (initial load
+        // or a style change removed it), then retry.
+        let source = map.getSource(this.SOURCE_ID) as GeoJSONSource | undefined;
+        if (!source) {
+            logger.debug('Shape3DRenderer', 'Source not found, re-creating layers...');
+            this.setupMapLayers();
+            source = map.getSource(this.SOURCE_ID) as GeoJSONSource | undefined;
+        }
+
         if (source) {
             source.setData(featureCollection(features));
         } else {
-            logger.debug('Shape3DRenderer', 'Source not found, re-initializing...');
-            this.initialized = false;
-            this.initialize();
-
-            const sourceAfterInit = map.getSource(this.SOURCE_ID) as GeoJSONSource;
-            if (sourceAfterInit) {
-                sourceAfterInit.setData(featureCollection(features));
-            } else {
-                logger.warn('Shape3DRenderer', `Failed to initialize source - cannot render ${polygons.length} extruded polygons`);
-            }
+            logger.warn('Shape3DRenderer', `Failed to create source - cannot render ${polygons.length} extruded polygons`);
         }
     }
 

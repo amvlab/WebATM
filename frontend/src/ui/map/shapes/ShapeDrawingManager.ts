@@ -16,13 +16,8 @@ import {
 import { buildShapeCommand } from './shapeCommand';
 
 /**
- * ShapeDrawingManager - Manages shape (polygon/polyline) drawing on the map
- *
- * Handles:
- * - Polygon and polyline drawing
- * - POLY, POLYALT, and POLYLINE command generation
- * - Interactive map clicking for shape definition
- * - Drawing state management
+ * ShapeDrawingManager - Interactive polygon/polyline drawing on the map,
+ * generating the POLY / POLYALT / POLYLINE command when the draw finishes.
  */
 export class ShapeDrawingManager extends BaseDrawingManager {
     private app: App;
@@ -62,13 +57,9 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         }
     }
 
-    /**
-     * Show the polygon/shape name modal
-     */
     private showPolygonNameModal(): void {
         const modal = modalManager.open('polygon-name-modal');
         if (modal) {
-            // Clear previous inputs
             const nameInput = document.getElementById('polygon-name-input') as HTMLInputElement;
             const topInput = document.getElementById('polygon-top-input') as HTMLInputElement;
             const bottomInput = document.getElementById('polygon-bottom-input') as HTMLInputElement;
@@ -79,10 +70,8 @@ export class ShapeDrawingManager extends BaseDrawingManager {
             if (bottomInput) bottomInput.value = '';
             if (shapeTypeSelect) shapeTypeSelect.value = 'area';
 
-            // Update UI based on shape type
             this.updateShapeTypeUI();
 
-            // Focus on the name input
             setTimeout(() => {
                 if (nameInput) nameInput.focus();
             }, 100);
@@ -91,9 +80,7 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         }
     }
 
-    /**
-     * Update UI based on shape type selection
-     */
+    /** Sync the modal title and altitude-field visibility with the shape type. */
     private updateShapeTypeUI(): void {
         const shapeType = (document.getElementById('shape-type-select') as HTMLSelectElement)?.value || 'area';
         const modalTitle = document.getElementById('polygon-modal-title');
@@ -108,9 +95,7 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         }
     }
 
-    /**
-     * Handle Create Polygon button click
-     */
+    /** Validate the modal inputs, then close it and start drawing. */
     private onCreatePolygonClick(): void {
         const nameInput = document.getElementById('polygon-name-input') as HTMLInputElement;
         const topInput = document.getElementById('polygon-top-input') as HTMLInputElement;
@@ -120,16 +105,16 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         const name = nameInput?.value.trim();
         const shapeType = shapeTypeSelect?.value || 'area';
 
-        // Validate name
         if (!name) {
             alert('Please enter a name for the shape');
             nameInput?.focus();
             return;
         }
 
-        // Check for spaces in name
-        if (name.includes(' ')) {
-            alert('Shape name cannot contain spaces');
+        // Spaces and commas are BlueSky's argument separators - a name
+        // containing them would corrupt the generated POLY/POLYLINE command.
+        if (/[\s,]/.test(name)) {
+            alert('Shape name cannot contain spaces or commas');
             nameInput?.focus();
             return;
         }
@@ -137,7 +122,7 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         this.currentShapeName = name;
         this.currentShapeType = shapeType as 'area' | 'line';
 
-        // Get altitude values if area
+        // Altitudes only apply to areas; both filled makes a POLYALT.
         if (shapeType === 'area') {
             const topValue = topInput?.value;
             const bottomValue = bottomInput?.value;
@@ -159,7 +144,6 @@ export class ShapeDrawingManager extends BaseDrawingManager {
             this.bottomAltitude = null;
         }
 
-        // Close modal and start drawing
         modalManager.close('polygon-name-modal');
         this.startDrawing();
     }
@@ -168,21 +152,17 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         this.drawingMode = true;
         this.drawingPoints = [];
 
-        // Update UI - change button text
         const drawBtn = document.getElementById('draw-shape-btn');
         if (drawBtn) {
             drawBtn.textContent = 'Stop Drawing';
             drawBtn.classList.add('active');
         }
 
-        // Show drawing banner
         let bannerMessage = `Drawing "${this.currentShapeName}" - Click to add points, Right-click to finish, Esc to cancel`;
         if (this.topAltitude !== null && this.bottomAltitude !== null) {
             bannerMessage = `Drawing "${this.currentShapeName}" (${this.bottomAltitude}-${this.topAltitude}ft) - Click to add points, Right-click to finish, Esc to cancel`;
         }
         this.showDrawingBanner(bannerMessage);
-
-        // Enable map drawing handlers
         this.enableMapDrawing();
 
         logger.info('ShapeDrawingManager', `Started drawing ${this.currentShapeType}: ${this.currentShapeName}`);
@@ -193,17 +173,13 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         this.drawingPoints = [];
         this.currentShapeName = null;
 
-        // Update UI - reset button
         const drawBtn = document.getElementById('draw-shape-btn');
         if (drawBtn) {
             drawBtn.textContent = 'Draw Shape';
             drawBtn.classList.remove('active');
         }
 
-        // Hide drawing banner
         this.hideDrawingBanner();
-
-        // Disable map drawing handlers
         this.disableMapDrawing();
 
         logger.info('ShapeDrawingManager', 'Stopped drawing');
@@ -244,9 +220,6 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         this.updateCursorPreview(point);
     }
 
-    /**
-     * Get banner message with current state
-     */
     private getBannerMessage(): string {
         const pointCount = this.drawingPoints.length;
         let message = `Drawing "${this.currentShapeName}" - ${pointCount} point(s) (Right-click to finish, Esc to cancel)`;
@@ -258,9 +231,7 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         return message;
     }
 
-    /**
-     * Finish drawing and generate command
-     */
+    /** Finish the draw: build the shape command and send it to BlueSky. */
     protected async finishDrawing(): Promise<void> {
         const minPoints = this.currentShapeType === 'line' ? 2 : 3;
         const shapeType = this.currentShapeType === 'line' ? 'line' : 'polygon';
@@ -272,6 +243,10 @@ export class ShapeDrawingManager extends BaseDrawingManager {
 
         const command = this.generateCommand();
         logger.info('ShapeDrawingManager', `Generated command: ${command}`);
+
+        // Leave drawing mode before the async send: a second right-click (or
+        // Escape) while the send is in flight must not finish/cancel again.
+        this.stopDrawing();
 
         // Send command to server via App, then echo it in the console.
         try {
@@ -287,13 +262,8 @@ export class ShapeDrawingManager extends BaseDrawingManager {
             logger.error('ShapeDrawingManager', 'Error sending shape command:', error);
             alert('Error sending shape command: ' + (error as Error).message);
         }
-
-        this.stopDrawing();
     }
 
-    /**
-     * Cancel drawing without generating command
-     */
     protected cancelDrawing(): void {
         logger.info('ShapeDrawingManager', `Drawing cancelled for "${this.currentShapeName}"`);
         this.stopDrawing();
@@ -312,9 +282,6 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         });
     }
 
-    /**
-     * Setup temporary drawing layers for visualization
-     */
     private setupTemporaryDrawingLayers(): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
@@ -465,7 +432,6 @@ export class ShapeDrawingManager extends BaseDrawingManager {
 
         layers.forEach(layerId => safeRemoveLayer(map, layerId));
 
-        // Remove sources
         const sources = ['temp-drawing-points', 'temp-drawing-polygon', 'temp-drawing-preview'];
         sources.forEach(sourceId => safeRemoveSource(map, sourceId));
 

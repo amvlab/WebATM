@@ -23,13 +23,12 @@ export class AircraftClickSelector {
     /**
      * Attach the click behavior to a list item element.
      */
-    public attach(element: HTMLElement, aircraftId: string, index: number): void {
+    public attach(element: HTMLElement, aircraftId: string): void {
         let clickCount = 0;
 
         element.addEventListener('click', () => {
             clickCount++;
 
-            // Clear any existing timeout for this aircraft
             const existingTimeout = this.clickTimeouts.get(aircraftId);
             if (existingTimeout) {
                 clearTimeout(existingTimeout);
@@ -37,16 +36,15 @@ export class AircraftClickSelector {
             }
 
             if (clickCount === 2) {
-                // Double click detected - select and zoom/follow aircraft
                 clickCount = 0;
-                this.handleDoubleClick(aircraftId, index);
+                this.handleDoubleClick(aircraftId);
             } else {
-                // Single click - wait to see if there's a second click
+                // Wait out the double-click window before treating it as a single click
                 const timeout = window.setTimeout(() => {
                     clickCount = 0;
                     this.clickTimeouts.delete(aircraftId);
-                    this.handleSingleClick(aircraftId, index);
-                }, 300); // 300ms delay to detect double-click
+                    this.handleSingleClick(aircraftId);
+                }, 300);
 
                 this.clickTimeouts.set(aircraftId, timeout);
             }
@@ -56,7 +54,7 @@ export class AircraftClickSelector {
     /**
      * Single click: toggle selection; pan to the aircraft when selecting.
      */
-    private handleSingleClick(aircraftId: string, index: number): void {
+    private handleSingleClick(aircraftId: string): void {
         const stateManager = this.getStateManager();
         if (!stateManager) return;
 
@@ -68,7 +66,7 @@ export class AircraftClickSelector {
             logger.debug(this.component, `Selected aircraft: ${aircraftId}`);
 
             document.dispatchEvent(new CustomEvent('aircraft-single-click', {
-                detail: { aircraftId, index }
+                detail: { aircraftId }
             }));
         }
     }
@@ -76,14 +74,14 @@ export class AircraftClickSelector {
     /**
      * Double click: select and zoom/follow.
      */
-    private handleDoubleClick(aircraftId: string, index: number): void {
+    private handleDoubleClick(aircraftId: string): void {
         const stateManager = this.getStateManager();
         if (!stateManager) return;
 
         stateManager.setSelectedAircraft(aircraftId);
 
         document.dispatchEvent(new CustomEvent('aircraft-double-click', {
-            detail: { aircraftId, index }
+            detail: { aircraftId }
         }));
 
         logger.debug(this.component, `Double-clicked aircraft: ${aircraftId} - zooming/following`);

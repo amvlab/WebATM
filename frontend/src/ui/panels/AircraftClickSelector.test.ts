@@ -32,7 +32,7 @@ describe('AircraftClickSelector', () => {
         );
         item = document.createElement('div');
         document.body.appendChild(item);
-        selector.attach(item, 'KL123', 0);
+        selector.attach(item, 'KL123');
     });
 
     afterEach(() => {
@@ -52,7 +52,7 @@ describe('AircraftClickSelector', () => {
         expect(stateManager.setSelectedAircraft).toHaveBeenCalledWith('KL123');
         expect(panEvent).toHaveBeenCalledTimes(1);
         expect((panEvent.mock.calls[0][0] as CustomEvent).detail)
-            .toEqual({ aircraftId: 'KL123', index: 0 });
+            .toEqual({ aircraftId: 'KL123' });
     });
 
     it('single click on the already-selected aircraft unselects without panning', () => {

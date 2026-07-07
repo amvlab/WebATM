@@ -10,7 +10,7 @@ export class ModalManager {
     private modals: Map<string, ModalState> = new Map();
     private eventHandlers: Map<string, ModalEventHandler[]> = new Map();
     private initialized = false;
-    private modalStack: string[] = []; // Track modal hierarchy for stacking
+    private openModalId: string | null = null; // At most one modal is open at a time
     private listenerAbort = new AbortController();
 
     constructor() {
@@ -85,10 +85,12 @@ export class ModalManager {
 
         this.modals.set(modalId, modalState);
 
-        // Setup close button if it exists
+        // Wire the close button (tied to the abort signal so destroy() removes it)
         const closeBtn = element.querySelector(`#${modalId}-close, .modal-close`);
         if (closeBtn) {
-            closeBtn.addEventListener('click', () => this.close(modalId));
+            closeBtn.addEventListener('click', () => this.close(modalId), {
+                signal: this.listenerAbort.signal,
+            });
         }
     }
 
@@ -106,28 +108,18 @@ export class ModalManager {
             return true; // Already open
         }
 
-        // Emit beforeOpen event
         this.emitEvent('beforeOpen', modalId);
 
-        // Check if this is a confirmation modal that should stack on top
-        const isConfirmationModal = modalId.includes('server-stop-modal') || modalId.includes('server-restart-modal');
-        
-        if (!isConfirmationModal) {
-            // For non-confirmation modals, close all other modals
-            this.closeAll();
-        }
+        // Only one modal is shown at a time, so close any other open modal first.
+        this.closeAll();
 
-        // Show the modal
         modalState.element.style.display = 'flex';
         modalState.isOpen = true;
-        
-        // Add to modal stack
-        this.modalStack.push(modalId);
-        
-        // Add body class to prevent scrolling
+        this.openModalId = modalId;
+
+        // Prevent the page behind the modal from scrolling.
         document.body.classList.add('modal-open');
 
-        // Emit open event
         this.emitEvent('open', modalId);
 
         return true;
@@ -147,25 +139,16 @@ export class ModalManager {
             return true; // Already closed
         }
 
-        // Emit beforeClose event
         this.emitEvent('beforeClose', modalId);
 
-        // Hide the modal
         modalState.element.style.display = 'none';
         modalState.isOpen = false;
 
-        // Remove from modal stack
-        const stackIndex = this.modalStack.indexOf(modalId);
-        if (stackIndex > -1) {
-            this.modalStack.splice(stackIndex, 1);
-        }
-
-        // Only remove body class if no modals are open
-        if (this.modalStack.length === 0) {
+        if (this.openModalId === modalId) {
+            this.openModalId = null;
             document.body.classList.remove('modal-open');
         }
 
-        // Emit close event
         this.emitEvent('close', modalId);
 
         return true;
@@ -180,8 +163,6 @@ export class ModalManager {
                 this.close(modalId);
             }
         });
-        // Clear the modal stack
-        this.modalStack = [];
     }
 
     /**
@@ -196,8 +177,7 @@ export class ModalManager {
      * Get the currently open modal ID, if any
      */
     public getOpenModal(): string | null {
-        // Return the top modal from the stack (most recently opened)
-        return this.modalStack.length > 0 ? this.modalStack[this.modalStack.length - 1] : null;
+        return this.openModalId;
     }
 
     /**

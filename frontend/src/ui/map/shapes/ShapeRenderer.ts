@@ -24,8 +24,8 @@ export class ShapeRenderer {
     private stateManager: StateManager;
     private shape3DRenderer: Shape3DRenderer;
     private initialized = false;
+    private unsubscribers: Array<() => void> = [];
 
-    // Layer and source IDs
     private readonly POLYGON_SOURCE_ID = 'shapes-polygons';
     private readonly POLYGON_FILL_LAYER_ID = 'shapes-polygon-fill';
     private readonly POLYGON_LINE_LAYER_ID = 'shapes-polygon-line';
@@ -38,11 +38,26 @@ export class ShapeRenderer {
         this.mapDisplay = mapDisplay;
         this.stateManager = stateManager;
         this.shape3DRenderer = new Shape3DRenderer(mapDisplay, stateManager);
+
+        // Subscribe once for the renderer's lifetime. initialize() re-runs on
+        // every style change and source recovery, so subscriptions must not
+        // live there - each re-init would stack another listener and multiply
+        // the render work per update.
+        this.unsubscribers.push(
+            this.stateManager.subscribeToShapes((shapes) => {
+                this.renderShapes(shapes);
+            }),
+            this.stateManager.subscribe('displayOptions', (newOptions) => {
+                if (newOptions) {
+                    this.updateDisplayOptions(newOptions);
+                }
+            })
+        );
     }
 
     /**
-     * Initialize the shape renderer
-     * Creates map sources and layers, subscribes to shape changes
+     * Create map sources/layers and render any shapes that arrived before the
+     * map was ready. Safe to re-run after a style change wipes the layers.
      */
     public initialize(): void {
         if (this.initialized) return;
@@ -53,10 +68,7 @@ export class ShapeRenderer {
             return;
         }
 
-        // Set up map layers for shape rendering
         this.setupMapLayers();
-
-        // Initialize 3D extrusion renderer
         this.shape3DRenderer.initialize();
 
         // Resize map after it settles from adding fill-extrusion layer
@@ -64,35 +76,16 @@ export class ShapeRenderer {
             this.mapDisplay.resize();
         });
 
-        // Subscribe to shape changes
-        this.stateManager.subscribeToShapes((shapes) => {
-            this.renderShapes(shapes);
-        });
-
-        // Subscribe to display options changes
-        this.stateManager.subscribe('displayOptions', (newOptions) => {
-            if (newOptions) {
-                this.updateDisplayOptions(newOptions);
-            }
-        });
-
-        // Render any existing shapes that were added before initialization
         const existingShapes = this.stateManager.getAllShapes();
-        logger.debug('ShapeRenderer', `Checking for existing shapes: ${existingShapes.size} shapes found`);
         if (existingShapes.size > 0) {
             logger.debug('ShapeRenderer', `Rendering ${existingShapes.size} existing shapes:`, Array.from(existingShapes.keys()));
             this.renderShapes(existingShapes);
-        } else {
-            logger.debug('ShapeRenderer', 'No existing shapes to render');
         }
 
         this.initialized = true;
         logger.info('ShapeRenderer', 'Initialized');
     }
 
-    /**
-     * Set up MapLibre GL sources and layers for shape rendering
-     */
     private setupMapLayers(): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
@@ -162,16 +155,12 @@ export class ShapeRenderer {
         logger.debug('ShapeRenderer', 'Map layers created');
     }
 
-    /**
-     * Render all shapes on the map
-     */
     private renderShapes(shapes: Map<string, Shape>): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
         logger.debug('ShapeRenderer', `Rendering ${shapes.size} shapes`);
 
-        // Separate shapes by type
         const polygons: PolygonShape[] = [];
         const polylines: PolylineShape[] = [];
 
@@ -185,27 +174,39 @@ export class ShapeRenderer {
             }
         });
 
-        // Render polygons (2D flat + 3D extruded)
         this.renderPolygons(polygons);
         this.shape3DRenderer.renderExtrudedPolygons(polygons);
-
-        // Render polylines
         this.renderPolylines(polylines);
-
-        // Render labels
         this.renderLabels(shapes);
     }
 
     /**
-     * Render polygon shapes
+     * Push features to a GeoJSON source. If the source is missing (initial
+     * map load, or a style change removed it), re-create the layers once and
+     * retry.
      */
-    private renderPolygons(polygons: PolygonShape[]): void {
+    private updateSource(sourceId: string, features: GeoJSON.Feature[]): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
+        let source = map.getSource(sourceId) as GeoJSONSource | undefined;
+        if (!source) {
+            logger.debug('ShapeRenderer', `Source ${sourceId} not found, re-creating layers...`);
+            this.setupMapLayers();
+            source = map.getSource(sourceId) as GeoJSONSource | undefined;
+        }
+
+        if (source) {
+            source.setData(featureCollection(features));
+        } else {
+            logger.warn('ShapeRenderer', `Failed to create source ${sourceId} - cannot render ${features.length} features`);
+        }
+    }
+
+    private renderPolygons(polygons: PolygonShape[]): void {
         const displayOptions = this.stateManager.getDisplayOptions();
 
-        // Convert polygons to GeoJSON features (ring closed by polygonFeature)
+        // Ring closure is handled by polygonFeature.
         const features = polygons.map(poly =>
             polygonFeature(toLngLatCoords(poly.coordinates), {
                 name: poly.name,
@@ -217,39 +218,12 @@ export class ShapeRenderer {
                 bottomAltitude: poly.bottomAltitude
             }));
 
-        // Update polygon source
-        const source = map.getSource(this.POLYGON_SOURCE_ID) as GeoJSONSource;
-        if (source) {
-            source.setData(featureCollection(features));
-        } else {
-            // Source not ready yet, which can happen:
-            // 1. During initial map load
-            // 2. After map style change (sources are removed)
-            // In both cases, we need to initialize the renderer
-            logger.debug('ShapeRenderer', 'Polygon source not found, initializing renderer...');
-            this.initialized = false;
-            this.initialize();
-
-            // After initialization, try updating again
-            const sourceAfterInit = map.getSource(this.POLYGON_SOURCE_ID) as GeoJSONSource;
-            if (sourceAfterInit) {
-                sourceAfterInit.setData(featureCollection(features));
-            } else {
-                logger.warn('ShapeRenderer', `Failed to initialize polygon source - cannot render ${polygons.length} polygons`);
-            }
-        }
+        this.updateSource(this.POLYGON_SOURCE_ID, features);
     }
 
-    /**
-     * Render polyline shapes
-     */
     private renderPolylines(polylines: PolylineShape[]): void {
-        const map = this.mapDisplay.getMap();
-        if (!map) return;
-
         const displayOptions = this.stateManager.getDisplayOptions();
 
-        // Convert polylines to GeoJSON features
         const features = polylines.map(line =>
             lineStringFeature(toLngLatCoords(line.coordinates), {
                 name: line.name,
@@ -257,45 +231,19 @@ export class ShapeRenderer {
                 width: line.width || 2
             }));
 
-        // Update polyline source
-        const source = map.getSource(this.POLYLINE_SOURCE_ID) as GeoJSONSource;
-        if (source) {
-            source.setData(featureCollection(features));
-        } else {
-            // Source not ready yet, which can happen:
-            // 1. During initial map load
-            // 2. After map style change (sources are removed)
-            // In both cases, we need to initialize the renderer
-            logger.debug('ShapeRenderer', 'Polyline source not found, initializing renderer...');
-            this.initialized = false;
-            this.initialize();
-
-            // After initialization, try updating again
-            const sourceAfterInit = map.getSource(this.POLYLINE_SOURCE_ID) as GeoJSONSource;
-            if (sourceAfterInit) {
-                sourceAfterInit.setData(featureCollection(features));
-            } else {
-                logger.warn('ShapeRenderer', `Failed to initialize polyline source - cannot render ${polylines.length} polylines`);
-            }
-        }
+        this.updateSource(this.POLYLINE_SOURCE_ID, features);
     }
 
     /**
-     * Render shape labels
+     * Render shape name labels at polygon centroids / polyline midpoints.
      */
     private renderLabels(shapes: Map<string, Shape>): void {
-        const map = this.mapDisplay.getMap();
-        if (!map) return;
-
-        // Create label features at shape centroids
         const features: GeoJSON.Feature[] = [];
 
         shapes.forEach((shape) => {
             if (!shape.visible) return;
 
-            // Calculate centroid
             let centroid: [number, number];
-
             if (shape.type === 'polygon') {
                 centroid = this.calculatePolygonCentroid(shape.coordinates);
             } else if (shape.type === 'polyline') {
@@ -307,32 +255,9 @@ export class ShapeRenderer {
             features.push(pointFeature(centroid, { name: shape.name }));
         });
 
-        // Update labels source
-        const source = map.getSource(this.LABELS_SOURCE_ID) as GeoJSONSource;
-        if (source) {
-            source.setData(featureCollection(features));
-        } else {
-            // Source not ready yet, which can happen:
-            // 1. During initial map load
-            // 2. After map style change (sources are removed)
-            // In both cases, we need to initialize the renderer
-            logger.debug('ShapeRenderer', 'Labels source not found, initializing renderer...');
-            this.initialized = false;
-            this.initialize();
-
-            // After initialization, try updating again
-            const sourceAfterInit = map.getSource(this.LABELS_SOURCE_ID) as GeoJSONSource;
-            if (sourceAfterInit) {
-                sourceAfterInit.setData(featureCollection(features));
-            } else {
-                logger.warn('ShapeRenderer', `Failed to initialize labels source - cannot render labels`);
-            }
-        }
+        this.updateSource(this.LABELS_SOURCE_ID, features);
     }
 
-    /**
-     * Calculate centroid of a polygon
-     */
     private calculatePolygonCentroid(coordinates: Array<{lat: number, lng: number}>): [number, number] {
         if (coordinates.length === 0) return [0, 0];
 
@@ -347,9 +272,6 @@ export class ShapeRenderer {
         return [sumLng / coordinates.length, sumLat / coordinates.length];
     }
 
-    /**
-     * Calculate midpoint of a polyline
-     */
     private calculatePolylineMidpoint(coordinates: Array<{lat: number, lng: number}>): [number, number] {
         if (coordinates.length === 0) return [0, 0];
 
@@ -358,14 +280,11 @@ export class ShapeRenderer {
         return [coord.lng, coord.lat];
     }
 
-    /**
-     * Update display options (visibility, colors, etc.)
-     */
     private updateDisplayOptions(displayOptions: DisplayOptions): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        // Update layer visibility - respect master showShapes toggle
+        // Layer visibility respects the master showShapes toggle.
         const showShapes = displayOptions.showShapes;
         setLayerVisibility(map, this.POLYGON_FILL_LAYER_ID, showShapes && displayOptions.showShapeFill);
         setLayerVisibility(map, this.POLYGON_LINE_LAYER_ID, showShapes && displayOptions.showShapeLines);
@@ -380,11 +299,9 @@ export class ShapeRenderer {
             );
         }
 
-        // Update 3D extrusion renderer
         this.shape3DRenderer.updateDisplayOptions(displayOptions);
 
-        // Re-render shapes with updated colors
-        // This ensures fill and line colors update when the user changes them in display options
+        // Re-render so per-shape fill/line colors pick up the new options.
         const shapes = this.stateManager.getAllShapes();
         if (shapes.size > 0) {
             this.renderShapes(shapes);
@@ -394,14 +311,13 @@ export class ShapeRenderer {
     }
 
     /**
-     * Handle map style changes - re-add layers
+     * Handle map style changes - re-add layers and re-render.
      */
     public onStyleChange(): void {
         logger.debug('ShapeRenderer', 'Map style changed - recreating layers');
         this.initialized = false;
         this.initialize();
 
-        // Re-create 3D extrusion layers
         this.shape3DRenderer.onStyleChange();
 
         // Resize map after it settles from re-adding fill-extrusion layer
@@ -412,15 +328,13 @@ export class ShapeRenderer {
             });
         }
 
-        // Re-render current shapes
         const shapes = this.stateManager.getAllShapes();
         this.renderShapes(shapes);
     }
 
-    /**
-     * Clean up resources
-     */
     public destroy(): void {
+        this.unsubscribers.forEach(unsubscribe => unsubscribe());
+        this.unsubscribers = [];
         this.shape3DRenderer.destroy();
         this.initialized = false;
         logger.info('ShapeRenderer', 'Destroyed');
