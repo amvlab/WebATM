@@ -1,12 +1,8 @@
 /**
  * TrafficListPanel - Manages the Traffic List panel
  *
- * This panel handles:
- * - Displaying list of all aircraft in simulation
- * - Aircraft selection with single/double click support
- * - Aircraft filtering/search
- * - Traffic count display
- * - Syncing selection with map and other components
+ * Displays all aircraft in the simulation as a clickable list and keeps
+ * the highlighted entry in sync with the shared aircraft selection.
  */
 
 import { BasePanel } from '../BasePanel';
@@ -43,13 +39,11 @@ export class TrafficListPanel extends BasePanel {
     public setStateManager(stateManager: StateManager): void {
         this.stateManager = stateManager;
 
-        // Subscribe to selected aircraft changes from other sources (e.g., map clicks)
         this.stateManager.subscribe('selectedAircraft', (newAircraft) => {
             this.selectedAircraft = newAircraft;
             this.updateSelectionVisuals();
         });
 
-        // Subscribe to aircraft data updates
         this.stateManager.subscribe('aircraftData', (newData) => {
             this.currentAircraftData = newData;
             this.updateTrafficList();
@@ -67,69 +61,38 @@ export class TrafficListPanel extends BasePanel {
     }
 
     /**
-     * Update traffic list display
+     * Reconcile the list against the current aircraft data: existing items
+     * are kept (preserving their click listeners), removed aircraft are
+     * dropped, and new aircraft are appended.
      */
     private updateTrafficList(): void {
-        if (!this.trafficListElement || !this.currentAircraftData?.id) {
-            if (this.trafficListElement) {
-                this.trafficListElement.innerHTML = '';
-            }
-            return;
-        }
+        if (!this.trafficListElement) return;
 
-        const data = this.currentAircraftData;
+        const ids = (this.currentAircraftData?.id ?? []).filter(id => id && id.trim() !== '');
+        const wanted = new Set(ids);
 
-        // Filter out aircraft with empty or invalid IDs
-        const validAircraft: string[] = [];
-        const validIndices: number[] = [];
-
-        for (let i = 0; i < data.id.length; i++) {
-            const aircraftId = data.id[i];
-            if (aircraftId && aircraftId.trim() !== '') {
-                validAircraft.push(aircraftId);
-                validIndices.push(i);
+        const existing = new Map<string, HTMLElement>();
+        for (const child of Array.from(this.trafficListElement.children) as HTMLElement[]) {
+            const id = child.textContent ?? '';
+            if (wanted.has(id)) {
+                existing.set(id, child);
+            } else {
+                child.remove();
             }
         }
 
-        // Get current items in the list
-        const currentItems = Array.from(this.trafficListElement.children) as HTMLElement[];
-        const newIds = validAircraft;
-
-        // Remove items that no longer exist
-        currentItems.forEach(item => {
-            if (!newIds.includes(item.textContent || '')) {
-                item.remove();
-            }
-        });
-
-        // Add or update items
-        validAircraft.forEach((aircraftId, idx) => {
-            const originalIndex = validIndices[idx];
-
-            // Check if item already exists
-            let item = Array.from(this.trafficListElement!.children).find(
-                child => child.textContent === aircraftId
-            ) as HTMLElement;
-
-            // Create new item if it doesn't exist
+        for (const aircraftId of ids) {
+            let item = existing.get(aircraftId);
             if (!item) {
                 item = document.createElement('div');
                 item.className = 'traffic-item';
                 item.textContent = aircraftId;
-
-                // Add click and double-click listeners
-                this.clickSelector.attach(item, aircraftId, originalIndex);
-
-                this.trafficListElement!.appendChild(item);
+                this.clickSelector.attach(item, aircraftId);
+                this.trafficListElement.appendChild(item);
+                existing.set(aircraftId, item);
             }
-
-            // Update selection state
-            if (this.selectedAircraft === aircraftId) {
-                item.classList.add('selected');
-            } else {
-                item.classList.remove('selected');
-            }
-        });
+            item.classList.toggle('selected', this.selectedAircraft === aircraftId);
+        }
     }
 
     /**
@@ -138,14 +101,8 @@ export class TrafficListPanel extends BasePanel {
     private updateSelectionVisuals(): void {
         if (!this.trafficListElement) return;
 
-        const items = this.trafficListElement.querySelectorAll('.traffic-item');
-        items.forEach(item => {
-            const aircraftId = item.textContent;
-            if (this.selectedAircraft === aircraftId) {
-                item.classList.add('selected');
-            } else {
-                item.classList.remove('selected');
-            }
+        this.trafficListElement.querySelectorAll('.traffic-item').forEach(item => {
+            item.classList.toggle('selected', this.selectedAircraft === item.textContent);
         });
     }
 

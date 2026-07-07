@@ -32,7 +32,6 @@ import { logger } from '../../../utils/Logger';
 
 export interface AircraftClickEvent {
     aircraftId: string;
-    index: number;
 }
 
 export class AircraftInteractionManager {
