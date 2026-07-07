@@ -356,9 +356,9 @@ def register_basic_routes(app, session_manager):
                     # Map common aircraft model names to better display names
                     display_name_map = {
                         "737": "Boeing 737",
+                        "b787": "Boeing 787",
                         "a320": "Airbus A320",
-                        "drone": "Generic Drone",
-                        "tie": "TIE Fighter",
+                        "drone": "Drone",
                     }
 
                     if display_name.lower() in display_name_map:

@@ -73,6 +73,16 @@ export const CATEGORY_TO_MODEL: Readonly<Record<AircraftCategory, string>> = {
     widebody_quad: 'A380.glb',
 };
 
+/**
+ * Bespoke per-ICAO model overrides. These take precedence over the
+ * size-category mapping when an aircraft type has a dedicated asset
+ * that its category representative doesn't capture (e.g. the 787,
+ * which shares the `widebody_twin` bucket with the A350).
+ */
+export const ICAO_TO_MODEL: Readonly<Record<string, string>> = {
+    B788: 'B787.glb', B789: 'B787.glb',
+};
+
 export function getAircraftCategory(actype: string | undefined | null): AircraftCategory | null {
     if (!actype) return null;
     return ICAO_TO_CATEGORY[actype.toUpperCase()] ?? null;
@@ -81,11 +91,18 @@ export function getAircraftCategory(actype: string | undefined | null): Aircraft
 /**
  * Resolve the 3D model filename for an aircraft type, falling back
  * to `fallbackModel` when the type is unknown or missing.
+ *
+ * A dedicated per-type override (`ICAO_TO_MODEL`) wins over the
+ * size-category default.
  */
 export function getModelForAircraftType(
     actype: string | undefined | null,
     fallbackModel: string
 ): string {
+    if (actype) {
+        const override = ICAO_TO_MODEL[actype.toUpperCase()];
+        if (override) return override;
+    }
     const category = getAircraftCategory(actype);
     if (category === null) return fallbackModel;
     return CATEGORY_TO_MODEL[category];
