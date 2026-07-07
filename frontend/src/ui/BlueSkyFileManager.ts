@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
 import { storage } from '../utils/StorageManager';
+import { modalManager } from './ModalManager';
 import { onDOMReady, setVisible, escapeHtml } from '../utils/dom';
 
 interface FileTypeConfig {
@@ -742,24 +743,21 @@ export class BlueSkyFileManager {
     }
 
     public closeModal(): void {
-        const modal = document.getElementById('upload-files-modal');
-        if (modal) {
-            modal.style.display = 'none';
-        }
+        modalManager.close('upload-files-modal');
     }
 
+    // Open through modalManager (not by setting style.display directly) so the
+    // modal participates in Escape/backdrop close and one-modal-at-a-time.
     public openModal(): void {
-        const modal = document.getElementById('upload-files-modal');
-        if (modal) {
-            modal.style.display = 'block';
-            // Reset all current paths when opening the modal
-            this.currentPaths = {
-                scenario: '',
-                plugins: '',
-                settings: ''
-            };
-            this.checkCurrentStatus(); // Refresh status when opening
-        }
+        if (!modalManager.open('upload-files-modal')) return;
+
+        // Reset browse state and refresh status on every open
+        this.currentPaths = {
+            scenario: '',
+            plugins: '',
+            settings: ''
+        };
+        this.checkCurrentStatus();
     }
 
     /**

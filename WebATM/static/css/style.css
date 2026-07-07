@@ -2110,10 +2110,6 @@ html.wa-open-threeD-controls #threeD-controls {
     z-index: 1000 !important;
 }
 
-#upload-files-modal[style*="display: block"] {
-    display: flex !important;
-}
-
 #upload-files-modal .modal-content {
     max-width: 600px;
     width: 90%;
