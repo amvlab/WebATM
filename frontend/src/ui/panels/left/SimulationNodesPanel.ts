@@ -16,11 +16,21 @@ import { BasePanel } from '../BasePanel';
 import { NodeInfo, NodeData } from '../../../data/types';
 import { SocketManager } from '../../../core/SocketManager';
 import { logger } from '../../../utils/Logger';
-import { escapeHtml } from '../../../utils/dom';
+
+/** Cached element references for one rendered node item, keyed by node ID. */
+interface NodeItemRefs {
+    root: HTMLElement;
+    alias: HTMLElement;
+    badge: HTMLElement;
+    status: HTMLElement;
+    time: HTMLElement;
+    idLine: HTMLElement;
+}
 
 export class SimulationNodesPanel extends BasePanel {
     private socketManager: SocketManager | null = null;
     private nodeData: NodeInfo | null = null;
+    private nodeItems: Map<string, NodeItemRefs> = new Map();
 
     // DOM elements
     private totalNodesSpan: HTMLElement | null = null;
@@ -156,33 +166,35 @@ export class SimulationNodesPanel extends BasePanel {
     private updateNodeSelector(): void {
         if (!this.nodeSelector || !this.nodeData) return;
 
-        // Clear existing options
-        this.nodeSelector.innerHTML = '';
+        const selector = this.nodeSelector;
+        const hasNodes = this.nodeData.total_nodes > 0;
+        selector.disabled = !hasNodes;
 
-        if (this.nodeData.total_nodes === 0) {
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'No nodes available';
-            this.nodeSelector.appendChild(option);
-            this.nodeSelector.disabled = true;
-        } else {
-            this.nodeSelector.disabled = false;
+        const desired: Array<{ value: string; label: string }> = hasNodes
+            ? Object.entries(this.nodeData.nodes).map(([nodeId, nodeData]) => ({
+                value: nodeId,
+                label: `${this.getNodeAlias(nodeData)} - ${this.getScenarioName(nodeData.status)}`,
+            }))
+            : [{ value: '', label: 'No nodes available' }];
 
-            // Add nodes to selector
-            Object.entries(this.nodeData.nodes).forEach(([nodeId, nodeData]) => {
-                const option = document.createElement('option');
-                option.value = nodeId;
+        // Reuse existing <option> elements in place so the open dropdown and
+        // current selection aren't disturbed on every update
+        desired.forEach(({ value, label }, index) => {
+            let option = selector.options[index];
+            if (!option) {
+                option = document.createElement('option');
+                selector.appendChild(option);
+            }
+            if (option.value !== value) option.value = value;
+            if (option.textContent !== label) option.textContent = label;
+        });
+        while (selector.options.length > desired.length) {
+            selector.remove(selector.options.length - 1);
+        }
 
-                const alias = this.getNodeAlias(nodeData);
-                const scenario = this.getScenarioName(nodeData.status);
-                option.textContent = `${alias} - ${scenario}`;
-
-                if (nodeId === this.nodeData!.active_node) {
-                    option.selected = true;
-                }
-
-                this.nodeSelector!.appendChild(option);
-            });
+        const activeNode = hasNodes ? this.nodeData.active_node || '' : '';
+        if (activeNode && selector.value !== activeNode) {
+            selector.value = activeNode;
         }
     }
 
@@ -192,56 +204,91 @@ export class SimulationNodesPanel extends BasePanel {
     private updateNodeList(): void {
         if (!this.nodeList || !this.nodeData) return;
 
-        // Clear existing list
-        this.nodeList.innerHTML = '';
+        const nodeList = this.nodeList;
+        const entries = Object.entries(this.nodeData.nodes || {});
+        const currentIds = new Set(entries.map(([nodeId]) => nodeId));
 
-        if (!this.nodeData.nodes) return;
+        // Remove items for nodes that no longer exist
+        this.nodeItems.forEach((item, nodeId) => {
+            if (!currentIds.has(nodeId)) {
+                item.root.remove();
+                this.nodeItems.delete(nodeId);
+            }
+        });
 
-        // Add node items
-        Object.entries(this.nodeData.nodes).forEach(([nodeId, nodeData]) => {
-            const nodeItem = this.createNodeItem(nodeId, nodeData);
-            if (this.nodeList) {
-                this.nodeList.appendChild(nodeItem);
+        // Update existing items in place; create only genuinely new ones.
+        // Existing elements are never destroyed, so clicks land reliably
+        // and there is no visual flicker on periodic updates.
+        entries.forEach(([nodeId, nodeData], index) => {
+            let item = this.nodeItems.get(nodeId);
+            if (!item) {
+                item = this.createNodeItem(nodeId);
+                this.nodeItems.set(nodeId, item);
+            }
+            this.updateNodeItem(item, nodeId, nodeData);
+
+            // Only touch the DOM if the item isn't already in position
+            if (nodeList.children[index] !== item.root) {
+                nodeList.insertBefore(item.root, nodeList.children[index] || null);
             }
         });
     }
 
     /**
-     * Create a node item element
+     * Create the skeleton of a node item element. Data is filled in by
+     * updateNodeItem so the same element can be reused across updates.
      */
-    private createNodeItem(nodeId: string, nodeData: NodeData): HTMLElement {
-        const nodeItem = document.createElement('div');
-        nodeItem.className = 'node-item';
-
-        // Mark active node
-        if (nodeId === this.nodeData?.active_node) {
-            nodeItem.classList.add('active-node');
-        }
-
-        const alias = this.getNodeAlias(nodeData);
-        const scenario = this.getScenarioName(nodeData.status);
-        const currentTime = nodeData.time || '--:--:--';
-        const displayNodeId = String(nodeId || 'Unknown');
-
-        // Build node item HTML
-        nodeItem.innerHTML = `
+    private createNodeItem(nodeId: string): NodeItemRefs {
+        const root = document.createElement('div');
+        root.className = 'node-item';
+        root.innerHTML = `
             <div class="node-header">
-                <strong>${escapeHtml(alias)}</strong>
-                ${nodeId === this.nodeData?.active_node ? '<span class="active-badge">Active</span>' : ''}
+                <strong></strong>
+                <span class="active-badge" hidden>Active</span>
             </div>
             <div class="node-details">
-                <div>Status: ${escapeHtml(scenario)}</div>
-                <div>Time: ${escapeHtml(currentTime)}</div>
-                <div>Node ID: ${escapeHtml(displayNodeId)}</div>
+                <div class="node-status"></div>
+                <div class="node-time"></div>
+                <div class="node-id"></div>
             </div>
         `;
 
         // Make clickable to switch nodes
-        nodeItem.addEventListener('click', () => {
+        root.addEventListener('click', () => {
             this.switchNode(nodeId);
         });
 
-        return nodeItem;
+        return {
+            root,
+            alias: root.querySelector('strong') as HTMLElement,
+            badge: root.querySelector('.active-badge') as HTMLElement,
+            status: root.querySelector('.node-status') as HTMLElement,
+            time: root.querySelector('.node-time') as HTMLElement,
+            idLine: root.querySelector('.node-id') as HTMLElement,
+        };
+    }
+
+    /**
+     * Refresh a node item's content in place
+     */
+    private updateNodeItem(item: NodeItemRefs, nodeId: string, nodeData: NodeData): void {
+        const isActive = nodeId === this.nodeData?.active_node;
+        item.root.classList.toggle('active-node', isActive);
+        item.badge.hidden = !isActive;
+
+        this.setTextIfChanged(item.alias, this.getNodeAlias(nodeData));
+        this.setTextIfChanged(item.status, `Status: ${this.getScenarioName(nodeData.status)}`);
+        this.setTextIfChanged(item.time, `Time: ${nodeData.time || '--:--:--'}`);
+        this.setTextIfChanged(item.idLine, `Node ID: ${String(nodeId || 'Unknown')}`);
+    }
+
+    /**
+     * Set an element's text only when it changed, to avoid needless reflows
+     */
+    private setTextIfChanged(element: HTMLElement, text: string): void {
+        if (element.textContent !== text) {
+            element.textContent = text;
+        }
     }
 
     /**
@@ -376,5 +423,6 @@ export class SimulationNodesPanel extends BasePanel {
 
         this.nodeData = null;
         this.socketManager = null;
+        this.nodeItems.clear();
     }
 }
