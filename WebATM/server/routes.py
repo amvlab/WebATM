@@ -82,7 +82,7 @@ def register_basic_routes(app, session_manager):
     Args:
         app (Flask): Flask application instance.
         session_manager (SessionManager): Session manager used by the status
-            endpoint for capacity information.
+            endpoint for session counts.
     """
 
     @app.route("/")
@@ -356,9 +356,9 @@ def register_basic_routes(app, session_manager):
                     # Map common aircraft model names to better display names
                     display_name_map = {
                         "737": "Boeing 737",
-                        "b787": "Boeing 787",
                         "a320": "Airbus A320",
-                        "drone": "Drone",
+                        "drone": "Generic Drone",
+                        "tie": "TIE Fighter",
                     }
 
                     if display_name.lower() in display_name_map:
@@ -527,8 +527,8 @@ def register_basic_routes(app, session_manager):
 
         Probes the BlueSky command/data ports (11000/11001) with a short
         socket timeout, inspects the proxy's connection state and tracked
-        nodes, and includes session/capacity information from the session
-        manager.
+        nodes, and includes session information from the session manager
+        (used externally, e.g. by demo-deploy, for capacity decisions).
 
         Returns:
             A 200 JSON payload with ``bluesky_server``, ``session_info`` and

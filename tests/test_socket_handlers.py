@@ -36,6 +36,15 @@ class TestConnectDisconnect:
         client.disconnect()
         assert app.bluesky_proxy.connected_clients == 0
 
+    def test_disconnect_untracked_session_does_not_decrement(self, sio):
+        """A connection whose session was never tracked (rejected at connect)
+        must not decrement the counter another client incremented."""
+        app, socketio, client = sio
+        assert app.bluesky_proxy.connected_clients == 1
+        app.session_manager.active_sessions.clear()
+        client.disconnect()
+        assert app.bluesky_proxy.connected_clients == 1
+
 
 class TestCommandEvent:
     def test_command_returns_result(self, sio):
@@ -79,3 +88,20 @@ class TestNodeEvents:
         client.emit("set_active_node", {"node_id": "deadbeef"})
         # Unknown node id is logged and ignored; connection stays up.
         assert client.is_connected()
+
+    def test_set_active_node_without_network_client(self, sio):
+        """A tracked node but no network client (disconnected) raises
+        RuntimeError inside actnode; the handler must swallow it."""
+        app, socketio, client = sio
+        client.get_received()
+        app.bluesky_proxy.tracked_nodes["abcd1234"] = {"node_id": b"\x01\x02"}
+        client.emit("set_active_node", {"node_id": "abcd1234"})
+        assert client.is_connected()
+
+    def test_command_with_malformed_payload(self, sio):
+        app, socketio, client = sio
+        client.get_received()
+        client.emit("command", None)
+        received = client.get_received()
+        results = [p for p in received if p["name"] == "command_result"]
+        assert results and results[0]["args"][0]["success"] is False

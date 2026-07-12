@@ -300,3 +300,42 @@ class TestBlueSkyClientConstruction:
         client.close()
         assert client.act_id is None
         assert client.nodes == set()
+
+
+class TestDataMessageDispatch:
+    """_process_data_message decodes [to_group + topic + from_group, payload]
+    frames and dispatches them to subscribers with the right calling
+    convention per topic."""
+
+    @staticmethod
+    def _frame(topic, data, sender=b"NODE\x81"):
+        import msgpack
+
+        header = b"*" * IDLEN + topic.encode() + sender
+        return [header, msgpack.packb(data, use_bin_type=True)]
+
+    def test_reset_threads_sender_from_header(self):
+        # RESET must carry WHICH node reset: the sender comes from the message
+        # header, not from the shared context (which still holds the sender of
+        # the last shared-state message — usually the active node).
+        client = BlueSkyClient()
+        client.context.sender_id = b"STALE"
+        received = []
+        client.subscriber.subscribe(
+            "RESET", lambda data=None, sender_id=None: received.append(sender_id)
+        )
+
+        client._process_data_message(self._frame("RESET", "", sender=b"NODE\x82"))
+
+        assert received == [b"NODE\x82"]
+        assert client.context.sender_id == b"NODE\x82"
+        assert client.context.action == client.context.Reset
+
+    def test_generic_topic_still_dispatches(self):
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe("DEFWPT", lambda **kw: received.append(kw))
+
+        client._process_data_message(self._frame("DEFWPT", {"name": "WPT1"}))
+
+        assert received == [{"name": "WPT1"}]

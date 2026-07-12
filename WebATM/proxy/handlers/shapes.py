@@ -7,7 +7,7 @@ them per sending node on the proxy, separates polygons from polylines by their
 """
 
 from ...logger import get_logger
-from ...utils import make_json_serializable
+from ...utils import id2str, make_json_serializable
 from ._base import active_proxy
 
 logger = get_logger()
@@ -39,13 +39,7 @@ def on_poly_received(data, *args, **kwargs):
         # Get sender_id from BlueSky context
         sender_id = None
         if proxy.bluesky_client and hasattr(proxy.bluesky_client, "context"):
-            ctx = proxy.bluesky_client.context
-            if ctx.sender_id:
-                sender_id = (
-                    ctx.sender_id.hex()
-                    if isinstance(ctx.sender_id, bytes)
-                    else str(ctx.sender_id)
-                )
+            sender_id = id2str(proxy.bluesky_client.context.sender_id)
 
         # Convert to JSON serializable format
         poly_data = make_json_serializable(data)

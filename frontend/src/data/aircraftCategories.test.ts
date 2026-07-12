@@ -20,11 +20,6 @@ describe('getModelForAircraftType', () => {
         expect(getModelForAircraftType('a359', DEFAULT_FALLBACK_MODEL)).toBe('A350.glb');
     });
 
-    it('uses the dedicated 787 model for 787 variants over the category default', () => {
-        expect(getModelForAircraftType('B788', DEFAULT_FALLBACK_MODEL)).toBe('B787.glb');
-        expect(getModelForAircraftType('b789', DEFAULT_FALLBACK_MODEL)).toBe('B787.glb');
-    });
-
     it('falls back for unknown or missing types', () => {
         expect(getModelForAircraftType('ZZZZ', DEFAULT_FALLBACK_MODEL)).toBe(DEFAULT_FALLBACK_MODEL);
         expect(getModelForAircraftType('', DEFAULT_FALLBACK_MODEL)).toBe(DEFAULT_FALLBACK_MODEL);

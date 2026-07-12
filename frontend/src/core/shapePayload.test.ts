@@ -26,7 +26,6 @@ describe('parseShapePayload - dictionary format', () => {
     it('extracts all valid shapes from a polys dictionary', () => {
         const result = parseShapePayload<TestShape>({ polys: { a: shape('a'), b: shape('b') } });
         expect(result.validShapes.map(s => s.name)).toEqual(['a', 'b']);
-        expect(result.firstShape).toEqual(shape('a'));
         expect(result.skipped).toEqual([]);
         expect(result.isEmpty).toBe(false);
     });
@@ -37,13 +36,6 @@ describe('parseShapePayload - dictionary format', () => {
         });
         expect(result.validShapes.map(s => s.name)).toEqual(['good']);
         expect(result.skipped).toEqual(['bad']);
-    });
-
-    it('reports the first dict entry as firstShape even when invalid', () => {
-        const result = parseShapePayload({
-            polys: { bad: { lat: [], lon: [] }, good: shape('good') },
-        });
-        expect(result.firstShape).toEqual({ lat: [], lon: [] });
     });
 
     it('flags an empty or invalid dictionary envelope as empty', () => {
@@ -57,7 +49,6 @@ describe('parseShapePayload - legacy formats', () => {
     it('handles a single shape', () => {
         const result = parseShapePayload(shape('solo'));
         expect(result.validShapes).toEqual([shape('solo')]);
-        expect(result.firstShape).toEqual(shape('solo'));
         expect(result.isEmpty).toBe(false);
     });
 
@@ -65,17 +56,22 @@ describe('parseShapePayload - legacy formats', () => {
         const result = parseShapePayload<TestShape>([shape('a'), { lat: [] }, shape('c')]);
         expect(result.validShapes.map(s => s.name)).toEqual(['a', 'c']);
         expect(result.skipped).toEqual(['#1']);
-        expect(result.firstShape).toEqual(shape('a'));
     });
 
     it('handles null and empty arrays without throwing', () => {
         const nullResult = parseShapePayload(null);
         expect(nullResult.validShapes).toEqual([]);
-        expect(nullResult.firstShape).toBeUndefined();
         expect(nullResult.skipped).toEqual(['#0']);
 
         const emptyResult = parseShapePayload([]);
         expect(emptyResult.validShapes).toEqual([]);
-        expect(emptyResult.firstShape).toBeUndefined();
+        expect(emptyResult.skipped).toEqual([]);
+    });
+
+    it('treats a bare empty object (cleared snapshot cache) as invalid, not a crash', () => {
+        const result = parseShapePayload({});
+        expect(result.validShapes).toEqual([]);
+        expect(result.skipped).toEqual(['#0']);
+        expect(result.isEmpty).toBe(false);
     });
 });

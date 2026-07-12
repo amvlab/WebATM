@@ -45,7 +45,6 @@ export class MapOverlay {
         this.mapDisplay = mapDisplay;
         this.stateManager = stateManager;
 
-        // Get references to all overlay elements
         this.aircraftCountElement = document.getElementById('aircraft-count');
         this.conflictCountElement = document.getElementById('conflict-count');
         this.conflictTotalElement = document.getElementById('conflict-total');
@@ -61,13 +60,9 @@ export class MapOverlay {
      * @param displayOptions - Display options for aircraft rendering
      */
     public async initialize(displayOptions: DisplayOptions): Promise<void> {
-        // Set up projection toggle button
         this.setupProjectionToggle();
-
-        // Set up cursor tracking
         this.setupCursorTracking();
 
-        // Set initial values
         this.updateAircraftCount(0);
         this.updateConflictCounts(0, 0);
         this.updateIntrusionCounts(0, 0);
@@ -93,11 +88,7 @@ export class MapOverlay {
             return;
         }
 
-        this.aircraft2DRenderer = await AircraftRendererFactory.create(
-            displayOptions,
-            this.stateManager,
-            false // request 2D
-        );
+        this.aircraft2DRenderer = AircraftRendererFactory.create2D(displayOptions, this.stateManager);
         this.aircraft2DRenderer.initialize(map);
         logger.debug('MapOverlay', '2D aircraft renderer initialized (always active)');
 
@@ -134,10 +125,8 @@ export class MapOverlay {
             return;
         }
 
-        // Set initial button state
         this.updateProjectionButton();
 
-        // Add click event listener
         this.projectionToggleButton.addEventListener('click', () => {
             this.handleProjectionToggle();
         });
@@ -154,10 +143,7 @@ export class MapOverlay {
             return;
         }
 
-        // Toggle the projection
         this.mapDisplay.toggleProjection();
-
-        // Update button appearance
         this.updateProjectionButton();
 
         logger.info('MapOverlay', 'Projection toggled to:', this.mapDisplay.getProjection());
@@ -172,11 +158,9 @@ export class MapOverlay {
         const currentProjection = this.mapDisplay.getProjection();
 
         if (currentProjection === 'globe') {
-            // Currently in globe view, button shows option to switch to 2D
             this.projectionToggleButton.innerHTML = '🗺️';
             this.projectionToggleButton.title = 'Switch to 2D View';
         } else {
-            // Currently in 2D view, button shows option to switch to globe
             this.projectionToggleButton.innerHTML = '🌐';
             this.projectionToggleButton.title = 'Switch to Globe View';
         }
@@ -192,14 +176,14 @@ export class MapOverlay {
             return;
         }
 
-        // Track mouse movement over the map
         map.on('mousemove', (e) => {
             const { lng, lat } = e.lngLat;
             this.updateCursorPosition(lat, lng);
         });
 
-        // Clear cursor position when mouse leaves the map
-        map.on('mouseleave', () => {
+        // 'mouseleave' only fires for layer-delegated listeners; the map-level
+        // event for the pointer leaving the canvas is 'mouseout'.
+        map.on('mouseout', () => {
             this.updateCursorPosition(null, null);
         });
 
@@ -255,10 +239,7 @@ export class MapOverlay {
         if (lat === null || lng === null) {
             this.cursorPositionElement.textContent = '--';
         } else {
-            // Format to 4 decimal places
-            const latStr = lat.toFixed(4);
-            const lngStr = lng.toFixed(4);
-            this.cursorPositionElement.textContent = `${latStr}°, ${lngStr}°`;
+            this.cursorPositionElement.textContent = `${lat.toFixed(4)}°, ${lng.toFixed(4)}°`;
         }
     }
 
@@ -267,21 +248,11 @@ export class MapOverlay {
      * @param aircraftData - Aircraft data containing counts
      */
     public updateFromAircraftData(aircraftData: AircraftData): void {
-        // Update aircraft count
         const aircraftCount = aircraftData.id ? aircraftData.id.length : 0;
         this.updateAircraftCount(aircraftCount);
+        this.updateConflictCounts(aircraftData.nconf_cur ?? 0, aircraftData.nconf_tot ?? 0);
+        this.updateIntrusionCounts(aircraftData.nlos_cur ?? 0, aircraftData.nlos_tot ?? 0);
 
-        // Update conflict counts
-        const conflictCurrent = aircraftData.nconf_cur !== undefined ? aircraftData.nconf_cur : 0;
-        const conflictTotal = aircraftData.nconf_tot !== undefined ? aircraftData.nconf_tot : 0;
-        this.updateConflictCounts(conflictCurrent, conflictTotal);
-
-        // Update intrusion counts
-        const intrusionCurrent = aircraftData.nlos_cur !== undefined ? aircraftData.nlos_cur : 0;
-        const intrusionTotal = aircraftData.nlos_tot !== undefined ? aircraftData.nlos_tot : 0;
-        this.updateIntrusionCounts(intrusionCurrent, intrusionTotal);
-
-        // Check if selected aircraft still exists
         const selectedAircraft = this.stateManager.getState().selectedAircraft;
         if (selectedAircraft && aircraftData.id && !aircraftData.id.includes(selectedAircraft)) {
             // Selected aircraft was deleted - deselect it and clear routes
@@ -317,13 +288,6 @@ export class MapOverlay {
             // Update 3D renderer if active
             if (this.is3DOverlayActive && this.aircraft3DRenderer) {
                 this.aircraft3DRenderer.updateEntities(aircraftMap, simTime);
-                // Debug: Confirm 3D renderer is receiving aircraft data after reset
-                if (aircraftCount > 0) {
-                    logger.debug('MapOverlay', `3D renderer updated with ${aircraftCount} aircraft`);
-                }
-            } else if (this.is3DOverlayActive && !this.aircraft3DRenderer) {
-                // This would indicate a state inconsistency
-                logger.warn('MapOverlay', '3D overlay marked active but no 3D renderer exists - this should not happen');
             }
 
             // Feed selected aircraft position/altitude into the 3D route renderer
@@ -476,13 +440,13 @@ export class MapOverlay {
         const savedPitch = map.getPitch();
         const savedBearing = map.getBearing();
 
-        // Create 3D renderer
-        this.aircraft3DRenderer = await AircraftRendererFactory.create(
-            displayOptions,
-            this.stateManager,
-            true // request 3D
-        );
+        const renderer3D = await AircraftRendererFactory.create3D(displayOptions, this.stateManager);
+        if (!renderer3D) {
+            logger.warn('MapOverlay', '3D renderer unavailable - keeping 2D-only rendering');
+            return;
+        }
 
+        this.aircraft3DRenderer = renderer3D;
         this.aircraft3DRenderer.initialize(map);
         this.is3DOverlayActive = true;
 
@@ -528,10 +492,7 @@ export class MapOverlay {
         if (currentAircraftData && currentAircraftData.id) {
             const aircraftMap = new Map<string, AircraftData>();
             aircraftMap.set('batch', currentAircraftData);
-            this.aircraft3DRenderer.updateEntities(aircraftMap, currentSimTime);
-            logger.debug('MapOverlay', `3D overlay initialized with ${currentAircraftData.id.length} existing aircraft`);
-        } else {
-            logger.debug('MapOverlay', '3D overlay enabled with no existing aircraft data');
+            renderer3D.updateEntities(aircraftMap, currentSimTime);
         }
 
         logger.info('MapOverlay', '3D overlay enabled successfully');

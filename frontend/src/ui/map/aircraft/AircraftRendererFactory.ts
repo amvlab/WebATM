@@ -10,31 +10,37 @@ import { logger } from '../../../utils/Logger';
 /**
  * Factory for creating aircraft renderers.
  *
- * 2D renderer is always active; 3D renderer is an optional overlay that
- * runs alongside 2D when enabled. Three.js is lazy-loaded on first use.
+ * The 2D renderer is always active; the 3D renderer is an optional overlay
+ * that runs alongside it. Three.js is lazy-loaded on first 3D use.
  */
 export class AircraftRendererFactory {
-    static async create(
+    /** Create the always-active 2D renderer. */
+    static create2D(
         displayOptions: DisplayOptions,
-        stateManager: StateManager,
-        requested3D?: boolean
-    ): Promise<IEntityRenderer<AircraftData>> {
-        const want3D = requested3D ?? displayOptions.show3DOverlay;
-
-        if (want3D) {
-            try {
-                logger.info('AircraftRendererFactory', 'Loading 3D aircraft renderer...');
-                const Aircraft3DModule = await import(/* webpackChunkName: "aircraft-3d" */ './Aircraft3DRenderer');
-                logger.info('AircraftRendererFactory', '3D aircraft renderer loaded successfully');
-                return new Aircraft3DModule.Aircraft3DRenderer(displayOptions, stateManager);
-            } catch (error) {
-                logger.warn('AircraftRendererFactory', 'Failed to load 3D renderer, falling back to 2D:', error);
-            }
-        }
-
-        logger.info('AircraftRendererFactory', 'Using 2D aircraft renderer');
+        stateManager: StateManager
+    ): IEntityRenderer<AircraftData> {
         const shapeDrawer = this.getShapeDrawer(displayOptions.aircraftShape);
         return new Aircraft2DRenderer(displayOptions, shapeDrawer, stateManager);
+    }
+
+    /**
+     * Lazy-load and instantiate the 3D overlay renderer.
+     *
+     * Returns null when the Three.js chunk fails to load so the caller leaves
+     * the overlay off — falling back to a 2D renderer here would duplicate the
+     * always-active 2D renderer's fixed map layer/source IDs.
+     */
+    static async create3D(
+        displayOptions: DisplayOptions,
+        stateManager: StateManager
+    ): Promise<IEntityRenderer<AircraftData> | null> {
+        try {
+            const module = await import(/* webpackChunkName: "aircraft-3d" */ './Aircraft3DRenderer');
+            return new module.Aircraft3DRenderer(displayOptions, stateManager);
+        } catch (error) {
+            logger.warn('AircraftRendererFactory', 'Failed to load 3D renderer:', error);
+            return null;
+        }
     }
 
     /**
@@ -43,11 +49,9 @@ export class AircraftRendererFactory {
      */
     static async createRoute3D(displayOptions: DisplayOptions): Promise<AircraftRoute3DRenderer | null> {
         try {
-            logger.info('AircraftRendererFactory', 'Loading 3D route renderer...');
             const module = await import(
                 /* webpackChunkName: "aircraft-3d" */ './AircraftRoute3DRenderer'
             );
-            logger.info('AircraftRendererFactory', '3D route renderer loaded successfully');
             return new module.AircraftRoute3DRenderer(displayOptions);
         } catch (error) {
             logger.warn('AircraftRendererFactory', 'Failed to load 3D route renderer:', error);

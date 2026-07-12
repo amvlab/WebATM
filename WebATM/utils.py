@@ -98,6 +98,53 @@ def make_json_serializable(obj):
         return obj
 
 
+def empty_traffic_data():
+    """Return a fresh empty ACDATA payload for clearing all aircraft.
+
+    Emitted whenever the map must drop stale traffic (simulation reset,
+    active-node change, or server disconnect). A new dict is returned on each
+    call so callers can cache or mutate it without sharing state.
+
+    Returns:
+        dict: An ``acdata`` payload with empty per-field arrays and zeroed
+            conflict/LOS counters.
+    """
+    return {
+        "id": [],
+        "lat": [],
+        "lon": [],
+        "alt": [],
+        "actype": [],  # only sent by bluesky/amvlab
+        "tas": [],
+        "trk": [],
+        "vs": [],
+        "inconf": [],
+        "tcpamax": [],
+        "nconf_cur": 0,
+        "nconf_tot": 0,
+        "nlos_cur": 0,
+        "nlos_tot": 0,
+    }
+
+
+def id2str(node_id):
+    """Convert a BlueSky node/sender ID to its hex-string form.
+
+    Node IDs arrive from the network as raw bytes; WebATM keys its tracking
+    maps and Socket.IO payloads by the hex-string form.
+
+    Args:
+        node_id (bytes | str | None): Raw node/sender identifier.
+
+    Returns:
+        str | None: Hex string for bytes input, ``str(node_id)`` for other
+            non-None values, or None.
+    """
+    if isinstance(node_id, bytes):
+        return node_id.hex()
+    return str(node_id) if node_id is not None else None
+
+
 def i2txt(i, n):
     """Convert an integer to a zero-padded string of fixed width.
 

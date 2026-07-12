@@ -20,6 +20,15 @@ import { connectionStatus } from './ConnectionStatusService';
 import { echoManager } from '../ui/EchoManager';
 import { logger } from '../utils/Logger';
 
+/**
+ * True when a snapshot field carries actual data. The proxy clears its
+ * caches to `{}` on disconnect, so an empty object means "no data" and
+ * must not flip the connection status.
+ */
+function hasEntries<T extends object>(value: T | undefined): value is T {
+    return value !== undefined && value !== null && Object.keys(value).length > 0;
+}
+
 interface SocketEventHandlers {
     onConnect?: () => void;
     onDisconnect?: (reason: string) => void;
@@ -34,8 +43,6 @@ interface SocketEventHandlers {
     onRouteData?: (data: RouteData) => void;
     onConnectionStatus?: (data: ConnectionStatus) => void;
     onServerDisconnected?: () => void;
-    onPoly?: (data: PolyData) => void;
-    onPolyline?: (data: PolylineData) => void;
     onReset?: () => void;
     onCommandDict?: (data: CommandDictData) => void;
 }
@@ -69,7 +76,6 @@ export class SocketManager {
     }
 
     private setupStateIntegration(): void {
-        // Set up automatic state updates when socket events are received
         this.setEventHandlers({
             onConnect: () => {
                 connectionStatus.setWebSocketConnected(true);
@@ -81,22 +87,19 @@ export class SocketManager {
                 connectionStatus.setWebSocketConnected(true);
             },
             onInitialData: (data: InitialData) => {
-                // Process simulation data from initial load
-                // Note: We intentionally don't process nodeinfo here to avoid
-                // showing "Connected (No Data)" on first page load before user
-                // explicitly connects. The nodeinfo event will be emitted separately
-                // by the server when data flows through the system.
+                // node_info is deliberately not processed here so a fresh
+                // page load doesn't show "Connected (No Data)" before live
+                // data flows; the server emits nodeinfo separately.
 
-                if (data.siminfo) {
-                    this.stateManager.updateSimInfo(data.siminfo);
+                if (hasEntries(data.sim_data)) {
+                    this.stateManager.updateSimInfo(data.sim_data);
                     connectionStatus.onSimInfoReceived();
                 }
-                if (data.acdata) {
-                    this.stateManager.updateAircraftData(data.acdata);
+                if (hasEntries(data.traffic_data)) {
+                    this.stateManager.updateAircraftData(data.traffic_data);
                     connectionStatus.onAircraftDataReceived();
                 }
-                // Handle cmddict from initial data if available
-                if (data.cmddict) {
+                if (hasEntries(data.cmddict)) {
                     this.stateManager.updateCommandDict(data.cmddict);
                     logger.debug('SocketManager', 'Command dictionary loaded from initial data');
                 }
@@ -125,19 +128,16 @@ export class SocketManager {
                 connectionStatus.onAircraftDataReceived();
             },
             onNodeInfo: (data: NodeInfo) => {
-                // CRITICAL: Receiving nodeinfo means we're connected to BlueSky!
+                // Receiving nodeinfo means we're connected to BlueSky.
                 connectionStatus.onNodeInfoReceived();
 
-                // Update active node in state if available
                 if (data.active_node) {
                     this.stateManager.setActiveNode(data.active_node);
                     logger.debug('SocketManager', 'Active node updated:', data.active_node);
                 }
             },
             onEcho: (data: EchoData) => {
-                // Handle echo messages from BlueSky server
                 if (data && data.text) {
-                    // Determine message type based on flags
                     // flags: 0 = info (default), 1 = error, 2 = warning
                     let messageType = 'info';
                     if (data.flags === 1) {
@@ -146,44 +146,31 @@ export class SocketManager {
                         messageType = 'warning';
                     }
 
-                    // Extract node ID from sender field if available
-                    // Also try to get active node from state as fallback
-                    let nodeId = data.sender || undefined;
+                    // Attribute to the sending node, falling back to the active node.
+                    const nodeId = data.sender || this.stateManager.getState().activeNode || undefined;
 
-                    // If no sender in data, get active node from state manager
-                    if (!nodeId) {
-                        const state = this.stateManager.getState();
-                        nodeId = state.activeNode || undefined;
-                    }
-
-                    // Debug logging to see what we're receiving
                     logger.verbose('SocketManager', 'Echo data:', { text: data.text, sender: data.sender, nodeId, flags: data.flags });
 
                     echoManager.addMessage(data.text, messageType, nodeId);
                 }
             },
             onConnectionStatus: (data: ConnectionStatus) => {
-                // connection_status event from server indicates BlueSky connection
-                // However, we should only trust this for disconnection events
-                // For connection, we rely on nodeinfo as the source of truth
+                // Only trust connection_status for disconnection; connection is
+                // confirmed by nodeinfo (the source of truth for "connected").
                 if (!data.connected) {
-                    // Only set disconnected state from connection_status
                     connectionStatus.setBlueSkyConnected(false);
                 }
-                // If connected is true, wait for nodeinfo to confirm actual connection
             },
             onServerDisconnected: () => {
                 connectionStatus.setBlueSkyConnected(false);
                 connectionStatus.setReceivingData(false);
             },
             onReset: () => {
-                // IMPORTANT: RESET only resets simulation data, NOT connection status!
-                // The simulation is reset but we're still connected to BlueSky server
+                // RESET clears simulation data only - we stay connected to BlueSky.
                 this.stateManager.reset();
                 logger.info('SocketManager', 'Simulation reset - connection maintained');
             },
             onCommandDict: (data: CommandDictData) => {
-                // Update command dictionary from server
                 this.stateManager.updateCommandDict(data.cmddict);
                 logger.debug('SocketManager', 'Command dictionary updated:', Object.keys(data.cmddict).length, 'commands');
             }
@@ -248,8 +235,7 @@ export class SocketManager {
             this.handleShapeEvent<PolyData>(
                 'poly',
                 data,
-                (shape, node) => this.stateManager.addPolyData(shape, node),
-                shape => this.handlers.onPoly?.(shape)
+                (shape, node) => this.stateManager.addPolyData(shape, node)
             );
         });
 
@@ -257,8 +243,7 @@ export class SocketManager {
             this.handleShapeEvent<PolylineData>(
                 'polyline',
                 data,
-                (shape, node) => this.stateManager.addPolylineData(shape, node),
-                shape => this.handlers.onPolyline?.(shape)
+                (shape, node) => this.stateManager.addPolylineData(shape, node)
             );
         });
     }
@@ -288,17 +273,15 @@ export class SocketManager {
     }
 
     /**
-     * Shared processing for 'poly' and 'polyline' events. Valid shapes go
-     * to the StateManager; the first shape (any validity) is forwarded to
-     * the backwards-compatible single-shape handler.
+     * Shared processing for 'poly' and 'polyline' events: valid shapes go
+     * to the StateManager, invalid ones are logged and skipped.
      */
     private handleShapeEvent<T extends PolyData | PolylineData>(
         kind: 'poly' | 'polyline',
         data: unknown,
-        addToState: (shape: T, activeNode: string | undefined) => void,
-        notifyHandler: (shape: T) => void
+        addToState: (shape: T, activeNode: string | undefined) => void
     ): void {
-        const { validShapes, firstShape, skipped, isEmpty } = parseShapePayload<T>(data);
+        const { validShapes, skipped, isEmpty } = parseShapePayload<T>(data);
 
         if (isEmpty) {
             logger.verbose('SocketManager', `Ignoring empty ${kind} data`);
@@ -314,13 +297,9 @@ export class SocketManager {
             addToState(shape, activeNode);
         }
 
-        // Mark BlueSky as connected if we received valid shape data
+        // Receiving valid shape data means BlueSky is connected.
         if (validShapes.length > 0) {
             connectionStatus.onShapeDataReceived();
-        }
-
-        if (firstShape) {
-            notifyHandler(firstShape);
         }
     }
 
@@ -399,14 +378,11 @@ export class SocketManager {
     }
 
     setReducedUpdates(enabled: boolean): void {
-        // This method can be used to throttle updates when page is not visible
-        // For now, just log the state change - actual throttling logic can be added later
+        // Placeholder for throttling updates while the page is hidden.
         logger.debug('SocketManager', `Reduced updates mode: ${enabled}`);
     }
 
     async initialize(): Promise<void> {
-        // Initialize socket connection if needed
-        // This method is called by App.ts during initialization
         if (!this.socket) {
             this.initializeSocket();
         }

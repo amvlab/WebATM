@@ -4,7 +4,13 @@ import struct
 
 import numpy as np
 
-from WebATM.utils import i2txt, make_json_serializable, tim2txt
+from WebATM.utils import (
+    empty_traffic_data,
+    i2txt,
+    id2str,
+    make_json_serializable,
+    tim2txt,
+)
 
 
 class TestI2txt:
@@ -130,3 +136,44 @@ class TestMakeJsonSerializable:
         # Has b"numpy" but is missing b"data"/b"type"/b"shape": normal dict path.
         obj = {b"numpy": True, b"other": 1}
         assert make_json_serializable(obj) == {"numpy": True, "other": 1}
+
+
+class TestId2str:
+    def test_bytes_become_hex(self):
+        assert id2str(b"\x01\x02") == "0102"
+
+    def test_none_stays_none(self):
+        assert id2str(None) is None
+
+    def test_string_passes_through(self):
+        assert id2str("abcd") == "abcd"
+
+
+class TestEmptyTrafficData:
+    def test_all_arrays_empty_and_counters_zero(self):
+        payload = empty_traffic_data()
+        for field in (
+            "id",
+            "lat",
+            "lon",
+            "alt",
+            "actype",
+            "tas",
+            "trk",
+            "vs",
+            "inconf",
+            "tcpamax",
+        ):
+            assert payload[field] == []
+        for counter in ("nconf_cur", "nconf_tot", "nlos_cur", "nlos_tot"):
+            assert payload[counter] == 0
+
+    def test_includes_actype_field(self):
+        # actype must be present so the reset and disconnect clear paths emit
+        # an identical acdata shape.
+        assert "actype" in empty_traffic_data()
+
+    def test_returns_fresh_dict_each_call(self):
+        first = empty_traffic_data()
+        first["id"].append("AC1")
+        assert empty_traffic_data()["id"] == []

@@ -70,6 +70,13 @@ class TestSiminfoHandler:
         # Should simply return without raising.
         on_siminfo_received(1.0, 0.0, 0.0, "utc", 0, 0, "x", sender_id=b"\x01")
 
+    def test_missing_sender_id_is_handled(self, proxy, fake_socketio):
+        # Regression: the old fallback imported the bluesky package (not a
+        # dependency of standalone WebATM) when sender_id was missing.
+        on_siminfo_received(1.0, 0.05, 12.0, "utc", 3, 1, "demo")
+        assert proxy.sim_data["sender_id"] is None
+        assert fake_socketio.count("siminfo") == 1
+
 
 class TestSiminfoActiveNodeFiltering:
     """The header clock/rate/state must follow the ACTIVE node only (multi-node
@@ -172,6 +179,10 @@ class TestAcdataHandler:
         on_acdata_received({"id": ["AC1"]})
         emitted = fake_socketio.last("acdata")
         assert emitted["id"] == []
+        # Canonical empty payload shape (matches the disconnect clear path).
+        from WebATM.utils import empty_traffic_data
+
+        assert emitted == empty_traffic_data()
 
 
 class TestAcdataActiveNodeFiltering:
@@ -270,6 +281,54 @@ class TestStatechangeHandler:
         on_statechange_received({"simstate": 1})
         assert fake_socketio.count("statechange") == 0
 
+    def test_empty_sim_data_is_not_seeded(self, proxy, fake_socketio):
+        # Without a cached SIMINFO payload there is nothing to patch; seeding
+        # {'state': ...} would let the backup timer emit a partial siminfo.
+        on_statechange_received({"simstate": 2}, sender_id=b"\x01")
+        assert proxy.sim_data == {}
+        assert fake_socketio.count("statechange") == 1
+
+
+class TestStatechangeActiveNodeFiltering:
+    """Like SIMINFO, STATECHANGE must only touch the cached header state for
+    the active node: a paused background node must not flip the displayed
+    run-state (which the 0.5 s backup emit would then broadcast as siminfo)."""
+
+    def _activate(self, proxy, fake_client, active_bytes):
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        fake_client.act_id = active_bytes
+        proxy.tracked_nodes[active_bytes.hex()] = {
+            "status": "init",
+            "time": "00:00:00",
+        }
+
+    def test_active_node_updates_state(self, proxy, fake_client, fake_socketio):
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        self._activate(proxy, fake_client, active)
+        proxy.sim_data = {"state": 2}
+        on_statechange_received({"simstate": 1}, sender_id=active)
+        assert proxy.sim_data["state"] == 1
+        assert fake_socketio.last("statechange")["sender_id"] == active.hex()
+
+    def test_background_node_is_ignored(self, proxy, fake_client, fake_socketio):
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        self._activate(proxy, fake_client, active)
+        proxy.sim_data = {"state": 2}  # active node is running (OP)
+
+        other = b"\xbb\xbb\xbb\xbb\x81"
+        on_statechange_received({"simstate": 1}, sender_id=other)  # HOLD elsewhere
+
+        assert proxy.sim_data["state"] == 2
+        assert fake_socketio.count("statechange") == 0
+
+    def test_falls_back_to_any_sender_without_active_node(self, proxy, fake_socketio):
+        proxy.sim_data = {"state": 0}
+        on_statechange_received({"simstate": 2}, sender_id=b"\x01")
+        assert proxy.sim_data["state"] == 2
+        assert fake_socketio.count("statechange") == 1
+
 
 class TestEchoHandler:
     def test_stores_and_emits_echo(self, proxy, fake_socketio):
@@ -321,20 +380,92 @@ class TestStackReceivedHandler:
 
 
 class TestResetHandler:
-    def test_clears_shapes_and_emits(self, proxy, fake_client, fake_socketio):
-        proxy.bluesky_client = fake_client
-        fake_client.context.sender_id = b"NODE1"
-        proxy.poly_data_by_node["4e4f444531"] = {"polys": {"a": {}}}
-        # sender hex of b"NODE1"
+    def test_clears_shapes_and_emits(self, proxy, fake_socketio):
         sender_hex = b"NODE1".hex()
         proxy.poly_data_by_node[sender_hex] = {"polys": {"a": {}}}
-        on_reset_received()
+        on_reset_received(sender_id=b"NODE1")
         assert sender_hex not in proxy.poly_data_by_node
         assert fake_socketio.count("reset") == 1
 
     def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
         proxy.allow_reconnection = False
         on_reset_received()
+        assert fake_socketio.count("reset") == 0
+
+
+class TestResetActiveNodeScoping:
+    """A RESET only affects the node that sent it: browsers display the active
+    node, so a background node's reset must neither delete the active node's
+    stored shapes nor emit the map-wiping ``poly``/``polyline``/``reset``
+    events (which clear aircraft, selection and shapes frontend-side)."""
+
+    def _activate(self, proxy, fake_client, active_bytes):
+        """Wire the proxy so _get_safe_active_node() resolves to active_bytes."""
+        active_hex = active_bytes.hex()
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        fake_client.act_id = active_bytes
+        proxy.tracked_nodes[active_hex] = {"status": "init", "time": "00:00:00"}
+        return active_hex
+
+    def test_background_node_reset_leaves_active_display_alone(
+        self, proxy, fake_client, fake_socketio
+    ):
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        active_hex = self._activate(proxy, fake_client, active)
+        other = b"\xbb\xbb\xbb\xbb\x81"
+        other_hex = other.hex()
+        proxy.tracked_nodes[other_hex] = {"status": "init", "time": "00:00:00"}
+        proxy.poly_data_by_node = {
+            active_hex: {"polys": {"keep": {}}},
+            other_hex: {"polys": {"stale": {}}},
+        }
+        proxy.polyline_data_by_node = {active_hex: {"polys": {"keep": {}}}}
+
+        on_reset_received(sender_id=other)
+
+        # The resetting node's shapes are dropped, the active node's are kept.
+        assert other_hex not in proxy.poly_data_by_node
+        assert proxy.poly_data_by_node[active_hex] == {"polys": {"keep": {}}}
+        assert proxy.polyline_data_by_node[active_hex] == {"polys": {"keep": {}}}
+        # Nothing display-clearing reaches the browser.
+        assert fake_socketio.count("reset") == 0
+        assert fake_socketio.count("poly") == 0
+        assert fake_socketio.count("polyline") == 0
+
+    def test_active_node_reset_clears_and_emits(
+        self, proxy, fake_client, fake_socketio
+    ):
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        active_hex = self._activate(proxy, fake_client, active)
+        proxy.poly_data_by_node = {active_hex: {"polys": {"stale": {}}}}
+
+        on_reset_received(sender_id=active)
+
+        assert active_hex not in proxy.poly_data_by_node
+        assert fake_socketio.count("reset") == 1
+        assert fake_socketio.last("poly") == {"polys": {}}
+        assert fake_socketio.last("polyline") == {"polys": {}}
+
+    def test_unresolvable_sender_falls_back_to_active_node(
+        self, proxy, fake_client, fake_socketio
+    ):
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        active_hex = self._activate(proxy, fake_client, active)
+        proxy.poly_data_by_node = {active_hex: {"polys": {"stale": {}}}}
+
+        on_reset_received()  # no sender resolvable -> active-node fallback
+
+        assert active_hex not in proxy.poly_data_by_node
+        assert fake_socketio.count("reset") == 1
+
+    def test_no_sender_and_no_active_node_is_a_noop(self, proxy, fake_socketio):
+        proxy.poly_data_by_node = {"somenode": {"polys": {"kept": {}}}}
+
+        on_reset_received()
+
+        assert proxy.poly_data_by_node == {"somenode": {"polys": {"kept": {}}}}
         assert fake_socketio.count("reset") == 0
 
 

@@ -33,6 +33,23 @@ describe('fetchAircraftModels', () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it('shares one request between concurrent callers', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ success: true, models: MODELS }),
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        // Both panels kick off the fetch at startup before either resolves
+        const [a, b] = await Promise.all([
+            fetchAircraftModels(),
+            fetchAircraftModels(),
+        ]);
+        expect(a).toEqual(MODELS);
+        expect(b).toEqual(MODELS);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('returns an empty list on HTTP failure without caching it', async () => {
         const fetchMock = vi.fn().mockResolvedValue({ ok: false });
         vi.stubGlobal('fetch', fetchMock);

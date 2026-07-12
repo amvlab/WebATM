@@ -290,12 +290,18 @@ export interface AppState {
   aircraftScaleOverrides: Record<string, number>;
 }
 
+/**
+ * State snapshot sent on socket connect (`initial_data` event), built by
+ * the proxy's `DataManager.get_current_data()`. Field names match the
+ * backend payload. The proxy clears these caches to empty objects on
+ * disconnect, so consumers must treat `{}` as "no data". The payload also
+ * carries `node_info`, which the client deliberately ignores on load (see
+ * SocketManager).
+ */
 export interface InitialData {
-  siminfo: SimInfo;
-  acdata: AircraftData;
-  nodes: NodeInfo[];
-  poly?: PolyData[];
-  polyline?: PolylineData[];
+  sim_data?: SimInfo;
+  traffic_data?: AircraftData;
+  echo_data?: Record<string, unknown>;
   cmddict?: CommandDict;
   poly_data?: ShapeBatchData<PolyData>;
   polyline_data?: ShapeBatchData<PolylineData>;

@@ -180,43 +180,12 @@ export class AircraftRoutes {
         // Update label size
         this.renderer.updateLabelSize(options.mapLabelsTextSize);
 
-        // Update sub-option containers visibility
-        if (oldShowRoutes !== this.showRoutes) {
-            this.updateSubOptionContainers(this.showRoutes);
-        }
-
-        // If routes were toggled off, clear selection
         if (!this.showRoutes && oldShowRoutes) {
-            logger.debug('AircraftRoutes', '🔄 Routes toggle OFF - clearing route display');
+            // Routes were toggled off, clear the display
             this.clearRouteDisplay();
-        } else if (this.showRoutes && !oldShowRoutes) {
-            // Routes were toggled on, refresh display
-            this.updateRouteDisplay();
         } else {
-            // Just a sub-option change, refresh display
+            // Routes were toggled on or a sub-option changed, refresh
             this.updateRouteDisplay();
-        }
-    }
-
-    /**
-     * Update sub-option containers visibility in HTML
-     */
-    private updateSubOptionContainers(visible: boolean): void {
-        const display = visible ? 'block' : 'none';
-
-        const routeLinesContainer = document.getElementById('show-route-lines-container');
-        if (routeLinesContainer) {
-            routeLinesContainer.style.display = display;
-        }
-
-        const routeLabelsContainer = document.getElementById('show-route-labels-container');
-        if (routeLabelsContainer) {
-            routeLabelsContainer.style.display = display;
-        }
-
-        const routePointsContainer = document.getElementById('show-route-points-container');
-        if (routePointsContainer) {
-            routePointsContainer.style.display = display;
         }
     }
 

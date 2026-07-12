@@ -1,13 +1,7 @@
 /**
- * AircraftInfoPanel - Manages the Aircraft Info panel
- *
- * This panel handles:
- * - Displaying detailed information for selected aircraft
- * - Aircraft position, altitude, speed, heading
- * - Flight plan information
- * - Performance data
- * - Real-time updates from BlueSky server
- * - Copyable field values
+ * AircraftInfoPanel - live details for the selected aircraft (position,
+ * speeds, conflict status) with click-to-copy fields and the
+ * per-aircraft 3D model/scale overrides.
  */
 
 import { BasePanel } from '../BasePanel';
@@ -66,49 +60,40 @@ export class AircraftInfoPanel extends BasePanel {
     public setStateManager(stateManager: StateManager): void {
         this.stateManager = stateManager;
 
-        // Get initial display options
         this.displayOptions = this.stateManager.getDisplayOptions();
 
-        // Subscribe to selected aircraft changes
-        this.stateManager.subscribe('selectedAircraft', (newAircraft) => {
+        this.trackSubscription(this.stateManager.subscribe('selectedAircraft', (newAircraft) => {
             this.selectedAircraft = newAircraft;
             this.updateAircraftInfo();
-        });
+        }));
 
-        // Subscribe to aircraft data updates
-        this.stateManager.subscribe('aircraftData', (newData) => {
+        this.trackSubscription(this.stateManager.subscribe('aircraftData', (newData) => {
             this.currentAircraftData = newData;
-            // Only update if an aircraft is selected
             if (this.selectedAircraft) {
                 this.updateAircraftInfo();
             }
-        });
+        }));
 
-        // Subscribe to display options changes (units, speed type, etc.)
-        this.stateManager.subscribe('displayOptions', (newOptions) => {
+        this.trackSubscription(this.stateManager.subscribe('displayOptions', (newOptions) => {
             this.displayOptions = newOptions;
-            // Update display if an aircraft is selected
             if (this.selectedAircraft) {
                 this.updateAircraftInfo();
             } else {
                 // Still sync 3D row visibility when overlay toggles
                 this.apply3DRowVisibility();
             }
-        });
+        }));
 
-        // Subscribe to per-aircraft model overrides so the dropdown
-        // reflects external changes (e.g. cleared when the aircraft
-        // disappears from the simulation).
-        this.stateManager.subscribe('aircraftModelOverrides', () => {
+        // Keep the override dropdown/input in sync with external changes
+        // (e.g. overrides cleared when the global model/scale changes or
+        // the aircraft disappears from the simulation).
+        this.trackSubscription(this.stateManager.subscribe('aircraftModelOverrides', () => {
             this.syncModelDropdown();
-        });
+        }));
 
-        // Same for scale overrides — keep the input in sync when the
-        // global scale changes (which clears overrides) or the aircraft
-        // disappears.
-        this.stateManager.subscribe('aircraftScaleOverrides', () => {
+        this.trackSubscription(this.stateManager.subscribe('aircraftScaleOverrides', () => {
             this.syncScaleInput();
-        });
+        }));
 
         // Kick off the model list fetch so the dropdown is ready
         // the first time an aircraft is selected.
@@ -163,9 +148,10 @@ export class AircraftInfoPanel extends BasePanel {
         const lat = data.lat[index];
         const lon = data.lon[index];
         const altMeters = data.alt[index];
-        const casKnots = (data.cas && data.cas[index]) || null;  // May not be available from backend yet
+        // cas/gs may be absent from the backend feed; 0 is a valid value
+        const casKnots = data.cas?.[index] ?? null;
         const tasKnots = data.tas[index];
-        const gsKnots = (data.gs && data.gs[index]) || null;  // May not be available from backend yet
+        const gsKnots = data.gs?.[index] ?? null;
         const trk = data.trk[index];
         const vsFtPerSec = data.vs[index];
         const inconf = data.inconf[index];
@@ -460,10 +446,10 @@ export class AircraftInfoPanel extends BasePanel {
         const override = this.stateManager.getAircraftModelOverride(this.selectedAircraft);
         const desired = override ?? AUTO_MODEL_SENTINEL;
         if (this.modelSelect.value !== desired) {
+            // If the option isn't present yet (model list still loading),
+            // this blanks the select; populateModelDropdown re-runs this
+            // sync once the fetch completes.
             this.modelSelect.value = desired;
-            // If the option isn't present (model list hasn't loaded yet),
-            // the assignment is a no-op — populateModelDropdown will
-            // call this method again once the fetch completes.
         }
     }
 
@@ -555,10 +541,6 @@ export class AircraftInfoPanel extends BasePanel {
     }
 
     protected override onDestroy(): void {
-        this.copyFeedbackTimeouts.forEach((id) => window.clearTimeout(id));
-        this.copyFeedbackTimeouts.clear();
-        this.valueElements.clear();
-        this.tcpaRowElement = null;
-        this.hasStructure = false;
+        this.clearStructure();
     }
 }
