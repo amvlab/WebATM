@@ -7,13 +7,10 @@ import './ui/LogStreamManager';
 import './ui/OutputFileBrowser';
 
 /**
- * Entry point for WebATM TypeScript application
- *
- * This file serves as the main entry point that initializes the App class
- * when the DOM is ready, replacing the original JavaScript initialization.
+ * Entry point for the WebATM TypeScript application: creates and
+ * initializes the App class once the DOM is ready.
  */
 
-// Initialize application when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     logger.info('main', 'DOM loaded, initializing WebATM...');
 
@@ -26,10 +23,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Make app and managers available globally for console and other components
     window.app = app;
     window.echoManager = echoManager;
-    window.blueSkyApp = app;
     window.connectionStatus = connectionStatus;
 
-    logger.info('main', 'Global debug helpers available: window.app, window.blueSkyApp, window.connectionStatus');
+    logger.info('main', 'Global debug helpers available: window.app, window.connectionStatus');
 
     app.initialize().then(() => {
         // Make console available globally for compatibility

@@ -1,4 +1,4 @@
-import { SimInfo, AircraftData, RouteData, AppState } from '../data/types';
+import { AircraftData, RouteData, AppState } from '../data/types';
 import { SocketManager } from './SocketManager';
 import { StateManager } from './StateManager';
 import { connectionStatus } from './ConnectionStatusService';
@@ -32,11 +32,8 @@ import { CommandHandler } from '../data/CommandHandler';
 import { logger } from '../utils/Logger';
 
 /**
- * Main application coordinator for the BlueSky Web Client
- * 
- * This class serves as the central hub for the TypeScript web application,
- * coordinating between different modules and managing the overall application lifecycle.
- * It replaces the BlueSkyWebUI class from app.js with a more modular TypeScript architecture.
+ * Main application coordinator: creates the core modules and UI components,
+ * wires them together, and manages the overall application lifecycle.
  */
 export class App {
     private socketManager: SocketManager;
@@ -139,15 +136,7 @@ export class App {
      * Initialize application state
      */
     private initializeState(): void {
-        // StateManager already initializes with default values,
-        // so we just need to ensure it's ready
-        // The default state is already set in StateManager constructor
-        logger.debug('App', 'State manager initialized with default state');
-
-        // Subscribe to connection state changes
         this.setupConnectionStatusHandlers();
-
-        // Subscribe to simulation data changes
         this.setupSimulationDataHandlers();
     }
 
@@ -155,10 +144,9 @@ export class App {
      * Set up handlers for connection status changes
      */
     private setupConnectionStatusHandlers(): void {
-        // Subscribe to ConnectionStatusService for centralized status updates
-        // This is the single source of truth for all connection state
+        // ConnectionStatusService is the single source of truth for all
+        // connection state.
         connectionStatus.subscribe(() => {
-            // Update UI based on centralized connection status
             this.updateConnectionStatusDisplay();
         });
 
@@ -176,31 +164,21 @@ export class App {
      * Set up handlers for simulation data changes
      */
     private setupSimulationDataHandlers(): void {
-        // Subscribe to simInfo updates from StateManager
+        // Header shows simulation time, rate, etc.
         this.stateManager.subscribe('simInfo', (newSimInfo) => {
             if (newSimInfo) {
-                // Update header with new simulation info (time, rate, etc.)
                 this.header.updateSimInfo(newSimInfo);
             }
         });
 
-        // Subscribe to aircraft data updates
         this.stateManager.subscribe('aircraftData', (newAircraftData) => {
-            if (newAircraftData) {
-                // Update aircraft display
-                this.updateAircraftDisplay(newAircraftData);
-
-                // Update map overlay with aircraft data
-                if (this.mapOverlay) {
-                    this.mapOverlay.updateFromAircraftData(newAircraftData);
-                }
+            if (newAircraftData && this.mapOverlay) {
+                this.mapOverlay.updateFromAircraftData(newAircraftData);
             }
         });
 
-        // Subscribe to display options changes
         this.stateManager.subscribe('displayOptions', (newOptions) => {
             if (newOptions && this.mapOverlay) {
-                // Update map overlay with new display options
                 this.mapOverlay.updateDisplayOptions(newOptions);
             }
             // Toggle the airport/waypoint search bar visibility
@@ -209,7 +187,6 @@ export class App {
             }
         });
 
-        // Subscribe to selected aircraft changes
         this.stateManager.subscribe('selectedAircraft', (newSelected) => {
             if (this.mapOverlay) {
                 this.mapOverlay.setSelectedAircraft(newSelected);
@@ -246,22 +223,10 @@ export class App {
      * Sets up UI modules and their event handlers
      */
     private initializeUI(): void {
-        // Initialize header
         this.initializeHeader();
-
-        // Initialize console
         this.initializeConsole();
-
-        // Initialize control panels
         this.initializeControlPanels();
-
-        // Initialize panel resizing
-        this.initializePanelResizing();
-
-        // Initialize map display
         this.initializeMapDisplay();
-
-        // Initialize modal dialogs
         this.initializeModals();
 
         // Update UI based on initial state
@@ -387,13 +352,6 @@ export class App {
             logger.warn('App', `✗ ${label} not found`);
         }
         return el;
-    }
-
-    /**
-     * Initialize panel resizing
-     */
-    private initializePanelResizing(): void {
-        logger.debug('App', 'Panel resizing initialized');
     }
 
     /**
@@ -632,44 +590,16 @@ export class App {
     }
 
     /**
-     * Update UI based on current state
+     * Update UI based on current state (initial call after init).
      */
     private updateUI(): void {
         const state = this.stateManager.getState();
 
-        // Update connection status display (initial call)
-        // Uses ConnectionStatusService as single source of truth
         this.updateConnectionStatusDisplay();
 
-        // Update simulation display
         if (state.simInfo) {
-            this.updateSimulationDisplay(state.simInfo);
+            this.header.updateSimInfo(state.simInfo);
         }
-
-        // Update aircraft display
-        if (state.aircraftData) {
-            this.updateAircraftDisplay(state.aircraftData);
-        }
-    }
-
-
-    /**
-     * Update simulation display
-     */
-    private updateSimulationDisplay(simInfo: SimInfo): void {
-        // Update header with simulation info
-        this.header.updateSimInfo(simInfo);
-
-        // Update simulation time, speed, aircraft count, etc.
-        logger.verbose('App', 'Updating simulation display:', simInfo);
-    }
-
-    /**
-     * Update aircraft display
-     */
-    private updateAircraftDisplay(aircraftData: AircraftData): void {
-        // Update aircraft positions, trails, etc.
-        logger.verbose('App', 'Updating aircraft display:', aircraftData.id.length, 'aircraft');
     }
 
     /**
@@ -699,29 +629,11 @@ export class App {
     }
 
     /**
-     * Add command to history
-     */
-    public addToHistory(command: string): void {
-        // This method is called by Console to keep history in sync
-        // For now, we just log it - could implement centralized command history
-        logger.verbose('App', 'Command added to history:', command);
-    }
-
-    /**
      * Set active simulation node
      */
     public setActiveNode(nodeId: string): void {
         this.socketManager.setActiveNode(nodeId);
         this.stateManager.setActiveNode(nodeId);
-    }
-
-    /**
-     * Select aircraft
-     */
-    public selectAircraft(aircraftId: string | null): void {
-        this.stateManager.setSelectedAircraft(aircraftId);
-        // Update map display to highlight selected aircraft
-        logger.debug('App', 'Selected aircraft:', aircraftId);
     }
 
     /**
@@ -750,34 +662,6 @@ export class App {
      */
     public getConsole(): Console {
         return this.console;
-    }
-
-    /**
-     * Get header instance
-     */
-    public getHeader(): Header {
-        return this.header;
-    }
-
-    /**
-     * Get traffic list panel instance
-     */
-    public getTrafficListPanel(): TrafficListPanel {
-        return this.trafficListPanel;
-    }
-
-    /**
-     * Get aircraft info panel instance
-     */
-    public getAircraftInfoPanel(): AircraftInfoPanel {
-        return this.aircraftInfoPanel;
-    }
-
-    /**
-     * Get conflicts panel instance
-     */
-    public getConflictsPanel(): ConflictsPanel {
-        return this.conflictsPanel;
     }
 
     /**
@@ -847,110 +731,35 @@ export class App {
     private cleanup(): void {
         logger.info('App', 'Cleaning up application resources');
 
-        if (this.socketManager) {
-            this.socketManager.disconnect();
-        }
+        this.socketManager.disconnect();
+        this.header.destroy();
+        this.controls.destroy();
 
-        if (this.header) {
-            this.header.destroy();
-        }
-
-        if (this.controls) {
-            this.controls.destroy();
-        }
-
-        // Clean up panels
-        if (this.simulationNodesPanel) {
-            this.simulationNodesPanel.destroy();
-        }
-
-        if (this.mapControlsPanel) {
-            this.mapControlsPanel.destroy();
-        }
-
-        if (this.displayOptionsPanel) {
-            this.displayOptionsPanel.destroy();
-        }
-
-        if (this.trafficListPanel) {
-            this.trafficListPanel.destroy();
-        }
-
-        if (this.aircraftInfoPanel) {
-            this.aircraftInfoPanel.destroy();
-        }
-
-        if (this.conflictsPanel) {
-            this.conflictsPanel.destroy();
-        }
-
-        // Clean up panel resizer
+        // Panels
+        this.simulationNodesPanel.destroy();
+        this.mapControlsPanel.destroy();
+        this.displayOptionsPanel.destroy();
+        this.trafficListPanel.destroy();
+        this.aircraftInfoPanel.destroy();
+        this.conflictsPanel.destroy();
         panelResizer.destroy();
 
-        // Clean up modals and their document-level listeners
+        // Modals and their document-level listeners
         this.commandPaletteModal.destroy();
         modalManager.destroy();
 
-        // Clean up map overlay
-        if (this.mapOverlay) {
-            this.mapOverlay.destroy();
-        }
-
-        // Clean up shape renderer
-        if (this.shapeRenderer) {
-            this.shapeRenderer.destroy();
-        }
-
-        // Clean up navdata renderer
-        if (this.navdataRenderer) {
-            this.navdataRenderer.destroy();
-        }
-
-        // Clean up interaction and drawing managers
-        if (this.aircraftInteractionManager) {
-            this.aircraftInteractionManager.destroy();
-        }
-
-        if (this.aircraftCreationManager) {
-            this.aircraftCreationManager.destroy();
-        }
-
-        if (this.shapeDrawingManager) {
-            this.shapeDrawingManager.destroy();
-        }
-
-        if (this.routeDrawingManager) {
-            this.routeDrawingManager.destroy();
-        }
-
-        // Clean up map display
-        if (this.mapDisplay) {
-            this.mapDisplay.destroy();
-        }
+        // Map renderers and interaction/drawing managers (created lazily,
+        // so they may still be null here)
+        this.mapOverlay?.destroy();
+        this.shapeRenderer?.destroy();
+        this.navdataRenderer?.destroy();
+        this.aircraftInteractionManager?.destroy();
+        this.aircraftCreationManager?.destroy();
+        this.shapeDrawingManager?.destroy();
+        this.routeDrawingManager?.destroy();
+        this.mapDisplay.destroy();
 
         // Remove the global listeners registered in setupGlobalEventListeners
         this.globalListenerAbort.abort();
-    }
-
-    /**
-     * Handle errors in the application
-     */
-    public handleError(error: Error, context?: string): void {
-        logger.error('App', `Application error${context ? ` in ${context}` : ''}:`, error);
-        
-        // Log error to state for UI display
-        // Could implement error toast notifications here
-        
-        // Optionally report critical errors to monitoring service
-        if (error.message.includes('critical') || error.message.includes('fatal')) {
-            logger.error('App', 'Critical error detected:', error);
-        }
-    }
-
-    /**
-     * Check if application is initialized
-     */
-    public isInitialized(): boolean {
-        return this.initialized;
     }
 }

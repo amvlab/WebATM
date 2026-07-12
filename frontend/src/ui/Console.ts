@@ -183,7 +183,7 @@ export class Console {
                     break;
                 case 'Enter':
                     this.handleCommand(input.value);
-                    this.addToHistory(input.value);
+                    this.history.add(input.value);
                     this.resetInput();
                     break;
                 case 'Escape':
@@ -381,15 +381,6 @@ export class Console {
         }
     }
 
-    private addToHistory(command: string): void {
-        this.history.add(command);
-
-        // Also add to app.js history to keep them in sync
-        if (window.app && window.app.addToHistory) {
-            window.app.addToHistory(command);
-        }
-    }
-
     private showPreviousCommand(): void {
         const input = document.getElementById('console-input') as HTMLInputElement;
         if (!input) return;
@@ -429,33 +420,14 @@ export class Console {
     }
 
     /**
-     * Get console instance for global access
-     */
-    public getConsole(): Console {
-        return this;
-    }
-
-    /**
      * Display a command that was sent (e.g., from modals or UI interactions)
-     * This adds the command to the console output and history
+     * in the console output and add it to the arrow-key history.
      */
     public displaySentCommand(command: string): void {
-        logger.debug('Console', 'displaySentCommand called with:', command);
+        if (!command.trim()) return;
 
-        if (!command.trim()) {
-            logger.debug('Console', 'Command is empty, returning');
-            return;
-        }
-
-        // Display the command in the console with command styling
-        logger.debug('Console', 'Adding message to console output');
         this.addMessage('> ' + command, 'command');
-
-        // Add to history so it can be recalled with arrow keys
-        logger.debug('Console', 'Adding command to history');
-        this.addToHistory(command);
-
-        logger.debug('Console', 'displaySentCommand completed');
+        this.history.add(command);
     }
 
     /**
@@ -733,7 +705,7 @@ export class Console {
             return;
         }
         this.handleCommand(value);
-        this.addToHistory(value);
+        this.history.add(value);
         this.resetInput();
     }
 

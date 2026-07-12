@@ -26,7 +26,6 @@ declare global {
     interface Window {
         // Application singletons (set in main.ts once the app boots)
         app?: App;
-        blueSkyApp?: App;
         echoManager?: EchoManager;
         connectionStatus?: ConnectionStatusService;
         console_ui?: Console;
