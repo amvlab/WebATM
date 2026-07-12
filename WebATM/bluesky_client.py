@@ -779,6 +779,14 @@ class BlueSkyClient:
                         )  # Pass the actual data dict
                     else:
                         self.subscriber.emit(topic, data)
+                elif topic == "RESET":
+                    # What matters for RESET is WHICH node reset, so thread the
+                    # sender from the message header. The generic path below
+                    # would leave handlers with a stale context.sender_id (the
+                    # sender of the last shared-state message).
+                    self.context.action = self.context.Reset
+                    self.context.sender_id = sender_id
+                    self.subscriber.emit(topic, data, sender_id=sender_id)
                 else:
                     # Generic handling for other topics
                     if isinstance(data, dict):

@@ -10,11 +10,24 @@ on the proxy and forward it to connected browsers over Socket.IO as the
 import time
 
 from ...logger import get_logger
-from ...utils import make_json_serializable, tim2txt
+from ...utils import empty_traffic_data, id2str, make_json_serializable, tim2txt
 from ..perf import data_path_perf
 from ._base import get_bluesky_proxy
 
 logger = get_logger()
+
+
+def _is_active_node(proxy, sender_id_str):
+    """Check whether a frame belongs to the currently active node.
+
+    The header clock/rate/state must follow the ACTIVE node only, not
+    whichever node sent the latest update; otherwise, with two or more nodes
+    running, the displayed values jump between them. When the active node
+    can't be resolved yet (e.g. early in connection setup) or the sender is
+    unknown, accept the frame so a single-node display still works.
+    """
+    active_node = proxy._get_safe_active_node()
+    return active_node is None or sender_id_str is None or sender_id_str == active_node
 
 
 def on_siminfo_received(
@@ -37,8 +50,7 @@ def on_siminfo_received(
         state (int): Simulation run-state code.
         scenname (str): Name of the currently loaded scenario.
         sender_id (bytes | str | None): Identifier of the sending node; bytes
-            are converted to a hex string. Falls back to the BlueSky network
-            context when not provided.
+            are converted to a hex string.
     """
     proxy = get_bluesky_proxy()
     if not proxy:
@@ -50,23 +62,7 @@ def on_siminfo_received(
         logger.debug("on_siminfo_received ignored - reconnection not allowed")
         return
 
-    # Convert binary sender_id to string for web client compatibility
-    if isinstance(sender_id, bytes):
-        # Convert bytes to hex string for consistent identification
-        sender_id_str = sender_id.hex()
-    else:
-        sender_id_str = str(sender_id) if sender_id else None
-
-    # Fallback to BlueSky context if no sender_id parameter provided (for compatibility)
-    if sender_id_str is None:
-        from bluesky.network import context as ctx
-
-        if ctx.sender_id:
-            sender_id_str = (
-                ctx.sender_id.hex()
-                if isinstance(ctx.sender_id, bytes)
-                else str(ctx.sender_id)
-            )
+    sender_id_str = id2str(sender_id)
 
     # Mark successful data reception
     current_time = time.time()
@@ -98,17 +94,8 @@ def on_siminfo_received(
             proxy.last_node_info_emit = current_time
             proxy._emit_node_info()
 
-    # The header clock/rate/state must follow the ACTIVE node only, not
-    # whichever node sent the latest update. Otherwise, with two or more nodes
-    # running, the displayed time jumps between them. Cache and emit the sim
-    # info solely for the active node. When the active node can't be resolved
-    # yet (e.g. early in connection setup, before act_id is known), fall back to
-    # accepting any sender so a single-node display still works.
-    active_node = proxy._get_safe_active_node()
-    is_active_node = (
-        active_node is None or sender_id_str is None or sender_id_str == active_node
-    )
-    if not is_active_node:
+    # Cache and emit the header sim info solely for the active node.
+    if not _is_active_node(proxy, sender_id_str):
         return
 
     proxy.sim_data = sim_data
@@ -124,7 +111,6 @@ def on_siminfo_received(
             proxy.last_siminfo_emit = current_time
         except Exception as e:
             logger.error(f"Proxy→Web: Error sending SIMINFO: {e}")
-            pass
 
 
 def on_acdata_received(data):
@@ -163,30 +149,15 @@ def on_acdata_received(data):
         if proxy.bluesky_client and hasattr(proxy.bluesky_client, "context"):
             ctx = proxy.bluesky_client.context
             if ctx.action == ctx.Reset or ctx.action == ctx.ActChange:
-                # Simulation reset: Clear all entries like web client does
+                # Simulation reset or active-node change: clear all aircraft.
                 logger.info("ACDATA reset/actchange detected - clearing aircraft data")
-                empty_traffic_data = {
-                    "id": [],
-                    "lat": [],
-                    "actype": [],  # this is only sent by bluesky/amvlab
-                    "lon": [],
-                    "alt": [],
-                    "tas": [],
-                    "trk": [],
-                    "vs": [],
-                    "inconf": [],
-                    "tcpamax": [],
-                    "nconf_cur": 0,
-                    "nconf_tot": 0,
-                    "nlos_cur": 0,
-                    "nlos_tot": 0,
-                }
-                proxy.traffic_data = empty_traffic_data
+                cleared = empty_traffic_data()
+                proxy.traffic_data = cleared
 
                 # Emit cleared data immediately
                 if proxy.socketio and proxy.connected_clients > 0:
                     try:
-                        proxy.socketio.emit("acdata", empty_traffic_data)
+                        proxy.socketio.emit("acdata", cleared)
                         logger.debug(
                             f"Emitted cleared ACDATA to {proxy.connected_clients} web clients"
                         )
@@ -194,11 +165,7 @@ def on_acdata_received(data):
                         logger.error(f"Error emitting cleared ACDATA: {e}")
                 return
 
-            sender_id = getattr(ctx, "sender_id", None)
-            if isinstance(sender_id, bytes):
-                sender_id_str = sender_id.hex()
-            elif sender_id is not None:
-                sender_id_str = str(sender_id)
+            sender_id_str = id2str(getattr(ctx, "sender_id", None))
 
         # Any ACDATA from any node proves the link to BlueSky is alive: update
         # liveness before filtering so a background node's traffic still counts.
@@ -207,14 +174,7 @@ def on_acdata_received(data):
 
         # Only the active node's traffic is displayed. Skip serializing frames
         # from background nodes nobody is viewing (mirrors the SIMINFO filter).
-        # When the active node can't be resolved yet (early connection or a
-        # single-node sim), accept any sender so the map still populates.
-        active_node = proxy._get_safe_active_node()
-        if (
-            active_node is not None
-            and sender_id_str is not None
-            and sender_id_str != active_node
-        ):
+        if not _is_active_node(proxy, sender_id_str):
             data_path_perf.record_filtered()
             return
 
@@ -263,7 +223,9 @@ def on_statechange_received(data, sender_id=None):
 
     Updates the cached simulation state (``proxy.sim_data['state']``) and
     immediately forwards the new run-state and sending node to connected
-    browsers, without throttling.
+    browsers, without throttling. Like SIMINFO, only the active node's state
+    changes touch the cached header state — a paused background node must not
+    flip the displayed run-state.
 
     Args:
         data (dict): Event payload; the ``simstate`` key holds the new
@@ -279,16 +241,22 @@ def on_statechange_received(data, sender_id=None):
     if simstate is None:
         return
 
-    if isinstance(sender_id, bytes):
-        sender_id_str = sender_id.hex()
-    elif sender_id is not None:
-        sender_id_str = str(sender_id)
-    else:
-        sender_id_str = None
+    sender_id_str = id2str(sender_id)
 
+    # Any node's state change proves the link is alive; update liveness
+    # before the active-node filter (mirrors ACDATA).
     proxy.last_successful_update = time.time()
 
-    if isinstance(proxy.sim_data, dict):
+    if not _is_active_node(proxy, sender_id_str):
+        logger.debug(
+            f"STATECHANGE from background node {sender_id_str} ignored "
+            f"(simstate={simstate})"
+        )
+        return
+
+    # Only patch an existing SIMINFO cache; seeding a bare {'state': ...} would
+    # let the backup timer re-emit a partial siminfo payload.
+    if proxy.sim_data:
         proxy.sim_data["state"] = int(simstate)
 
     payload = {

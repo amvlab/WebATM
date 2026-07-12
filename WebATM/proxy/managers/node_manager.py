@@ -5,6 +5,7 @@ import time
 
 from ...bluesky_client import safe_decode, seqid2idx, seqidx2id
 from ...logger import get_logger
+from ...utils import id2str
 
 logger = get_logger()
 
@@ -36,17 +37,9 @@ class NodeManager:
             return None
 
         try:
-            # The act_id is stored as raw bytes in the network client
-            raw_active_id = self.proxy.bluesky_client.act_id
-
-            # Convert to hex string to match our tracked_nodes keys
-            active_id_str = (
-                raw_active_id.hex()
-                if isinstance(raw_active_id, bytes)
-                else str(raw_active_id)
-            )
-
-            # Check if this hex string exists in our tracked nodes
+            # act_id is raw bytes in the network client; tracked_nodes is
+            # keyed by the hex-string form.
+            active_id_str = id2str(self.proxy.bluesky_client.act_id)
             if active_id_str in self.proxy.tracked_nodes:
                 return active_id_str
         except Exception:
@@ -96,8 +89,8 @@ class NodeManager:
     def _on_node_added(self, node_id):
         """Callback when a new node is discovered."""
         try:
-            # Convert binary node_id to hex string for consistency with SIMINFO
-            node_id_str = node_id.hex() if isinstance(node_id, bytes) else str(node_id)
+            # Hex string keys for consistency with SIMINFO
+            node_id_str = id2str(node_id)
 
             if node_id_str not in self.proxy.tracked_nodes:
                 server_id = node_id[:-1] + seqidx2id(0)
@@ -159,8 +152,7 @@ class NodeManager:
 
     def _on_node_removed(self, node_id):
         """Callback when a node is removed."""
-        # Convert binary node_id to hex string for consistency
-        node_id_str = node_id.hex() if isinstance(node_id, bytes) else str(node_id)
+        node_id_str = id2str(node_id)
         if node_id_str in self.proxy.tracked_nodes:
             del self.proxy.tracked_nodes[node_id_str]
             self._emit_node_info()
@@ -210,11 +202,7 @@ class NodeManager:
                         # Include decoded, hex, and raw server ID
                         raw_server_id = node_data["server_id"]
                         node_data["server_id"] = safe_decode(raw_server_id)
-                        node_data["server_id_hex"] = (
-                            raw_server_id.hex()
-                            if isinstance(raw_server_id, bytes)
-                            else str(raw_server_id)
-                        )
+                        node_data["server_id_hex"] = id2str(raw_server_id)
                         node_data["server_id_raw"] = str(
                             raw_server_id
                         )  # Raw byte string representation

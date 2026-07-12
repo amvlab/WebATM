@@ -26,9 +26,13 @@ class TestEmitClearedData:
         proxy.data_mgr._emit_cleared_data()
         ac = fake_socketio.last("acdata")
         assert ac["id"] == [] and ac["nconf_cur"] == 0
+        # Same canonical shape as the reset clear path, including actype.
+        assert ac["actype"] == []
         sim = fake_socketio.last("siminfo")
         assert sim["scenname"] == "disconnected"
         assert sim["ntraf"] == 0
+        # Same shape as SIMINFO-handler emissions (sender_id always present).
+        assert sim["sender_id"] is None
         assert fake_socketio.last("poly") == {"polys": {}}
         assert fake_socketio.last("polyline") == {"polys": {}}
         assert fake_socketio.count("server_disconnected") == 1
