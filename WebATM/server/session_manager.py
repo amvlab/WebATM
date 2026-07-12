@@ -26,11 +26,7 @@ class SessionManager:
 
     def __init__(self):
         """Initialize the session manager with configuration from the environment."""
-        self.heartbeat_interval = int(
-            os.getenv("HEARTBEAT_INTERVAL", 30)
-        )  # 30 seconds default
-
-        # Active sessions tracking: session_id -> {'start_time': time, 'last_heartbeat': time}
+        self.heartbeat_interval = int(os.getenv("HEARTBEAT_INTERVAL", 30))
         self.active_sessions: dict[str, dict[str, float]] = {}
 
     def add_session(self, session_id: str) -> bool:
@@ -61,10 +57,7 @@ class SessionManager:
         Returns:
             bool: True if the session was removed, False if it was not found.
         """
-        if session_id in self.active_sessions:
-            self.active_sessions.pop(session_id, None)
-            return True
-        return False
+        return self.active_sessions.pop(session_id, None) is not None
 
     def update_heartbeat(self, session_id: str) -> bool:
         """Update the last heartbeat time for a session.

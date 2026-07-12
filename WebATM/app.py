@@ -5,7 +5,7 @@ Air Traffic Simulator developed by TU Delft (Delft University of Technology).
 
 This module is separated into different focused modules in the server/ package:
 
-- server/session_manager.py: Session tracking and capacity management
+- server/session_manager.py: Session tracking and heartbeat bookkeeping
 - server/routes.py: Basic Flask routes (index, commands, config, health)
 - server/server_status.py: BlueSky server status
 - server/socket_handlers.py: Socket.IO event handlers
