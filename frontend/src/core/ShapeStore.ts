@@ -1,4 +1,5 @@
 import { Shape, PolygonShape, PolylineShape, PolyData, PolylineData } from '../data/types';
+import { hasValidLatLon } from './shapePayload';
 import { logger } from '../utils/Logger';
 
 export type ShapeChangeListener = (shapes: Map<string, Shape>) => void;
@@ -8,8 +9,10 @@ export type ShapeChangeListener = (shapes: Map<string, Shape>) => void;
  * PolygonShape ({type, name, coordinates: {lat, lng}[], ...styling}).
  */
 export function polyDataToShape(data: PolyData, nodeId?: string): PolygonShape {
-    if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
-        logger.warn('ShapeStore', 'Invalid PolyData received - missing or invalid lat/lon arrays:', data);
+    // Boolean form: the type-guard would narrow `data` to never in this branch.
+    const valid: boolean = hasValidLatLon(data);
+    if (!valid) {
+        logger.warn('ShapeStore', 'Invalid PolyData received - missing or empty lat/lon arrays:', data);
         // Minimal valid shape with empty coordinates so callers never crash.
         return {
             type: 'polygon',
@@ -49,8 +52,10 @@ export function polyDataToShape(data: PolyData, nodeId?: string): PolygonShape {
  * client PolylineShape ({type, name, coordinates: {lat, lng}[], ...styling}).
  */
 export function polylineDataToShape(data: PolylineData, nodeId?: string): PolylineShape {
-    if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
-        logger.warn('ShapeStore', 'Invalid PolylineData received - missing or invalid lat/lon arrays:', data);
+    // Boolean form: the type-guard would narrow `data` to never in this branch.
+    const valid: boolean = hasValidLatLon(data);
+    if (!valid) {
+        logger.warn('ShapeStore', 'Invalid PolylineData received - missing or empty lat/lon arrays:', data);
         // Minimal valid shape with empty coordinates so callers never crash.
         return {
             type: 'polyline',
@@ -140,15 +145,10 @@ export class ShapeStore {
      * Add or update shape from server PolyData format
      */
     addPolyData(data: PolyData, nodeId?: string): void {
-        if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
-            logger.warn('ShapeStore', 'Skipping PolyData - missing or invalid lat/lon arrays');
+        if (!hasValidLatLon(data)) {
+            logger.warn('ShapeStore', 'Skipping PolyData - missing or empty lat/lon arrays');
             return;
         }
-        if (data.lat.length === 0 || data.lon.length === 0) {
-            logger.warn('ShapeStore', 'Skipping PolyData - empty lat/lon arrays');
-            return;
-        }
-
         this.add(polyDataToShape(data, nodeId));
     }
 
@@ -156,15 +156,10 @@ export class ShapeStore {
      * Add or update shape from server PolylineData format
      */
     addPolylineData(data: PolylineData, nodeId?: string): void {
-        if (!data.lat || !data.lon || !Array.isArray(data.lat) || !Array.isArray(data.lon)) {
-            logger.warn('ShapeStore', 'Skipping PolylineData - missing or invalid lat/lon arrays');
+        if (!hasValidLatLon(data)) {
+            logger.warn('ShapeStore', 'Skipping PolylineData - missing or empty lat/lon arrays');
             return;
         }
-        if (data.lat.length === 0 || data.lon.length === 0) {
-            logger.warn('ShapeStore', 'Skipping PolylineData - empty lat/lon arrays');
-            return;
-        }
-
         this.add(polylineDataToShape(data, nodeId));
     }
 

@@ -15,6 +15,7 @@ export abstract class BasePanel {
     protected panelContent: HTMLElement | null = null;
     protected collapseButton: HTMLElement | null = null;
     protected listeners = new ListenerRegistry();
+    private subscriptions: Array<() => void> = [];
 
     /**
      * @param panelSelector - CSS selector for the panel container
@@ -185,6 +186,15 @@ export abstract class BasePanel {
     }
 
     /**
+     * Track an unsubscribe function (e.g. from StateManager.subscribe) so
+     * the subscription is released in destroy(). Without this, destroyed
+     * panels keep reacting to state changes on detached DOM.
+     */
+    protected trackSubscription(unsubscribe: () => void): void {
+        this.subscriptions.push(unsubscribe);
+    }
+
+    /**
      * Update panel content (override in subclasses)
      */
     public abstract update(data?: unknown): void;
@@ -194,7 +204,8 @@ export abstract class BasePanel {
      */
     public destroy(): void {
         this.listeners.removeAll();
-        // Call subclass cleanup
+        this.subscriptions.forEach(unsubscribe => unsubscribe());
+        this.subscriptions = [];
         this.onDestroy();
     }
 

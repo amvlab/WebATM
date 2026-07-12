@@ -169,21 +169,20 @@ export class DataProcessor {
     }
 
     /**
-     * Get speed value for aircraft based on speed type (CAS/TAS/GS)
-     * Handles missing data gracefully with fallback to TAS
+     * Get speed value for aircraft based on speed type (CAS/TAS/GS).
+     * Falls back to other speeds only when a field is absent — a genuine
+     * 0 kt (stationary/held aircraft) is a valid value, not missing data.
      */
     static getSpeedValue(data: AircraftData, index: number, type: SpeedType): number {
         switch (type) {
             case 'cas':
-                // If CAS not available, fall back to TAS
-                return (data.cas && data.cas[index]) || data.tas[index] || 0;
-            case 'tas':
-                return data.tas[index] || 0;
+                return data.cas?.[index] ?? data.tas[index] ?? 0;
             case 'gs':
                 // Fallback chain: gs -> tas -> cas
-                return (data.gs && data.gs[index]) || data.tas[index] || (data.cas && data.cas[index]) || 0;
+                return data.gs?.[index] ?? data.tas[index] ?? data.cas?.[index] ?? 0;
+            case 'tas':
             default:
-                return data.tas[index] || 0;
+                return data.tas[index] ?? 0;
         }
     }
 

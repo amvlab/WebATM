@@ -86,6 +86,17 @@ describe('TrafficListPanel', () => {
         expect(list.querySelector('.traffic-item.selected')?.textContent).toBe('KL123');
     });
 
+    it('stops reacting to state changes after destroy', () => {
+        stateManager.updateAircraftData(aircraft(['KL123']));
+        panel.destroy();
+
+        stateManager.updateAircraftData(aircraft(['KL123', 'AF265']));
+        expect(itemTexts()).toEqual(['KL123']);
+
+        stateManager.setSelectedAircraft('KL123');
+        expect(list.querySelector('.traffic-item.selected')).toBeNull();
+    });
+
     it('clicking an item selects the aircraft through the state manager', async () => {
         stateManager.updateAircraftData(aircraft(['KL123']));
         (list.querySelector('.traffic-item') as HTMLElement).click();

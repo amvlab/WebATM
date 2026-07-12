@@ -14,6 +14,9 @@ class TestPanel extends BasePanel {
     public update(): void {}
 
     // Expose protected helpers for testing
+    public testTrackSubscription(unsubscribe: () => void) {
+        this.trackSubscription(unsubscribe);
+    }
     public testBindClick(id: string, handler: () => void) {
         return this.bindClick(id, handler);
     }
@@ -99,6 +102,15 @@ describe('BasePanel DOM helpers', () => {
         panel.destroy();
         (document.getElementById('btn') as HTMLElement).click();
         expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('tracked subscriptions are released once on destroy', () => {
+        const unsubscribe = vi.fn();
+        panel.testTrackSubscription(unsubscribe);
+        panel.destroy();
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
+        panel.destroy();
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
     });
 
     it('setInputValue, setChecked and setText update elements and ignore missing IDs', () => {

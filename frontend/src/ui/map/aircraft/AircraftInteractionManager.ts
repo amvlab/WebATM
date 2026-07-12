@@ -1,26 +1,12 @@
 /**
  * AircraftInteractionManager - Handles aircraft selection and camera control
  *
- * This manager provides UNIFIED interaction behavior across all sources:
- *
- * SINGLE CLICK (Map or Panel):
- * - Click on new aircraft: Select + Simple zoom with adaptive zoom level
- * - Click on selected aircraft: Unselect + Stop following
- *
- * DOUBLE CLICK (Map or Panel):
- * - Click on any aircraft: Select + Fancy zoom effect + Activate follow mode
- * - Zoom effect: zoom-out → pan → zoom-in (smooth visual transition)
- *
- * OTHER INTERACTIONS:
- * - Click on empty map: Unselect + Stop following
- * - User pan/drag: Stop following (allow manual control)
- * - Aircraft disappears: Auto-stop following
- *
- * Architecture:
- * - Panels (TrafficListPanel, ConflictsPanel) handle UI clicks and emit events
- * - This manager handles ALL camera movements and map interactions
- * - StateManager coordinates selection state across all components
- * - Consistent behavior regardless of interaction source (map/panel)
+ * Provides unified interaction behavior whether a click comes from the map
+ * or from a panel (TrafficListPanel/ConflictsPanel emit document events):
+ * single click toggles selection with a simple adaptive zoom, double click
+ * selects with a zoom-out → pan → zoom-in effect and activates follow mode.
+ * Clicking empty map, user drag, or the aircraft disappearing stops
+ * following. Selection state itself is coordinated through StateManager.
  */
 
 import { Map as MapLibreMap, MapMouseEvent } from 'maplibre-gl';
@@ -29,6 +15,7 @@ import { StateManager } from '../../../core/StateManager';
 import { SocketManager } from '../../../core/SocketManager';
 import { AircraftData } from '../../../data/types';
 import { logger } from '../../../utils/Logger';
+import { ListenerRegistry } from '../../../utils/events';
 
 export interface AircraftClickEvent {
     aircraftId: string;
@@ -55,6 +42,11 @@ export class AircraftInteractionManager {
     // Optional reference to the route drawing manager - when route drawing is
     // active, empty-map clicks are waypoint placements, not aircraft deselects.
     private isRouteDrawingActive: (() => boolean) | null = null;
+
+    // Document-level listeners and state subscriptions, released in destroy()
+    // (map listeners die with the map, but these would outlive it).
+    private documentListeners = new ListenerRegistry();
+    private unsubscribeAircraftData: (() => void) | null = null;
 
     constructor(
         mapDisplay: MapDisplay,
@@ -197,25 +189,23 @@ export class AircraftInteractionManager {
      * Set up listeners for panel events
      */
     private setupPanelEventListeners(): void {
-        // Listen for single-click events from panels (TrafficListPanel, ConflictsPanel)
-        document.addEventListener('aircraft-single-click', (e) => {
+        // Panel clicks (TrafficListPanel, ConflictsPanel) get the same
+        // behavior as map clicks: route data + zoom, follow on double click.
+        this.documentListeners.add(document, 'aircraft-single-click', ((e: DocumentEventMap['aircraft-single-click']) => {
             const { aircraftId } = e.detail;
             logger.debug('AircraftInteractionManager', '📋 Panel single-click event received:', aircraftId);
 
-            // UNIFIED BEHAVIOR: Request route data + Simple zoom (same as map clicks)
             this.requestRouteData(aircraftId);
             this.zoomToAircraft(aircraftId, { follow: false, adaptive: true });
-        });
+        }) as EventListener);
 
-        // Listen for double-click events from panels
-        document.addEventListener('aircraft-double-click', (e) => {
+        this.documentListeners.add(document, 'aircraft-double-click', ((e: DocumentEventMap['aircraft-double-click']) => {
             const { aircraftId } = e.detail;
             logger.debug('AircraftInteractionManager', '📋 Panel double-click event received:', aircraftId);
 
-            // UNIFIED BEHAVIOR: Request route data + Fancy zoom effect + follow (same as map)
             this.requestRouteData(aircraftId);
             this.zoomToAircraftWithEffect(aircraftId, true);
-        });
+        }) as EventListener);
 
         logger.debug('AircraftInteractionManager', 'Panel event listeners set up');
     }
@@ -224,8 +214,8 @@ export class AircraftInteractionManager {
      * Set up subscriptions to state changes
      */
     private setupStateSubscriptions(): void {
-        // Subscribe to aircraft data updates for follow mode
-        this.stateManager.subscribe('aircraftData', (newData) => {
+        // Follow mode tracks each aircraft data update
+        this.unsubscribeAircraftData = this.stateManager.subscribe('aircraftData', (newData) => {
             if (newData) {
                 this.updateFollowing(newData);
             }
@@ -256,28 +246,26 @@ export class AircraftInteractionManager {
         const isCurrentlySelected = currentSelection === aircraftId;
 
         if (isDoubleClick) {
-            // UNIFIED BEHAVIOR: Double click = fancy zoom effect + follow + send POS
+            // Double click: select + fancy zoom effect + follow
             logger.debug('AircraftInteractionManager', '🚀 Map double-click: selecting and following', aircraftId);
 
             this.stateManager.setSelectedAircraft(aircraftId);
-            this.requestRouteData(aircraftId);  // Sends POS command
+            this.requestRouteData(aircraftId);
             this.zoomToAircraftWithEffect(aircraftId, true);
 
+        } else if (isCurrentlySelected) {
+            // Single click on selected aircraft: POS toggles the route
+            // visibility off, then clear selection and stop following.
+            logger.debug('AircraftInteractionManager', '🔄 Map single-click: unselecting', aircraftId);
+            this.requestRouteData(aircraftId);
+            this.stateManager.setSelectedAircraft(null);
+            this.stopFollowing();
         } else {
-            // UNIFIED BEHAVIOR: Single click = toggle selection with simple zoom
-            if (isCurrentlySelected) {
-                // DESELECT: Send POS command to toggle visibility OFF, then clear selection
-                logger.debug('AircraftInteractionManager', '🔄 Map single-click: unselecting', aircraftId);
-                this.requestRouteData(aircraftId);  // Sends POS command to toggle off
-                this.stateManager.setSelectedAircraft(null);
-                this.stopFollowing();
-            } else {
-                // SELECT new aircraft: Just send POS for new aircraft (don't send for old)
-                logger.debug('AircraftInteractionManager', 'Map single-click: selecting', aircraftId);
-                this.stateManager.setSelectedAircraft(aircraftId);
-                this.requestRouteData(aircraftId);  // Sends POS command for new selection
-                this.zoomToAircraft(aircraftId, { follow: false, adaptive: true });
-            }
+            // Single click on a new aircraft: select with simple zoom
+            logger.debug('AircraftInteractionManager', 'Map single-click: selecting', aircraftId);
+            this.stateManager.setSelectedAircraft(aircraftId);
+            this.requestRouteData(aircraftId);
+            this.zoomToAircraft(aircraftId, { follow: false, adaptive: true });
         }
     }
 
@@ -503,28 +491,14 @@ export class AircraftInteractionManager {
     }
 
     /**
-     * Re-setup handlers when display mode changes
-     * This should be called when the 2D aircraft layer is added or removed
-     */
-    public refreshHandlers(): void {
-        if (!this.map) return;
-
-        logger.debug('AircraftInteractionManager', 'Refreshing aircraft interaction handlers');
-
-        // Note: We don't remove existing handlers here because MapLibre doesn't 
-        // provide a clean way to remove specific handlers without affecting others.
-        // Instead, we rely on layer existence checks in the handlers themselves.
-        
-        // Re-setup handlers based on current layer state
-        this.setupMapEventHandlers();
-    }
-
-    /**
-     * Cleanup resources
+     * Cleanup resources. Map listeners die with the map; the document
+     * listeners and state subscription must be released explicitly.
      */
     public destroy(): void {
         this.stopFollowing();
-        // Event listeners are automatically cleaned up when map is destroyed
+        this.documentListeners.removeAll();
+        this.unsubscribeAircraftData?.();
+        this.unsubscribeAircraftData = null;
         logger.debug('AircraftInteractionManager', 'AircraftInteractionManager destroyed');
     }
 }

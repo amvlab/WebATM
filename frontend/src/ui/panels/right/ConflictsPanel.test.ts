@@ -98,6 +98,17 @@ describe('ConflictsPanel', () => {
         expect(info.querySelector('.no-conflicts')).not.toBeNull();
     });
 
+    it('stops reacting to state changes after destroy', () => {
+        stateManager.updateAircraftData(aircraft([{ id: 'KL123', inconf: true, tcpa: 30 }]));
+        panel.destroy();
+
+        stateManager.updateAircraftData(aircraft([
+            { id: 'KL123', inconf: true, tcpa: 28 },
+            { id: 'BA042', inconf: true, tcpa: 15 },
+        ]));
+        expect(items().map(el => el.dataset.aircraftId)).toEqual(['KL123']);
+    });
+
     it('highlights the selected aircraft', () => {
         stateManager.updateAircraftData(aircraft([
             { id: 'KL123', inconf: true, tcpa: 30 },

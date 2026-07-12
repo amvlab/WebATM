@@ -39,15 +39,15 @@ export class TrafficListPanel extends BasePanel {
     public setStateManager(stateManager: StateManager): void {
         this.stateManager = stateManager;
 
-        this.stateManager.subscribe('selectedAircraft', (newAircraft) => {
+        this.trackSubscription(this.stateManager.subscribe('selectedAircraft', (newAircraft) => {
             this.selectedAircraft = newAircraft;
             this.updateSelectionVisuals();
-        });
+        }));
 
-        this.stateManager.subscribe('aircraftData', (newData) => {
+        this.trackSubscription(this.stateManager.subscribe('aircraftData', (newData) => {
             this.currentAircraftData = newData;
             this.updateTrafficList();
-        });
+        }));
     }
 
     /**

@@ -142,10 +142,11 @@ describe('DataProcessor.getSpeedValue', () => {
         ).toBe(190);
     });
 
-    it('treats a zero value as missing (falls through the || chain)', () => {
-        // Documents current behavior: CAS of exactly 0 falls back to TAS.
-        const data = aircraft({ cas: [0], tas: [200] });
-        expect(DataProcessor.getSpeedValue(data, 0, 'cas')).toBe(200);
+    it('keeps a genuine 0 kt instead of falling back', () => {
+        // A stationary/held aircraft has speed 0 — valid data, not missing.
+        expect(DataProcessor.getSpeedValue(aircraft({ cas: [0], tas: [200] }), 0, 'cas')).toBe(0);
+        expect(DataProcessor.getSpeedValue(aircraft({ gs: [0], tas: [200] }), 0, 'gs')).toBe(0);
+        expect(DataProcessor.getSpeedValue(aircraft({ tas: [0] }), 0, 'tas')).toBe(0);
     });
 });
 
