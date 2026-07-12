@@ -43,13 +43,12 @@ function sendButton(): HTMLButtonElement {
 describe('Console "Send" button (#send-command)', () => {
     // With no CommandHandler registered, Console falls back to
     // window.app.sendCommand - the path these tests assert on.
-    const app = { sendCommand: vi.fn(), addToHistory: vi.fn() };
+    const app = { sendCommand: vi.fn() };
 
     beforeEach(() => {
         localStorage.clear();
         setupDom();
         app.sendCommand.mockReset();
-        app.addToHistory.mockReset();
         window.app = app as unknown as Window['app'];
         new Console();
     });
@@ -81,5 +80,15 @@ describe('Console "Send" button (#send-command)', () => {
         input().value = '   ';
         sendButton().click();
         expect(app.sendCommand).not.toHaveBeenCalled();
+    });
+
+    it('adds the sent command to the persisted arrow-key history', () => {
+        input().value = 'MCRE 5';
+        sendButton().click();
+        // CommandHistory persists via StorageManager under the webatm- namespace.
+        const saved = JSON.parse(
+            localStorage.getItem('webatm-console-command-history') ?? '[]'
+        );
+        expect(saved).toContain('MCRE 5');
     });
 });
