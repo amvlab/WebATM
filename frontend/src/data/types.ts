@@ -154,8 +154,8 @@ export interface PolyData {
   lon: number[];
   color?: string;
   fill?: boolean;
-  top?: number;      // Top altitude in meters (from POLYALT)
-  bottom?: number;   // Bottom altitude in meters (from POLYALT)
+  top?: number;      // Top altitude in metres (POLYALT/BOX/CIRCLE; amvlab BlueSky only)
+  bottom?: number;   // Bottom altitude in metres (POLYALT/BOX/CIRCLE; amvlab BlueSky only)
 }
 
 /**
@@ -195,9 +195,12 @@ export interface PolygonShape extends BaseShape {
   type: 'polygon';
   coordinates: Array<{lat: number, lng: number}>;
 
-  // Altitude constraints (for POLYALT)
-  topAltitude?: number;    // Top altitude in feet
-  bottomAltitude?: number; // Bottom altitude in feet
+  // Altitude constraints (for POLYALT/BOX/CIRCLE volumes) in metres, matching
+  // BlueSky's Shape.top/bottom and MapLibre's fill-extrusion units. Present
+  // only when the server (amvlab BlueSky) publishes a finite vertical extent;
+  // absent for vanilla BlueSky, which renders the shape flat.
+  topAltitude?: number;    // Top altitude in metres
+  bottomAltitude?: number; // Bottom altitude in metres
 
   // Styling
   fillColor?: string;
