@@ -92,3 +92,56 @@ describe('Console "Send" button (#send-command)', () => {
         expect(saved).toContain('MCRE 5');
     });
 });
+
+describe('Console routing through CommandHandler', () => {
+    const app = { sendCommand: vi.fn() };
+
+    beforeEach(() => {
+        localStorage.clear();
+        setupDom();
+        app.sendCommand.mockReset();
+        window.app = app as unknown as Window['app'];
+    });
+
+    afterEach(() => {
+        delete window.app;
+        document.body.innerHTML = '';
+    });
+
+    function consoleWithHandler(result: {
+        handled: boolean;
+        sendToServer: boolean;
+        modifiedCommand?: string;
+    }): Console {
+        const c = new Console();
+        c.setCommandHandler({
+            handleCommand: () => result,
+        } as unknown as import('../data/CommandHandler').CommandHandler);
+        return c;
+    }
+
+    it('does not send locally handled commands to the server', () => {
+        consoleWithHandler({ handled: true, sendToServer: false });
+        input().value = 'PAN 52,4';
+        sendButton().click();
+        expect(app.sendCommand).not.toHaveBeenCalled();
+    });
+
+    it('sends the rewritten command when the handler modifies it', () => {
+        consoleWithHandler({
+            handled: true,
+            sendToServer: true,
+            modifiedCommand: 'INSIDE 52 4 53 5 MCRE 5',
+        });
+        input().value = 'MCRE 5';
+        sendButton().click();
+        expect(app.sendCommand).toHaveBeenCalledWith('INSIDE 52 4 53 5 MCRE 5');
+    });
+
+    it('sends pass-through commands unchanged', () => {
+        consoleWithHandler({ handled: false, sendToServer: true });
+        input().value = 'HDG KL123 90';
+        sendButton().click();
+        expect(app.sendCommand).toHaveBeenCalledWith('HDG KL123 90');
+    });
+});

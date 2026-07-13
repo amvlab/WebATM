@@ -57,25 +57,11 @@ export class CommandHandler {
     }
 
     /**
-     * Get all commands handled by this CommandHandler
-     * This is the single source of truth for local/preprocessed commands
+     * All commands handled by this CommandHandler — the single source of
+     * truth the console merges into its autocomplete list.
      */
     public getAllHandledCommands(): string[] {
         return [...this.LOCAL_COMMANDS, ...this.PREPROCESSED_COMMANDS];
-    }
-
-    /**
-     * Get only the local commands (client-side only)
-     */
-    public getLocalCommands(): string[] {
-        return [...this.LOCAL_COMMANDS];
-    }
-
-    /**
-     * Get only the preprocessed commands
-     */
-    public getPreprocessedCommands(): string[] {
-        return [...this.PREPROCESSED_COMMANDS];
     }
 
     /**
@@ -161,10 +147,7 @@ export class CommandHandler {
     private handlePanCommand(args: string): CommandResult {
         if (!args || args.trim().length === 0) {
             this.sendEcho('PAN command requires coordinates (e.g., PAN 52.3,4.8) or aircraft ID (e.g., PAN AF265)', 'warning');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+            return { handled: true, sendToServer: false };
         }
 
         const mapDisplay = this.requireMapInitialized();
@@ -178,10 +161,7 @@ export class CommandHandler {
             // Pan to coordinates
             mapDisplay.panTo(coords.lat, coords.lon);
             this.sendEcho(`Panned to ${coords.lat.toFixed(3)}, ${coords.lon.toFixed(3)}`, 'success');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+            return { handled: true, sendToServer: false };
         }
 
         // Try as aircraft ID
@@ -190,10 +170,7 @@ export class CommandHandler {
 
         if (!aircraftData || !aircraftData.id || aircraftData.id.length === 0) {
             this.sendEcho('No aircraft data available', 'warning');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+            return { handled: true, sendToServer: false };
         }
 
         // Find aircraft (case-insensitive)
@@ -202,10 +179,7 @@ export class CommandHandler {
 
         if (index === -1) {
             this.sendEcho(`Aircraft ${args} not found`, 'warning');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+            return { handled: true, sendToServer: false };
         }
 
         const lat = aircraftData.lat[index];
@@ -214,10 +188,7 @@ export class CommandHandler {
         mapDisplay.panTo(lat, lon);
         this.sendEcho(`Panned to aircraft ${aircraftData.id[index]}`, 'success');
 
-        return {
-            handled: true,
-            sendToServer: false
-        };
+        return { handled: true, sendToServer: false };
     }
 
     /**
@@ -227,10 +198,7 @@ export class CommandHandler {
     private handleZoomCommand(args: string): CommandResult {
         if (!args || args.trim().length === 0) {
             this.sendEcho('ZOOM command requires a level (e.g., ZOOM 8) or IN/OUT', 'warning');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+            return { handled: true, sendToServer: false };
         }
 
         const mapDisplay = this.requireMapInitialized();
@@ -252,19 +220,13 @@ export class CommandHandler {
         const level = parseFloat(args);
         if (isNaN(level)) {
             this.sendEcho('Invalid zoom level. Use a number, IN, or OUT', 'warning');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+            return { handled: true, sendToServer: false };
         }
 
         mapDisplay.setZoom(level);
         this.sendEcho(`Zoom set to ${level.toFixed(1)}`, 'success');
 
-        return {
-            handled: true,
-            sendToServer: false
-        };
+        return { handled: true, sendToServer: false };
     }
 
     /**
@@ -279,10 +241,7 @@ export class CommandHandler {
         mapDisplay.zoomIn();
         this.sendEcho('Zoomed in', 'success');
 
-        return {
-            handled: true,
-            sendToServer: false
-        };
+        return { handled: true, sendToServer: false };
     }
 
     /**
@@ -297,10 +256,7 @@ export class CommandHandler {
         mapDisplay.zoomOut();
         this.sendEcho('Zoomed out', 'success');
 
-        return {
-            handled: true,
-            sendToServer: false
-        };
+        return { handled: true, sendToServer: false };
     }
 
     /**
@@ -317,10 +273,7 @@ export class CommandHandler {
         const bounds = mapDisplay.getCurrentBounds();
         if (!bounds || bounds.length !== 4) {
             this.sendEcho('Unable to get map bounds', 'error');
-            return {
-                handled: true,
-                sendToServer: false
-            };
+            return { handled: true, sendToServer: false };
         }
 
         const [west, south, east, north] = bounds;
@@ -375,10 +328,7 @@ export class CommandHandler {
 
         this.sendEcho('Disconnected from BlueSky server (the server itself is left running)', 'info');
 
-        return {
-            handled: true,
-            sendToServer: false
-        };
+        return { handled: true, sendToServer: false };
     }
 
     /**
@@ -386,10 +336,7 @@ export class CommandHandler {
      */
     private handleNotImplemented(cmd: string): CommandResult {
         this.sendEcho(`${cmd} command not yet implemented`, 'warning');
-        return {
-            handled: true,
-            sendToServer: false
-        };
+        return { handled: true, sendToServer: false };
     }
 
     /**

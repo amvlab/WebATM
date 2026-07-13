@@ -5,7 +5,6 @@
 import { describe, it, expect } from 'vitest';
 import {
     parseSignature,
-    currentArgIndex,
     commandFromInput,
     scoreCommand,
     getDisplaySignature,
@@ -44,40 +43,6 @@ describe('parseSignature', () => {
         const args = parseSignature('callsign/ALL/WIND,Shape');
         expect(args[0].name).toBe('callsign');
         expect(args[1].name).toBe('shape');
-    });
-});
-
-describe('currentArgIndex', () => {
-    it('returns -1 for empty input or while typing the command', () => {
-        expect(currentArgIndex('', 0)).toBe(-1);
-        expect(currentArgIndex('CRE', 3)).toBe(-1);
-    });
-
-    it('returns 0 on the first argument', () => {
-        expect(currentArgIndex('CRE KL123', 9)).toBe(0);
-    });
-
-    it('advances on separators (space and comma)', () => {
-        expect(currentArgIndex('CRE KL123 ', 10)).toBe(1);
-        expect(currentArgIndex('CRE KL123,A320', 14)).toBe(1);
-        expect(currentArgIndex('CRE KL123,A320,', 15)).toBe(2);
-    });
-
-    it('uses the cursor position, not the input end', () => {
-        expect(currentArgIndex('CRE KL123 A320', 7)).toBe(0);
-    });
-
-    it('ignores leading whitespace before the command', () => {
-        expect(currentArgIndex(' CRE KL123', 10)).toBe(0);
-        expect(currentArgIndex('  CRE KL123,A320', 16)).toBe(1);
-    });
-
-    it('returns -1 for whitespace-only input', () => {
-        expect(currentArgIndex('   ', 3)).toBe(-1);
-    });
-
-    it('clamps an out-of-range cursor', () => {
-        expect(currentArgIndex('CRE KL123', 999)).toBe(0);
     });
 });
 
