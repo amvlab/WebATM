@@ -13,14 +13,12 @@ from WebATM.logger import get_logger
 logger = get_logger()
 
 
-def register_integrated_routes(app, manager, streamer):
+def register_integrated_routes(app, manager):
     """Register server lifecycle-control routes on the Flask app.
 
     Args:
         app (flask.Flask): Flask application instance.
         manager (BlueSkyProcessManager): Controls the bundled server.
-        streamer (LogStreamer): Broadcasts the server's output (unused here;
-            kept for signature parity with the socket handlers).
     """
 
     @app.route("/api/integrated/server/start", methods=["POST"])
