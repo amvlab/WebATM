@@ -35,9 +35,10 @@ export class ServerLogStreamManager {
     private echoTabBtn: HTMLElement | null = null;
     private logStreamTabBtn: HTMLElement | null = null;
 
+    private static readonly MAX_LINES = 2000;
+
     private items: ServerLogLine[] = [];
     private seqSet = new Set<number>();
-    private maxLines = 2000;
     private historyRequested = false;
 
     constructor(socket: Socket | null) {
@@ -177,8 +178,8 @@ export class ServerLogStreamManager {
             // Out-of-order (history replay): merge, sort, cap, re-render once.
             this.items.push(...fresh);
             this.items.sort((a, b) => a.seq - b.seq);
-            if (this.items.length > this.maxLines) {
-                this.items = this.items.slice(this.items.length - this.maxLines);
+            if (this.items.length > ServerLogStreamManager.MAX_LINES) {
+                this.items = this.items.slice(this.items.length - ServerLogStreamManager.MAX_LINES);
             }
             this.seqSet = new Set(this.items.map((it) => it.seq));
             this.fullRender();
@@ -203,7 +204,7 @@ export class ServerLogStreamManager {
 
     private trimFront(): void {
         if (!this.output) return;
-        while (this.items.length > this.maxLines) {
+        while (this.items.length > ServerLogStreamManager.MAX_LINES) {
             const dropped = this.items.shift();
             if (dropped) this.seqSet.delete(dropped.seq);
             if (this.output.firstChild) this.output.removeChild(this.output.firstChild);

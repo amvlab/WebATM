@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 /**
  * Tests for the integrated server-control buttons: status probe on construction,
- * the REST calls behind each button, and that (re)starting opens the log tab.
+ * the REST calls behind each button, auto-connect/disconnect around the
+ * lifecycle actions, and reconciliation with the live BlueSky connection.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { ProcessControlManager } from './ProcessControlManager';
+import type { ConnectionStateSource } from './ProcessControlManager';
 import type { ServerLogStreamManager } from './ServerLogStreamManager';
 
 function buildControlDom(): void {
@@ -27,12 +29,38 @@ function click(action: string): void {
         ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 }
 
+/** Controllable stand-in for ConnectionStatusService. */
+function makeConnState(initial: boolean) {
+    let connected = initial;
+    let listener: (() => void) | null = null;
+    const source: ConnectionStateSource = {
+        isBlueSkyConnected: () => connected,
+        subscribe: (cb: () => void) => {
+            listener = cb;
+            return () => {
+                listener = null;
+            };
+        },
+    };
+    return {
+        source,
+        flip(value: boolean) {
+            connected = value;
+            listener?.();
+        },
+    };
+}
+
 describe('ProcessControlManager', () => {
     let logTab: { activate: ReturnType<typeof vi.fn> };
+    let autoConnect: Mock<() => Promise<boolean>>;
+    let autoDisconnect: Mock<() => Promise<void>>;
 
     beforeEach(() => {
         buildControlDom();
         logTab = { activate: vi.fn() };
+        autoConnect = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+        autoDisconnect = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -40,20 +68,25 @@ describe('ProcessControlManager', () => {
         vi.restoreAllMocks();
     });
 
-    function makeManager(): ProcessControlManager {
-        return new ProcessControlManager(logTab as unknown as ServerLogStreamManager);
+    function makeManager(conn: ConnectionStateSource = makeConnState(false).source): ProcessControlManager {
+        return new ProcessControlManager(
+            logTab as unknown as ServerLogStreamManager,
+            autoConnect,
+            autoDisconnect,
+            conn,
+        );
     }
 
-    it('probes status on construction and shows running + pid', async () => {
+    it('probes status on construction and folds in the connection state', async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
             json: async () => ({ success: true, running: true, status: 'running', pid: 4242 }),
         });
         vi.stubGlobal('fetch', fetchMock);
 
-        makeManager();
+        makeManager(makeConnState(true).source);
 
-        await vi.waitFor(() => expect(statusText()).toBe('running (pid 4242)'));
+        await vi.waitFor(() => expect(statusText()).toBe('running — connected'));
         expect(fetchMock).toHaveBeenCalledWith('/api/integrated/server/status');
     });
 
@@ -70,7 +103,7 @@ describe('ProcessControlManager', () => {
         await vi.waitFor(() => expect(statusText()).toBe('stopped'));
     });
 
-    it('Start POSTs the start endpoint, surfaces the message, and opens the log tab', async () => {
+    it('Start POSTs the start endpoint, opens the log tab, and auto-connects', async () => {
         const fetchMock = vi.fn((url: string) => {
             if (url.endsWith('/status')) {
                 return Promise.resolve({ ok: true, json: async () => ({ running: false }) });
@@ -87,12 +120,61 @@ describe('ProcessControlManager', () => {
 
         click('start');
 
-        await vi.waitFor(() => expect(statusText()).toBe('BlueSky server started'));
+        await vi.waitFor(() => expect(statusText()).toBe('running — connected'));
         expect(fetchMock).toHaveBeenCalledWith('/api/integrated/server/start', { method: 'POST' });
+        expect(autoConnect).toHaveBeenCalledTimes(1);
         expect(logTab.activate).toHaveBeenCalledTimes(1);
     });
 
-    it('Stop POSTs the stop endpoint and does NOT open the log tab', async () => {
+    it('does not auto-connect when the start request fails', async () => {
+        const fetchMock = vi.fn((url: string) => {
+            if (url.endsWith('/status')) {
+                return Promise.resolve({ ok: true, json: async () => ({ running: false }) });
+            }
+            return Promise.resolve({
+                ok: true,
+                json: async () => ({ success: false, status: 'error', message: 'Failed to start BlueSky' }),
+            });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        makeManager();
+        await vi.waitFor(() => expect(statusText()).toBe('stopped'));
+
+        click('start');
+
+        await vi.waitFor(() => expect(statusText()).toBe('Failed to start BlueSky'));
+        expect(autoConnect).not.toHaveBeenCalled();
+        // The log tab still opens so the failure output is visible.
+        expect(logTab.activate).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries the connect hook on Restart and reports failure after exhausting attempts', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn((url: string) => {
+                if (url.endsWith('/status')) {
+                    return Promise.resolve({ ok: true, json: async () => ({ running: true, pid: 9 }) });
+                }
+                return Promise.resolve({
+                    ok: true,
+                    json: async () => ({ success: true, status: 'running', message: 'BlueSky server restarted' }),
+                });
+            }),
+        );
+
+        autoConnect.mockResolvedValue(false);
+        makeManager();
+        await vi.waitFor(() => expect(statusText()).toBe('running — not connected'));
+
+        click('restart');
+
+        await vi.waitFor(() => expect(autoConnect).toHaveBeenCalledTimes(3));
+        expect(statusText()).toContain('auto-connect failed');
+        expect(logTab.activate).toHaveBeenCalledTimes(1);
+    });
+
+    it('Stop POSTs the stop endpoint, auto-disconnects, and does NOT open the log tab', async () => {
         const fetchMock = vi.fn((url: string) => {
             if (url.endsWith('/status')) {
                 return Promise.resolve({ ok: true, json: async () => ({ running: true, pid: 7 }) });
@@ -104,13 +186,15 @@ describe('ProcessControlManager', () => {
         });
         vi.stubGlobal('fetch', fetchMock);
 
-        makeManager();
-        await vi.waitFor(() => expect(statusText()).toBe('running (pid 7)'));
+        makeManager(makeConnState(true).source);
+        await vi.waitFor(() => expect(statusText()).toBe('running — connected'));
 
         click('stop');
 
-        await vi.waitFor(() => expect(statusText()).toBe('BlueSky server stopped'));
+        await vi.waitFor(() => expect(autoDisconnect).toHaveBeenCalledTimes(1));
+        expect(statusText()).toBe('BlueSky server stopped');
         expect(fetchMock).toHaveBeenCalledWith('/api/integrated/server/stop', { method: 'POST' });
+        expect(autoConnect).not.toHaveBeenCalled();
         expect(logTab.activate).not.toHaveBeenCalled();
     });
 
@@ -129,84 +213,6 @@ describe('ProcessControlManager', () => {
         click('kill');
 
         await vi.waitFor(() => expect(statusText()).toBe('kill failed'));
-        expect(logTab.activate).not.toHaveBeenCalled();
-    });
-
-    it('auto-connects after a successful Start when a connect hook is provided', async () => {
-        const fetchMock = vi.fn((url: string) => {
-            if (url.endsWith('/status')) {
-                return Promise.resolve({ ok: true, json: async () => ({ running: false }) });
-            }
-            return Promise.resolve({
-                ok: true,
-                json: async () => ({ success: true, status: 'running', message: 'BlueSky server started' }),
-            });
-        });
-        vi.stubGlobal('fetch', fetchMock);
-
-        const autoConnect = vi.fn().mockResolvedValue(true);
-        new ProcessControlManager(logTab as unknown as ServerLogStreamManager, autoConnect);
-        await vi.waitFor(() => expect(statusText()).toBe('stopped'));
-
-        click('start');
-
-        await vi.waitFor(() => expect(statusText()).toBe('running — connected'));
-        expect(autoConnect).toHaveBeenCalledTimes(1);
-        expect(logTab.activate).toHaveBeenCalledTimes(1);
-    });
-
-    it('retries the connect hook on Restart and reports failure after exhausting attempts', async () => {
-        vi.stubGlobal(
-            'fetch',
-            vi.fn((url: string) => {
-                if (url.endsWith('/status')) {
-                    return Promise.resolve({ ok: true, json: async () => ({ running: true, pid: 9 }) });
-                }
-                return Promise.resolve({
-                    ok: true,
-                    json: async () => ({ success: true, status: 'running', message: 'BlueSky server restarted' }),
-                });
-            }),
-        );
-
-        const autoConnect = vi.fn().mockResolvedValue(false);
-        new ProcessControlManager(logTab as unknown as ServerLogStreamManager, autoConnect);
-        await vi.waitFor(() => expect(statusText()).toBe('running (pid 9)'));
-
-        click('restart');
-
-        await vi.waitFor(() => expect(autoConnect).toHaveBeenCalledTimes(3));
-        expect(statusText()).toContain('auto-connect failed');
-        expect(logTab.activate).toHaveBeenCalledTimes(1);
-    });
-
-    it('auto-disconnects (and does not connect) on Stop', async () => {
-        vi.stubGlobal(
-            'fetch',
-            vi.fn((url: string) => {
-                if (url.endsWith('/status')) {
-                    return Promise.resolve({ ok: true, json: async () => ({ running: true, pid: 3 }) });
-                }
-                return Promise.resolve({
-                    ok: true,
-                    json: async () => ({ success: true, status: 'stopped', message: 'BlueSky server stopped' }),
-                });
-            }),
-        );
-
-        const autoConnect = vi.fn().mockResolvedValue(true);
-        const autoDisconnect = vi.fn().mockResolvedValue(undefined);
-        new ProcessControlManager(
-            logTab as unknown as ServerLogStreamManager,
-            autoConnect,
-            autoDisconnect,
-        );
-        await vi.waitFor(() => expect(statusText()).toBe('running (pid 3)'));
-
-        click('stop');
-
-        await vi.waitFor(() => expect(autoDisconnect).toHaveBeenCalledTimes(1));
-        expect(autoConnect).not.toHaveBeenCalled();
         expect(logTab.activate).not.toHaveBeenCalled();
     });
 
@@ -247,42 +253,13 @@ describe('ProcessControlManager', () => {
         await vi.waitFor(() =>
             expect(
                 Array.from(document.querySelectorAll('.bs-status')).map((el) => el.textContent),
-            ).toEqual(['BlueSky server started', 'BlueSky server started']),
+            ).toEqual(['running — connected', 'running — connected']),
         );
         expect(fetchMock).toHaveBeenCalledWith('/api/integrated/server/start', { method: 'POST' });
     });
 
     describe('connection-status reconciliation', () => {
-        function makeConnState(initial: boolean) {
-            let connected = initial;
-            let listener: (() => void) | null = null;
-            return {
-                source: {
-                    isBlueSkyConnected: () => connected,
-                    subscribe: (cb: () => void) => {
-                        listener = cb;
-                        return () => {
-                            listener = null;
-                        };
-                    },
-                },
-                flip(value: boolean) {
-                    connected = value;
-                    listener?.();
-                },
-            };
-        }
-
-        function makeManagerWithConn(conn: { source: unknown }): void {
-            new ProcessControlManager(
-                logTab as unknown as ServerLogStreamManager,
-                undefined,
-                undefined,
-                conn.source as never,
-            );
-        }
-
-        it('folds the live BlueSky connection into the status so it tracks the header', async () => {
+        it('re-probes and re-renders when the live BlueSky connection flips', async () => {
             const conn = makeConnState(true);
             vi.stubGlobal(
                 'fetch',
@@ -292,9 +269,7 @@ describe('ProcessControlManager', () => {
                 }),
             );
 
-            makeManagerWithConn(conn);
-
-            // Process up AND connected -> combined status (not the bare pid form).
+            makeManager(conn.source);
             await vi.waitFor(() => expect(statusText()).toBe('running — connected'));
 
             // Connection drops (e.g. after QUIT) while the process keeps running:
@@ -313,7 +288,7 @@ describe('ProcessControlManager', () => {
                 }),
             );
 
-            makeManagerWithConn(conn);
+            makeManager(conn.source);
             await vi.waitFor(() => expect(statusText()).toBe('stopped'));
 
             conn.flip(true); // a stray connect signal must not claim "connected"
