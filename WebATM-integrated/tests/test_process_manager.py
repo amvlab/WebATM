@@ -121,6 +121,32 @@ def test_kill_reaps_the_whole_process_group():
         manager.kill()
 
 
+def test_reader_keeps_draining_when_on_line_raises():
+    """A raising on_line callback must not stop pipe draining: an abandoned
+    pipe fills up and then blocks the whole BlueSky tree on its next write."""
+    captured: list[str] = []
+    lock = threading.Lock()
+
+    def on_line(line: str) -> None:
+        if line == "BOOM":
+            raise RuntimeError("handler failed")
+        with lock:
+            captured.append(line)
+
+    exit_codes: list[int] = []
+    src = "print('BOOM', flush=True)\nprint('AFTER', flush=True)\n"
+    manager = BlueSkyProcessManager(
+        on_line=on_line, on_exit=exit_codes.append, cmd=[sys.executable, "-c", src]
+    )
+    try:
+        assert manager.start()["success"] is True
+        got = _wait_for(lambda: "AFTER" in captured)
+        assert got, f"reader died on the raising line; captured={captured}"
+        assert _wait_for(lambda: exit_codes == [0])
+    finally:
+        manager.kill()
+
+
 def test_status_and_restart():
     """status() tracks running/stopped; restart() yields a fresh pid."""
     cmd = [sys.executable, "-c", "import time; time.sleep(30)"]

@@ -17,12 +17,7 @@ EVENT = "server_log"
 
 
 class LogStreamer:
-    """Buffer process output and broadcast it as ordered, batched events.
-
-    Lines are stamped with a monotonic sequence number under a lock at
-    ingest, kept in a bounded history for late joiners, and flushed to the
-    ``server_log`` Socket.IO event in coalesced batches.
-    """
+    """Buffer process output and broadcast it as ordered, batched events."""
 
     def __init__(
         self,
@@ -41,7 +36,7 @@ class LogStreamer:
         """
         self._sio = socketio
         self._lock = threading.Lock()
-        self._history = collections.deque(maxlen=max_history)
+        self._history: collections.deque[dict] = collections.deque(maxlen=max_history)
         self._pending: list[dict] = []
         self._seq = 0
         self._flush_scheduled = False
@@ -61,7 +56,14 @@ class LogStreamer:
             self._pending.append(item)
             if not self._flush_scheduled:
                 self._flush_scheduled = True
-                self._sio.start_background_task(self._flush_after_delay)
+                try:
+                    self._sio.start_background_task(self._flush_after_delay)
+                except Exception:
+                    # Un-wedge the scheduler: the line stays pending and the
+                    # next feed_line retries; a stuck True flag would silence
+                    # the stream forever.
+                    self._flush_scheduled = False
+                    raise
 
     def _flush_after_delay(self) -> None:
         # Cooperative sleep: works under both threading and eventlet modes.
@@ -90,8 +92,3 @@ class LogStreamer:
             return_code (int): Exit code of the BlueSky server process.
         """
         self.feed_line(f"--- bluesky server exited (return code {return_code}) ---")
-
-    def clear(self) -> None:
-        """Clear the buffered log history."""
-        with self._lock:
-            self._history.clear()
