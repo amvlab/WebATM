@@ -2,9 +2,10 @@
  * Pure helpers for working with cmddict argument signatures.
  *
  * cmddict ships from the backend as a flat `{ COMMAND: "arg1,arg2,[arg3]" }`
- * map with no help text. These DOM-free helpers parse a signature string,
- * locate the cursor's current argument, and score commands for the searchable
- * palette, so the inline hint, panels, and modal palette can all reuse them.
+ * map with no help text. These DOM-free helpers parse a signature string and
+ * score commands for the searchable palette, so the inline hint, panels, and
+ * modal palette can all reuse them. (Cursor/argument location helpers live in
+ * ui/consoleTokens.ts.)
  */
 
 export interface SignatureArg {
@@ -67,55 +68,6 @@ export function parseSignature(sig: string): SignatureArg[] {
         if (slashIdx >= 0) name = name.substring(0, slashIdx);
         return { name: name.trim(), raw: trimmedRaw, optional };
     });
-}
-
-/**
- * Determine which argument index the cursor sits on for the given input.
- *
- * The first whitespace-delimited token is the command itself. Subsequent
- * tokens, separated by spaces or commas (CRE uses commas), are arguments.
- * Returns -1 when the cursor is still on the command token, or when input
- * is empty / cursor is out of range.
- *
- * A cursor on a separator (e.g. just after a comma or trailing space) is
- * treated as "on the next arg slot" so the inline hint advances as soon as
- * the user types the separator.
- */
-export function currentArgIndex(input: string, cursor: number): number {
-    if (!input) return -1;
-    const clamped = Math.max(0, Math.min(cursor, input.length));
-    const upTo = input.substring(0, clamped);
-
-    // Find the command token's end: skip any leading whitespace first (like
-    // commandFromInput does), then take the next whitespace. Without the skip,
-    // a leading space would be mistaken for the command end and shift every
-    // arg index by one.
-    const cmdStart = upTo.search(/\S/);
-    if (cmdStart === -1) return -1; // nothing but whitespace typed yet
-    const sepRel = upTo.slice(cmdStart).search(/\s/);
-    if (sepRel === -1) return -1; // still typing the command
-    const cmdEnd = cmdStart + sepRel;
-
-    // Count separator runs after the command token. Each run advances the
-    // arg index by one. Treat both whitespace and comma as separators so
-    // CRE's comma-separated form behaves the same as space-separated forms.
-    const after = upTo.substring(cmdEnd);
-    let argIndex = -1;
-    let inSep = true; // we start right after the command, on a separator run
-    for (let i = 0; i < after.length; i++) {
-        if (/[\s,]/.test(after[i])) {
-            inSep = true;
-        } else if (inSep) {
-            // First non-separator after a run begins a new argument.
-            argIndex++;
-            inSep = false;
-        }
-    }
-    // A cursor on a trailing separator is poised to type the next arg.
-    if (inSep && /[\s,]$/.test(upTo)) {
-        argIndex++;
-    }
-    return argIndex;
 }
 
 /**

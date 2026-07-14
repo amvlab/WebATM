@@ -21,31 +21,22 @@ export function registerIntegrated(app: App): void {
 
     const socket = app.getSocketManager().getSocket();
     const logTab = new ServerLogStreamManager(socket);
-    // Expose the full server lifecycle from Settings too: inject Start / Stop /
-    // Restart / Kill controls into the connectivity section before wiring, so
+    // Inject the Settings-modal lifecycle controls before wiring, so
     // ProcessControlManager binds them alongside the Server Log toolbar buttons.
     injectSettingsServerControls();
-    // Connecting/disconnecting is auto-managed in the integrated build: connect
-    // the proxy to the local server after a start/restart and drop it after a
-    // stop/kill, so the user never has to open Settings and click Connect.
     const controls = new ProcessControlManager(
         logTab,
+        // The proxy connection follows the server lifecycle automatically:
+        // connect after a start/restart, disconnect after a stop/kill.
         () => settingsModal.connectToConfiguredServer(),
         () => settingsModal.disconnectFromConfiguredServer(),
-        // Reconcile the control status with the live BlueSky connection (the
-        // same source the header reads) so the two never contradict — notably
-        // after QUIT disconnects the proxy while the bundled server keeps running.
         connectionStatus,
     );
 
-    // BlueSky runs inside this container alongside the backend, so the host is
-    // fixed and the manual Connect/Disconnect buttons are hidden — connecting
-    // follows the server lifecycle automatically.
+    // BlueSky runs inside this container, so the host is fixed and file
+    // management is pre-wired to its scenario/plugins/output directories —
+    // hide the manual connect and base-path controls.
     settingsModal.enableIntegratedMode();
-
-    // For the same reason, file management is pre-wired to BlueSky's own
-    // scenario/plugins/output directories by the integrated backend, so hide the
-    // manual "BlueSky Base Directory" configuration — there's nothing to set.
     blueSkyFileManager.enableIntegratedMode();
 
     window.serverLogStreamManager = logTab;

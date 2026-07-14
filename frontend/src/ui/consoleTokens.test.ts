@@ -3,7 +3,12 @@
  * and aircraft-type autocomplete dropdowns.
  */
 import { describe, it, expect } from 'vitest';
-import { tokenizeInput, getArgAtCursor, findAcidContext } from './consoleTokens';
+import {
+    tokenizeInput,
+    getArgAtCursor,
+    argStartIndex,
+    findAcidContext,
+} from './consoleTokens';
 
 describe('tokenizeInput', () => {
     it('splits on whitespace and commas, keeping character ranges', () => {
@@ -51,6 +56,45 @@ describe('getArgAtCursor', () => {
 
     it('lists all token texts with the command first', () => {
         expect(getArgAtCursor(input, 12).parts).toEqual(['CRE', 'KL123', 'A320']);
+    });
+
+    // Ported from the retired CommandSignature.currentArgIndex, which the
+    // arg hint used before it switched to this shared implementation.
+    it('advances on separators (space and comma)', () => {
+        expect(getArgAtCursor('CRE KL123 ', 10).currentArgIndex).toBe(1);
+        expect(getArgAtCursor('CRE KL123,A320', 14).currentArgIndex).toBe(1);
+        expect(getArgAtCursor('CRE KL123,A320,', 15).currentArgIndex).toBe(2);
+    });
+
+    it('ignores leading whitespace before the command', () => {
+        expect(getArgAtCursor(' CRE KL123', 10).currentArgIndex).toBe(0);
+        expect(getArgAtCursor('  CRE KL123,A320', 16).currentArgIndex).toBe(1);
+    });
+
+    it('returns -1 for empty or whitespace-only input', () => {
+        expect(getArgAtCursor('', 0).currentArgIndex).toBe(-1);
+        expect(getArgAtCursor('   ', 3).currentArgIndex).toBe(-1);
+    });
+});
+
+describe('argStartIndex', () => {
+    it('returns the character index where an argument begins', () => {
+        expect(argStartIndex('CRE KL123 A320', 0)).toBe(4);
+        expect(argStartIndex('CRE KL123 A320', 1)).toBe(10);
+        expect(argStartIndex('CRE KL123,A320', 1)).toBe(10);
+    });
+
+    it('returns the input length for a slot not yet typed', () => {
+        expect(argStartIndex('CRE KL123', 1)).toBe(9);
+        expect(argStartIndex('CRE KL123 ', 1)).toBe(10);
+    });
+
+    it('is not confused by leading whitespace before the command', () => {
+        // Regression: the old separator-run walker counted the leading
+        // whitespace as the run after the command, so a map click replaced
+        // the command token itself instead of the target argument.
+        expect(argStartIndex(' CRE KL123', 0)).toBe(5);
+        expect(argStartIndex('  CRE KL123 A320', 1)).toBe(12);
     });
 });
 

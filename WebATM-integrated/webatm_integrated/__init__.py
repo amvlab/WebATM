@@ -80,8 +80,8 @@ def register(app, socketio, *, session_manager=None, bluesky_proxy=None):
     app.bluesky_process_manager = manager
     app.bluesky_log_streamer = streamer
 
-    register_integrated_routes(app, manager, streamer)
-    register_integrated_socket_handlers(socketio, manager, streamer)
+    register_integrated_routes(app, manager)
+    register_integrated_socket_handlers(socketio, streamer)
 
     # Reap the whole bluesky process group if the worker process exits.
     atexit.register(manager.kill)

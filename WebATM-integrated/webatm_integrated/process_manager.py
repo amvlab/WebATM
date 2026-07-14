@@ -13,12 +13,16 @@ live in the parent's process group, so:
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import subprocess
 import threading
-import time
 from collections.abc import Callable
+
+# Stdlib logger (not WebATM.logger) so this module stays importable without
+# Flask; it still propagates into WebATM's root logger configuration.
+logger = logging.getLogger(f"WebATM.{__name__}")
 
 
 def _default_spawn(target: Callable, *args) -> threading.Thread:
@@ -59,8 +63,6 @@ class BlueSkyProcessManager:
         self._proc: subprocess.Popen | None = None
         self._on_line = on_line
         self._on_exit = on_exit
-        # Use socketio.start_background_task so the reader cooperates with the
-        # server's async model; fall back to a plain daemon thread otherwise.
         self._spawn = spawn or _default_spawn
         self._cmd = cmd or ["bluesky", "--headless"]
         self._state = "stopped"  # stopped | starting | running | stopping
@@ -114,7 +116,7 @@ class BlueSkyProcessManager:
             self._state = "running"
             proc = self._proc
 
-        # Launch the reader outside the lock using the provided spawn primitive.
+        # Launch the reader outside the lock.
         self._spawn(self._read_loop, proc)
         return {
             "success": True,
@@ -129,10 +131,14 @@ class BlueSkyProcessManager:
         try:
             if stream is not None:
                 for line in iter(stream.readline, ""):
-                    if not line:
-                        break
                     if self._on_line:
-                        self._on_line(line.rstrip("\n"))
+                        try:
+                            self._on_line(line.rstrip("\n"))
+                        except Exception:
+                            # Keep draining: an abandoned pipe fills up and
+                            # then blocks the whole BlueSky tree on its next
+                            # write, freezing the simulation.
+                            logger.exception("Log line callback failed")
         finally:
             return_code = proc.wait()
             with self._lock:
@@ -153,6 +159,7 @@ class BlueSkyProcessManager:
 
         Returns:
             dict: Result with ``success``, ``status`` and ``message``.
+                ``success`` is False if the process survives even SIGKILL.
         """
         with self._lock:
             proc = self._proc
@@ -180,14 +187,9 @@ class BlueSkyProcessManager:
         except ProcessLookupError:
             pass
 
-        deadline = time.time() + escalate_after
-        while time.time() < deadline:
-            if proc.poll() is not None:
-                break
-            time.sleep(0.1)
-
-        if proc.poll() is None:
-            # Escalate: force-kill the entire group.
+        try:
+            proc.wait(timeout=escalate_after)
+        except subprocess.TimeoutExpired:
             try:
                 os.killpg(pgid, signal.SIGKILL)
             except ProcessLookupError:
@@ -195,7 +197,15 @@ class BlueSkyProcessManager:
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                pass
+                logger.error("BlueSky process group %s survived SIGKILL", pgid)
+                with self._lock:
+                    if self._proc is proc:
+                        self._state = "running"
+                return {
+                    "success": False,
+                    "status": "error",
+                    "message": "BlueSky server did not exit after SIGKILL",
+                }
 
         with self._lock:
             if self._proc is proc:
@@ -238,10 +248,17 @@ class BlueSkyProcessManager:
                 ``pid`` (None when stopped).
         """
         with self._lock:
-            running = self._proc is not None and self._proc.poll() is None
+            proc = self._proc
+            if proc is None or proc.poll() is not None:
+                return {
+                    "success": True,
+                    "running": False,
+                    "status": "stopped",
+                    "pid": None,
+                }
             return {
                 "success": True,
-                "running": running,
-                "status": self._state if running else "stopped",
-                "pid": self._proc.pid if running else None,
+                "running": True,
+                "status": self._state,
+                "pid": proc.pid,
             }

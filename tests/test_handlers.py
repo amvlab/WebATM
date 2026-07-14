@@ -7,6 +7,8 @@ global, so the handlers operate against it directly.
 
 import time
 
+import pytest
+
 from WebATM.proxy import set_bluesky_proxy
 from WebATM.proxy.handlers.commands import (
     on_stack_received,
@@ -556,6 +558,129 @@ class TestSeparatePolyAndPolyline:
         poly_data = {"polys": {"area": {"coordinates": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}}}
         result = _separate_poly_and_polyline_data(poly_data)
         assert "area" in result["polygons"]["polys"]
+
+    def test_box_expanded_to_four_corner_polygon(self):
+        # BlueSky sends a BOX as two opposite corners [lat0, lon0, lat1, lon1].
+        poly_data = {
+            "polys": {
+                "box1": {"shape": "BOX", "coordinates": [48.0, 2.0, 49.0, 3.0]},
+            }
+        }
+        result = _separate_poly_and_polyline_data(poly_data)
+        box = result["polygons"]["polys"]["box1"]
+        assert box["shape"] == "POLY"
+        # Four corners of the axis-aligned rectangle.
+        assert box["lat"] == [48.0, 48.0, 49.0, 49.0]
+        assert box["lon"] == [2.0, 3.0, 3.0, 2.0]
+
+    def test_circle_tessellated_into_polygon_ring(self):
+        # BlueSky sends a CIRCLE as [clat, clon, radius_nm].
+        poly_data = {
+            "polys": {
+                "circ1": {"shape": "CIRCLE", "coordinates": [45.0, 5.0, 10.0]},
+            }
+        }
+        result = _separate_poly_and_polyline_data(poly_data)
+        circ = result["polygons"]["polys"]["circ1"]
+        assert circ["shape"] == "POLY"
+        # A full ring of points, all offset from the centre by ~radius/60 deg.
+        assert len(circ["lat"]) == len(circ["lon"]) > 8
+        # First point sits due north of the centre (theta = 0): dlat = 10/60.
+        assert circ["lat"][0] == pytest.approx(45.0 + 10.0 / 60.0)
+        assert circ["lon"][0] == pytest.approx(5.0)
+        # Every ring point stays within the bounding radius of the centre.
+        max_dlat = max(abs(v - 45.0) for v in circ["lat"])
+        assert max_dlat == pytest.approx(10.0 / 60.0)
+
+    def test_finite_altitudes_passed_through_for_3d(self):
+        # amvlab BlueSky publishes top/bottom (metres) for a 3D volume.
+        poly_data = {
+            "polys": {
+                "vol1": {
+                    "shape": "POLYALT",
+                    "coordinates": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                    "top": 3000.0,
+                    "bottom": 500.0,
+                },
+            }
+        }
+        result = _separate_poly_and_polyline_data(poly_data)
+        vol = result["polygons"]["polys"]["vol1"]
+        assert vol["top"] == 3000.0
+        assert vol["bottom"] == 500.0
+
+    def test_box_altitudes_passed_through(self):
+        # A BOX with a vertical extent should also carry top/bottom to the 3D path.
+        poly_data = {
+            "polys": {
+                "box3d": {
+                    "shape": "BOX",
+                    "coordinates": [48.0, 2.0, 49.0, 3.0],
+                    "top": 3048.0,
+                    "bottom": 610.0,
+                },
+            }
+        }
+        result = _separate_poly_and_polyline_data(poly_data)
+        box = result["polygons"]["polys"]["box3d"]
+        assert box["shape"] == "POLY"
+        assert box["lat"] == [48.0, 48.0, 49.0, 49.0]
+        assert box["top"] == 3048.0
+        assert box["bottom"] == 610.0
+
+    def test_unbounded_sentinel_altitudes_dropped(self):
+        # BlueSky's +/-1e9 "unbounded" sentinels must not reach the 3D renderer.
+        poly_data = {
+            "polys": {
+                "flat": {
+                    "shape": "POLY",
+                    "coordinates": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                    "top": 1e9,
+                    "bottom": -1e9,
+                },
+            }
+        }
+        result = _separate_poly_and_polyline_data(poly_data)
+        flat = result["polygons"]["polys"]["flat"]
+        assert "top" not in flat
+        assert "bottom" not in flat
+
+    def test_vanilla_bluesky_without_altitudes_stays_flat(self):
+        # Vanilla BlueSky sends no top/bottom - shape must render flat (no keys).
+        poly_data = {
+            "polys": {
+                "z": {"shape": "POLY", "coordinates": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]},
+            }
+        }
+        result = _separate_poly_and_polyline_data(poly_data)
+        z = result["polygons"]["polys"]["z"]
+        assert "top" not in z
+        assert "bottom" not in z
+
+    def test_partial_bound_keeps_finite_side_only(self):
+        # Only a finite ceiling: keep top, drop the sentinel floor.
+        poly_data = {
+            "polys": {
+                "ceil": {
+                    "shape": "POLY",
+                    "coordinates": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                    "top": 2000.0,
+                    "bottom": -1e9,
+                },
+            }
+        }
+        result = _separate_poly_and_polyline_data(poly_data)
+        ceil = result["polygons"]["polys"]["ceil"]
+        assert ceil["top"] == 2000.0
+        assert "bottom" not in ceil
+
+    def test_box_with_malformed_coordinates_kept_as_polygon(self):
+        # Too few values to be a box - stored without lat/lon (frontend skips it)
+        # rather than raising.
+        poly_data = {"polys": {"bad": {"shape": "BOX", "coordinates": [1.0, 2.0]}}}
+        result = _separate_poly_and_polyline_data(poly_data)
+        assert "bad" in result["polygons"]["polys"]
+        assert "lat" not in result["polygons"]["polys"]["bad"]
 
     def test_unexpected_format_treated_as_polygons(self):
         result = _separate_poly_and_polyline_data({"unexpected": True})

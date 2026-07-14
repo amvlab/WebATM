@@ -103,6 +103,17 @@ export function getArgAtCursor(value: string, cursorPos: number): ArgAtCursor {
 }
 
 /**
+ * Find the character index in `value` where the argument at position
+ * `argIndex` begins (the command token is at conceptual index -1).
+ * Returns `value.length` when that argument hasn't been typed yet, so
+ * callers can truncate-and-append in one step.
+ */
+export function argStartIndex(value: string, argIndex: number): number {
+    const token = tokenizeInput(value)[argIndex + 1];
+    return token ? token.start : value.length;
+}
+
+/**
  * Check whether the cursor sits on an aircraft-ID parameter of the
  * current command (per the cmddict signature). Returns the context for
  * the ACID autocomplete dropdown, or null when the slot is not an acid

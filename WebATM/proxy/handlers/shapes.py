@@ -6,11 +6,123 @@ them per sending node on the proxy, separates polygons from polylines by their
 ``poly`` and ``polyline`` Socket.IO events.
 """
 
+import math
+
 from ...logger import get_logger
 from ...utils import id2str, make_json_serializable
 from ._base import active_proxy
 
 logger = get_logger()
+
+# Number of segments used to approximate a CIRCLE shape as a polygon ring.
+_CIRCLE_SEGMENTS = 72
+
+# Nautical miles per degree of latitude (1 arc-minute == 1 nm).
+_NM_PER_DEGREE = 60.0
+
+# BlueSky stores a shape's vertical extent (metres) on ``Shape.top``/``bottom``,
+# defaulting to +/-1e9 for "unbounded". amvlab BlueSky additionally publishes
+# these on the POLY payload so WebATM can extrude the shape into a 3D volume;
+# vanilla BlueSky omits them. Any bound at or beyond this magnitude is treated
+# as unbounded (no vertical extent -> flat 2D, the vanilla behaviour).
+_ALT_UNBOUNDED = 9e8
+
+
+def _normalize_altitudes(shape_dict):
+    """Keep only finite vertical bounds on a shape dict, in place.
+
+    amvlab BlueSky publishes ``top``/``bottom`` (metres) on each shape so the
+    frontend can extrude it; vanilla BlueSky sends neither. BlueSky uses
+    +/-1e9 as its "unbounded" sentinel, which must never reach the 3D renderer
+    as a literal extrusion height. This keeps ``top`` only when it is a finite
+    upper bound and ``bottom`` only when it is a finite lower bound, popping
+    anything else (missing, non-numeric, or sentinel) so the shape renders flat.
+
+    The frontend treats the mere presence of ``top`` as "has altitude", so a
+    fully-unbounded shape ends up with neither key and renders in 2D, exactly
+    like it does against vanilla BlueSky.
+
+    Args:
+        shape_dict (dict): A per-shape payload that may carry ``top``/``bottom``.
+    """
+    top = shape_dict.get("top")
+    if (
+        not isinstance(top, (int, float))
+        or isinstance(top, bool)
+        or top >= _ALT_UNBOUNDED
+    ):
+        shape_dict.pop("top", None)
+    bottom = shape_dict.get("bottom")
+    if (
+        not isinstance(bottom, (int, float))
+        or isinstance(bottom, bool)
+        or bottom <= -_ALT_UNBOUNDED
+    ):
+        shape_dict.pop("bottom", None)
+
+
+def _box_corners(coordinates):
+    """Expand a BOX's two opposite corners into a 4-corner polygon ring.
+
+    BlueSky publishes a BOX as ``[lat0, lon0, lat1, lon1]`` - two opposite
+    corners of an axis-aligned rectangle. This returns the four corners as
+    separate ``lat``/``lon`` lists, or ``None`` when the coordinate list is
+    malformed.
+
+    Args:
+        coordinates (list): ``[lat0, lon0, lat1, lon1]`` corner pair.
+
+    Returns:
+        tuple[list, list] | None: ``(lats, lons)`` for the four corners, or
+        None if fewer than four values were provided.
+    """
+    if not isinstance(coordinates, list) or len(coordinates) < 4:
+        return None
+    lat0, lon0, lat1, lon1 = (
+        coordinates[0],
+        coordinates[1],
+        coordinates[2],
+        coordinates[3],
+    )
+    lats = [lat0, lat0, lat1, lat1]
+    lons = [lon0, lon1, lon1, lon0]
+    return lats, lons
+
+
+def _circle_ring(coordinates, segments=_CIRCLE_SEGMENTS):
+    """Tessellate a CIRCLE (centre + radius) into a polygon ring.
+
+    BlueSky publishes a CIRCLE as ``[clat, clon, radius_nm]``. This offsets
+    ``segments`` evenly-spaced points around the centre using an
+    equirectangular approximation (accurate at the radii used for ATM areas),
+    returning them as separate ``lat``/``lon`` lists, or ``None`` when the
+    coordinate list is malformed.
+
+    Args:
+        coordinates (list): ``[clat, clon, radius_nm]`` centre and radius.
+        segments (int): Number of points used to approximate the circle.
+
+    Returns:
+        tuple[list, list] | None: ``(lats, lons)`` around the ring, or None if
+        fewer than three values were provided.
+    """
+    if not isinstance(coordinates, list) or len(coordinates) < 3:
+        return None
+    clat, clon, radius_nm = coordinates[0], coordinates[1], coordinates[2]
+    dlat = radius_nm / _NM_PER_DEGREE
+    cos_lat = math.cos(math.radians(clat))
+    lats = []
+    lons = []
+    for i in range(segments):
+        theta = 2.0 * math.pi * i / segments
+        lats.append(clat + dlat * math.cos(theta))
+        # Near the poles cos(lat) -> 0; fall back to the centre longitude
+        # rather than dividing by ~0 and producing an absurd offset.
+        if abs(cos_lat) > 1e-9:
+            lons.append(clon + (dlat * math.sin(theta)) / cos_lat)
+        else:
+            lons.append(clon)
+    return lats, lons
 
 
 def on_poly_received(data, *args, **kwargs):
@@ -152,10 +264,15 @@ def _separate_poly_and_polyline_data(poly_data):
     """Split combined POLY data into polygons and polylines by ``shape`` field.
 
     Shapes marked ``LINE`` become polylines; ``POLYALT`` shapes are rewritten
-    as ``POLY`` polygons; everything else is treated as a polygon. Flat
-    ``coordinates`` arrays (``[lat1, lon1, lat2, lon2, ...]``) are converted to
-    separate ``lat``/``lon`` lists for web-client compatibility. On errors or
-    unexpected formats the whole payload is treated as polygons.
+    as ``POLY`` polygons; ``BOX`` (two opposite corners) and ``CIRCLE`` (centre
+    plus radius in nautical miles) are expanded into ``POLY`` polygon rings;
+    everything else is treated as a polygon. Flat ``coordinates`` arrays
+    (``[lat1, lon1, lat2, lon2, ...]``) are converted to separate ``lat``/``lon``
+    lists for web-client compatibility. Finite ``top``/``bottom`` vertical
+    bounds (metres) are passed through so the frontend can extrude the shape in
+    3D; BlueSky's unbounded +/-1e9 sentinels (and vanilla BlueSky's absent
+    altitudes) are dropped so those shapes stay flat. On errors or unexpected
+    formats the whole payload is treated as polygons.
 
     Args:
         poly_data (dict): JSON-serializable POLY payload, expected to contain a
@@ -224,6 +341,31 @@ def _separate_poly_and_polyline_data(poly_data):
                                 poly_info_copy["name"] = name
 
                         polygons_polys[name] = poly_info_copy
+                    elif shape == "BOX":
+                        # BlueSky sends a BOX as two opposite corners; expand it
+                        # into a 4-corner POLY so the existing polygon renderer
+                        # can draw it (the flat-pair path below can't - a box
+                        # has only 4 coordinate values, i.e. 2 points).
+                        poly_info_copy = poly_info.copy()
+                        poly_info_copy["shape"] = "POLY"
+                        if not ("lat" in poly_info and "lon" in poly_info):
+                            corners = _box_corners(poly_info.get("coordinates"))
+                            if corners:
+                                poly_info_copy["lat"], poly_info_copy["lon"] = corners
+                                poly_info_copy["name"] = name
+                        polygons_polys[name] = poly_info_copy
+                    elif shape == "CIRCLE":
+                        # BlueSky sends a CIRCLE as centre + radius (nm);
+                        # tessellate it into a POLY ring so the existing polygon
+                        # renderer can draw it.
+                        poly_info_copy = poly_info.copy()
+                        poly_info_copy["shape"] = "POLY"
+                        if not ("lat" in poly_info and "lon" in poly_info):
+                            ring = _circle_ring(poly_info.get("coordinates"))
+                            if ring:
+                                poly_info_copy["lat"], poly_info_copy["lon"] = ring
+                                poly_info_copy["name"] = name
+                        polygons_polys[name] = poly_info_copy
                     else:  # 'POLY' or any other shape
                         poly_info_copy = poly_info.copy()
 
@@ -245,6 +387,13 @@ def _separate_poly_and_polyline_data(poly_data):
                 else:
                     # Fallback: assume it's a polygon if no shape info
                     polygons_polys[name] = poly_info
+
+            # Keep any finite vertical bounds (amvlab BlueSky) and drop the
+            # unbounded sentinels / vanilla-BlueSky's absent altitudes, so 3D
+            # extrusion only kicks in for shapes that actually have an extent.
+            for entry in polygons_polys.values():
+                if isinstance(entry, dict):
+                    _normalize_altitudes(entry)
 
             # Create separated data structures
             if polygons_polys:

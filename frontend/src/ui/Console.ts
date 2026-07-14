@@ -7,13 +7,12 @@ import type { MapDisplay } from './map/MapDisplay';
 import type { NavaidSnapper } from './map/navdata/NavaidSnapper';
 import {
     parseSignature,
-    currentArgIndex,
     commandFromInput,
     getDisplaySignature,
     SignatureArg,
 } from '../data/CommandSignature';
 import { CommandHistory } from './CommandHistory';
-import { getArgAtCursor } from './consoleTokens';
+import { argStartIndex, getArgAtCursor } from './consoleTokens';
 import { CommandListView } from './CommandListView';
 import { ConsoleAutocomplete } from './ConsoleAutocomplete';
 
@@ -42,8 +41,7 @@ export class Console {
             }
         });
 
-        // Load command history from localStorage
-        this.loadHistory();
+        this.history.load();
 
         this.init();
     }
@@ -53,7 +51,7 @@ export class Console {
         this.createSuggestionOverlay();
         this.createArgHint();
         this.autocomplete.createElements();
-        this.clearDisplay();
+        this.clear();
         this.applyPlatformPlaceholder();
     }
 
@@ -125,23 +123,6 @@ export class Console {
         this.suggestionOverlay.className = 'console-suggestion-overlay';
         this.suggestionOverlay.style.display = 'none';
         inputContainer.appendChild(this.suggestionOverlay);
-    }
-
-    /**
-     * Load command history from localStorage
-     */
-    private loadHistory(): void {
-        this.history.load();
-    }
-
-    /**
-     * Clear the console display (but preserve history)
-     */
-    private clearDisplay(): void {
-        const output = document.getElementById('console-output');
-        if (output) {
-            output.innerHTML = '';
-        }
     }
 
     private setupEventListeners(): void {
@@ -348,36 +329,13 @@ export class Console {
             CommandListView.recordRecent(cmdName);
         }
 
-        // Process command through CommandHandler first
-        if (this.commandHandler) {
-            const result = this.commandHandler.handleCommand(command);
-
-            // If command was handled locally or shouldn't be sent to server, return
-            // (CommandHandler sends messages to echo directly)
-            if (result.handled && !result.sendToServer) {
-                return;
-            }
-
-            // If command needs to be modified before sending, use modified version
-            if (result.sendToServer && result.modifiedCommand) {
-                if (window.app) {
-                    window.app.sendCommand(result.modifiedCommand);
-                }
-                return;
-            }
-
-            // If handler says to send to server but didn't handle it, fall through
-            if (!result.handled && result.sendToServer) {
-                if (window.app) {
-                    window.app.sendCommand(command);
-                }
-                return;
-            }
-        }
-
-        // Fallback: send command through main app if no handler
-        if (window.app) {
-            window.app.sendCommand(command);
+        // CommandHandler may execute the command locally (echoing its own
+        // feedback), rewrite it (MCRE), or pass it through untouched. With no
+        // handler wired up yet, send as-is.
+        const result = this.commandHandler?.handleCommand(command)
+            ?? { handled: false, sendToServer: true };
+        if (result.sendToServer && window.app) {
+            window.app.sendCommand(result.modifiedCommand ?? command);
         }
     }
 
@@ -590,8 +548,7 @@ export class Console {
         // signature in cmddict. Use the display version for the hint.
         const sig = getDisplaySignature(command, rawSig);
         const args: SignatureArg[] = parseSignature(sig);
-        const cursor = input.selectionStart ?? value.length;
-        const idx = currentArgIndex(value, cursor);
+        const idx = getArgAtCursor(value, this.getCursorPos(input)).currentArgIndex;
 
         this.argHint.innerHTML = '';
 
@@ -737,7 +694,6 @@ export class Console {
      * Read the console input's current cursor position, falling back to the
      * end of the value when the selection API returns null.
      */
-
     private getCursorPos(input: HTMLInputElement): number {
         return input.selectionStart ?? input.value.length;
     }
@@ -821,30 +777,6 @@ export class Console {
     }
 
     /**
-     * Find the character index in `value` where the argument at position
-     * `argIndex` begins. Walks across alternating non-separator/separator
-     * regions and stops just after the (argIndex + 1)th separator run so the
-     * returned index sits at the first character of the target argument.
-     *
-     * Used by insertGeoValue() to strip any already-typed content for a
-     * specific arg slot (or range of slots) before inserting new values from
-     * a map click.
-     */
-    private findArgStartIndex(value: string, argIndex: number): number {
-        const SEP = /[\s,]/;
-        let i = 0;
-        let sepsPassed = 0;
-        const sepsNeeded = argIndex + 1;
-        while (sepsPassed < sepsNeeded) {
-            while (i < value.length && !SEP.test(value[i])) i++;
-            if (i >= value.length) return value.length;
-            while (i < value.length && SEP.test(value[i])) i++;
-            sepsPassed++;
-        }
-        return i;
-    }
-
-    /**
      * Enable or disable the map picker based on the current input state.
      * Called on every input event alongside suggestion/autocomplete updates.
      */
@@ -893,7 +825,7 @@ export class Console {
         const current = input.value;
 
         // Truncate the input back to the start of the slot we're overwriting.
-        const argStart = this.findArgStartIndex(current, replaceFromArgIndex);
+        const argStart = argStartIndex(current, replaceFromArgIndex);
         let newValue = current.substring(0, argStart) + value;
 
         // Append a trailing comma when more arguments are expected, a space
