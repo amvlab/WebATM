@@ -2,11 +2,11 @@
 """
 WSGI entry point for production deployment with gunicorn.
 
-Usage:
-    gunicorn --worker-class gthread -w 1 --threads 4 --bind 0.0.0.0:8082 wsgi:app
+Run it with a threaded worker — the SocketIO instance is created with
+``async_mode="threading"`` (see ``WebATM.app.create_app``), and gunicorn 26+
+no longer ships an eventlet worker:
 
-Matches Flask-SocketIO's `async_mode="threading"` in WebATM/app.py — WebSocket
-support comes from simple-websocket (no eventlet/gevent monkey patching needed).
+    gunicorn --worker-class gthread --threads 4 -w 1 --bind 0.0.0.0:8082 wsgi:app
 """
 
 import os
@@ -30,7 +30,9 @@ logger.info("BlueSky Proxy initialized (not connected to BlueSky server)")
 logger.info(f"Default BlueSky server IP set to: {bluesky_host}")
 logger.info("Ready - Connect to BlueSky server via WebATM")
 
-# Flask-SocketIO wires itself into the Flask app; gunicorn just serves `app`.
+# Note: Under gunicorn's threaded worker, Flask-SocketIO (threading mode,
+# WebSocket via simple-websocket) handles everything automatically. We just
+# expose the Flask app, not socketio.
 
 if __name__ == "__main__":
     # This won't be used by gunicorn, but allows testing with python wsgi.py

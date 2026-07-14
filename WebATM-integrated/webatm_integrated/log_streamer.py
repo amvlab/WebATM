@@ -66,7 +66,7 @@ class LogStreamer:
                     raise
 
     def _flush_after_delay(self) -> None:
-        # Cooperative sleep: works under both threading and eventlet modes.
+        # Cooperative sleep via SocketIO so it matches the active async mode.
         self._sio.sleep(self._batch_ms / 1000.0)
         with self._lock:
             batch = self._pending

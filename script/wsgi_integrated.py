@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 """WSGI entry point for the ``webatm-integrated`` build.
 
-Unlike ``wsgi.py``, this entry point does NOT monkey-patch eventlet: the
-integrated build reads a blocking subprocess pipe in a background thread, which
-is incompatible with eventlet's cooperative scheduler. Run it with a threaded
-worker, e.g.::
+Like ``wsgi.py``, this entry point uses plain threading (no monkey patching):
+the integrated build reads a blocking subprocess pipe in a background thread.
+Run it with a threaded worker, e.g.::
 
     gunicorn --worker-class gthread --threads 4 -w 1 --bind 0.0.0.0:8082 wsgi_integrated:app
 

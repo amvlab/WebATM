@@ -7,7 +7,7 @@ single source of truth (there are no `requirements*.txt` files):
 
 ```bash
 uv sync                    # create/refresh .venv with runtime + dev deps
-uv sync --extra prod       # include the production-only extra (gunicorn/eventlet)
+uv sync --extra prod       # include the production-only extra (gunicorn)
 uv run python WebATM.py    # run a command inside the managed environment
 uv add <package>           # add a runtime dependency
 uv add --dev <package>     # add a dev dependency
