@@ -45,8 +45,8 @@ browser↔WebATM socket. The BlueSky server is left running.
 
 ## Build and run
 
-The variant uses the threaded gunicorn worker (not eventlet) because it
-reads a blocking subprocess pipe:
+The variant uses the threaded gunicorn worker, like the standalone build (it
+additionally requires threads because it reads a blocking subprocess pipe):
 
 ```bash
 docker build -f Dockerfile.integrated -t webatm-integrated .

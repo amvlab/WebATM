@@ -31,7 +31,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # Install locked production dependencies. Copying only the lock metadata first
 # keeps this layer cached across source changes; --no-install-project skips
 # building the app itself (it is run from PYTHONPATH below), --no-dev drops the
-# dev tooling, and --extra prod pulls in gunicorn/eventlet.
+# dev tooling, and --extra prod pulls in gunicorn.
 COPY --chown=webatm:webatm pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project --extra prod
 
@@ -61,12 +61,17 @@ EXPOSE 8082
 
 # Set environment variables with defaults
 ENV WEB_HOST=0.0.0.0 \
-    WEB_PORT=8082
+    WEB_PORT=8082 \
+    WEBATM_THREADS=4
 
 # Add current directory to Python path so WebATM package can be found
 ENV PYTHONPATH="/home/webatm"
 
-# Start WebATM with gunicorn for production (eventlet worker for Socket.IO support).
-# Use shell form so WEB_HOST / WEB_PORT env vars are honored; exec replaces the
-# shell so gunicorn stays PID 1 and receives signals directly.
-CMD ["sh", "-c", "exec gunicorn --worker-class eventlet -w 1 --bind ${WEB_HOST:-0.0.0.0}:${WEB_PORT:-8082} wsgi:app"]
+# Start WebATM with gunicorn using a THREADED worker: SocketIO runs in
+# async_mode="threading" (WebSocket via simple-websocket), and gunicorn 26+
+# removed the eventlet worker. --threads is read from WEBATM_THREADS so the
+# concurrency cap can be raised at `docker run` time (-e WEBATM_THREADS=16)
+# without overriding this whole CMD. Shell form so WEB_HOST / WEB_PORT /
+# WEBATM_THREADS env vars are honored; exec replaces the shell so gunicorn
+# stays PID 1 and receives signals directly.
+CMD ["sh", "-c", "exec gunicorn --worker-class gthread --threads ${WEBATM_THREADS:-4} -w 1 --bind ${WEB_HOST:-0.0.0.0}:${WEB_PORT:-8082} wsgi:app"]

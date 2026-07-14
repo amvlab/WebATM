@@ -20,7 +20,6 @@ dependencies = [
 [project.optional-dependencies]
 prod = [
     "gunicorn>=20.0.0",
-    "eventlet>=0.33.0",
 ]
 
 # Development tooling lives in PEP 735 dependency groups so that a bare
@@ -81,11 +80,6 @@ ignore = [
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
 ]
-
-[tool.ruff.lint.per-file-ignores]
-# The production WSGI entry point must call eventlet.monkey_patch() before any
-# other import, so module-level imports legitimately follow executable code.
-"script/wsgi.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["WebATM"]

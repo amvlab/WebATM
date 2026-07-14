@@ -37,10 +37,10 @@ ENV UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install the locked production dependencies for the core webatm stack (flask,
-# gunicorn, eventlet, ...). Copying only the lock metadata first keeps this
+# gunicorn, ...). Copying only the lock metadata first keeps this
 # layer cached across source changes; --no-install-project skips building the
 # app itself (run from PYTHONPATH below), --no-dev drops dev tooling, and
-# --extra prod pulls in gunicorn/eventlet. The integrated package and the
+# --extra prod pulls in gunicorn. The integrated package and the
 # bundled BlueSky simulator are installed separately below.
 COPY --chown=webatm:webatm pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project --extra prod
@@ -90,8 +90,8 @@ ENV WEB_HOST=0.0.0.0 \
 # Add current directory to Python path so the WebATM package can be found
 ENV PYTHONPATH="/home/webatm"
 
-# Start WebATM with gunicorn using a THREADED worker (not eventlet): the
-# integrated build reads a blocking subprocess pipe in a background thread.
+# Start WebATM with gunicorn using a THREADED worker: the integrated build
+# reads a blocking subprocess pipe in a background thread.
 # --threads is read from WEBATM_THREADS so the concurrency cap can be raised at
 # `docker run` time (-e WEBATM_THREADS=16) without overriding this whole CMD.
 # Shell form so WEB_HOST / WEB_PORT / WEBATM_THREADS env vars are honored; exec
