@@ -55,4 +55,73 @@ describe('Logger', () => {
             enableComponentPrefixes: true,
         });
     });
+
+    it('getLevelName reports UNKNOWN for out-of-range levels', () => {
+        expect(logger.getLevelName(99 as LogLevel)).toBe('UNKNOWN');
+    });
+});
+
+/**
+ * Startup log-level resolution. The singleton reads WEBATM_LOG_LEVEL /
+ * ?log_level= once at import time, so each case re-imports a fresh module
+ * (and stubs `window` where a URL parameter is involved).
+ */
+describe('startup log-level resolution', () => {
+    afterEach(() => {
+        delete process.env.WEBATM_LOG_LEVEL;
+        vi.unstubAllGlobals();
+        vi.resetModules();
+    });
+
+    async function freshLogger(urlSearch?: string) {
+        if (urlSearch !== undefined) {
+            vi.stubGlobal('window', { location: { search: urlSearch } });
+        }
+        vi.resetModules();
+        return import('./Logger');
+    }
+
+    it('reads a valid WEBATM_LOG_LEVEL env var', async () => {
+        process.env.WEBATM_LOG_LEVEL = 'debug';
+        const fresh = await freshLogger();
+        expect(fresh.logger.getLevel()).toBe(fresh.LogLevel.DEBUG);
+    });
+
+    it('accepts numeric levels and the TRACE/WARNING aliases', async () => {
+        process.env.WEBATM_LOG_LEVEL = '4';
+        expect((await freshLogger()).logger.getLevel()).toBe(LogLevel.VERBOSE);
+        process.env.WEBATM_LOG_LEVEL = 'TRACE';
+        expect((await freshLogger()).logger.getLevel()).toBe(LogLevel.VERBOSE);
+        process.env.WEBATM_LOG_LEVEL = 'warning';
+        expect((await freshLogger()).logger.getLevel()).toBe(LogLevel.WARN);
+    });
+
+    it('falls back to the default for unparseable values', async () => {
+        for (const bogus of ['bogus', '42', '3abc', '-1']) {
+            process.env.WEBATM_LOG_LEVEL = bogus;
+            expect((await freshLogger()).logger.getLevel()).toBe(LogLevel.INFO);
+        }
+    });
+
+    it('does not let parseInt turn "0x1" into ERROR (URL parameter)', async () => {
+        const fresh = await freshLogger('?log_level=0x1');
+        expect(fresh.logger.getLevel()).toBe(fresh.LogLevel.INFO);
+    });
+
+    it('reads a valid ?log_level= URL parameter', async () => {
+        const fresh = await freshLogger('?log_level=verbose');
+        expect(fresh.logger.getLevel()).toBe(fresh.LogLevel.VERBOSE);
+    });
+
+    it('an invalid env var does not mask a valid URL parameter', async () => {
+        process.env.WEBATM_LOG_LEVEL = 'bogus';
+        const fresh = await freshLogger('?log_level=error');
+        expect(fresh.logger.getLevel()).toBe(fresh.LogLevel.ERROR);
+    });
+
+    it('a valid env var takes precedence over the URL parameter', async () => {
+        process.env.WEBATM_LOG_LEVEL = 'debug';
+        const fresh = await freshLogger('?log_level=error');
+        expect(fresh.logger.getLevel()).toBe(fresh.LogLevel.DEBUG);
+    });
 });
