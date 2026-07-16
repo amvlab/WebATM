@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ConnectionStatusService } from './ConnectionStatusService';
 import { echoManager } from '../ui/EchoManager';
+import { logger } from '../utils/Logger';
 
 vi.mock('../ui/EchoManager', () => ({
     echoManager: {
@@ -311,6 +312,22 @@ describe('ConnectionStatusService', () => {
             service.onNodeInfoReceived();
             vi.advanceTimersByTime(500);
             expect(onNotConnected).not.toHaveBeenCalled();
+        });
+
+        it('does nothing when BlueSky is already connected at check time', () => {
+            // Regression: the early-connection listener used to reference its
+            // own `unsubscribe` binding during subscribe()'s synchronous
+            // initial call, throwing a (swallowed) TDZ ReferenceError and
+            // leaking the subscription when already connected.
+            const errorSpy = vi.spyOn(logger, 'error');
+            service.onNodeInfoReceived(); // BlueSky connected
+
+            const onNotConnected = vi.fn();
+            service.startInitialConnectionCheck(onNotConnected);
+            vi.advanceTimersByTime(500);
+
+            expect(onNotConnected).not.toHaveBeenCalled();
+            expect(errorSpy).not.toHaveBeenCalled();
         });
 
         it('skips the check entirely on a non-initial load', () => {

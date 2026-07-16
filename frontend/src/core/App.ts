@@ -102,28 +102,15 @@ export class App {
         try {
             logger.info('App', 'Initializing BlueSky Web Client...');
 
-            // Initialize state management
             this.initializeState();
-
-            // Initialize socket connections
             await this.socketManager.initialize();
-            
-            // Connect controls to socket manager
             this.controls.setSocketManager(this.socketManager);
-            
-            // Connect server manager to socket
             serverManager.setSocket(this.socketManager.getSocket());
-
-            // Initialize UI components
             this.initializeUI();
-
-            // Set up global event listeners
             this.setupGlobalEventListeners();
 
             this.initialized = true;
             logger.info('App', 'BlueSky Web Client initialized successfully');
-
-            // Add initialization message to echo
             echoManager.success('WebATM initialized');
 
         } catch (error) {
@@ -201,14 +188,9 @@ export class App {
     private updateConnectionStatusDisplay(): void {
         const status = connectionStatus.getStatus();
 
-        // Enable/disable controls based on connection
         this.header.setControlsEnabled(status.blueSkyConnected);
+        this.header.updateConnectionStatus(connectionStatus.getStatusString());
 
-        // Get status string from ConnectionStatusService (single source of truth)
-        const statusString = connectionStatus.getStatusString();
-        this.header.updateConnectionStatus(statusString);
-
-        // Log detailed status for debugging when connection state changes
         logger.debug('App', 'Connection status update:', {
             webSocket: status.webSocketConnected,
             blueSky: status.blueSkyConnected,
@@ -242,19 +224,15 @@ export class App {
      * Delegates to ConnectionStatusService for centralized logic
      */
     private checkInitialConnectionStatus(): void {
-        // The integrated build auto-starts BlueSky and auto-connects on boot, so
-        // on load there's nothing for the user to do in Settings — and its
-        // connect controls are hidden there anyway. Don't pop Settings open while
-        // the auto-connect is still settling. Only the standalone build, where
-        // the user must connect manually, prompts by opening Settings when it's
-        // disconnected from BlueSky on initial load.
+        // The integrated build auto-starts BlueSky and auto-connects on boot
+        // (and hides the connect controls in Settings), so don't pop Settings
+        // open while that auto-connect is still settling. Only the standalone
+        // build, where the user must connect manually, prompts on load.
         if (INTEGRATED_BUILD) {
             return;
         }
 
-        // Use ConnectionStatusService to handle initial connection checking
         connectionStatus.startInitialConnectionCheck(() => {
-            // Callback when not connected after initial check
             logger.info('App', 'Initial load: Not connected - opening settings modal');
             settingsModal.open();
         });
@@ -274,13 +252,10 @@ export class App {
      * Initialize console component
      */
     private initializeConsole(): void {
-        // Console is already instantiated in constructor and will set up event listeners
-        // Set state manager reference for accessing cmddict
         this.console.setStateManager(this.stateManager);
-        // Set command handler reference for processing local commands
         this.console.setCommandHandler(this.commandHandler);
-        // Provide map display so the console can offer map-click coordinate /
-        // heading insertion when typing lat/lon/hdg arguments.
+        // Map display enables map-click coordinate/heading insertion when
+        // typing lat/lon/hdg arguments.
         this.console.setMapDisplay(this.mapDisplay, this.navaidSnapper);
         logger.debug('App', 'Console component initialized');
     }
@@ -289,29 +264,21 @@ export class App {
      * Initialize control panels
      */
     private initializeControlPanels(): void {
-        // Initialize Controls - must be called after DOM is ready
         this.controls.init();
-        logger.debug('App', 'Control panels initialized - Controls instance ready');
 
-        // Initialize Simulation Nodes Panel
         this.simulationNodesPanel.init();
         this.simulationNodesPanel.setSocketManager(this.socketManager);
-        logger.debug('App', 'SimulationNodesPanel initialized');
 
-        // Initialize Map Controls Panel
         this.mapControlsPanel.init();
         this.mapControlsPanel.setMapDisplay(this.mapDisplay);
-        logger.debug('App', 'MapControlsPanel initialized');
 
-        // Initialize Display Options Panel
         this.displayOptionsPanel.init();
         this.displayOptionsPanel.setStateManager(this.stateManager);
         this.displayOptionsPanel.setApp(this);
-        logger.debug('App', 'DisplayOptionsPanel initialized');
 
-        // Initialize Command Palette Modal (wired up to the Ctrl/Cmd+K
-        // shortcut in setupGlobalEventListeners and the "Commands" button
-        // in the console header).
+        // Command palette: opened by the Ctrl/Cmd+K shortcut (registered in
+        // setupGlobalEventListeners) and the "Commands" button in the console
+        // header.
         this.commandPaletteModal.setStateManager(this.stateManager);
         this.commandPaletteModal.setConsole(this.console);
         const openPaletteBtn = document.getElementById('open-command-palette');
@@ -320,28 +287,20 @@ export class App {
                 this.commandPaletteModal.open();
             });
         }
-        logger.debug('App', 'CommandPaletteModal initialized');
 
-        // Initialize Traffic List Panel
         this.trafficListPanel.init();
         this.trafficListPanel.setStateManager(this.stateManager);
-        logger.debug('App', 'TrafficListPanel initialized');
 
-        // Initialize Aircraft Info Panel
         this.aircraftInfoPanel.init();
         this.aircraftInfoPanel.setStateManager(this.stateManager);
-        logger.debug('App', 'AircraftInfoPanel initialized');
 
-        // Initialize Conflicts Panel
         this.conflictsPanel.init();
         this.conflictsPanel.setStateManager(this.stateManager);
-        logger.debug('App', 'ConflictsPanel initialized');
 
-        // Verify controls are working by checking if key elements exist
         this.verifyElementExists('play-btn', 'Play button');
         this.verifyElementExists('settings-btn', 'Settings button');
 
-        logger.debug('App', 'Controls event handlers should be active');
+        logger.debug('App', 'Control panels initialized');
     }
 
     private verifyElementExists(id: string, label: string): HTMLElement | null {
@@ -358,72 +317,52 @@ export class App {
      * Initialize map display
      */
     private initializeMapDisplay(): void {
-        // Initialize the MapLibre GL map
         this.mapDisplay.initialize();
-
-        // Set up the map style selector (connects to settings modal)
         this.mapDisplay.setupStyleSelector();
 
-        // Set up callback for when map finishes loading
-        // This ensures MapControlsPanel event listeners are attached AFTER the map is ready
+        // The renderers below must be created only after the map style has
+        // loaded, or MapLibre throws "Style is not done loading".
         this.mapDisplay.setMapLoadCallback(async () => {
-            logger.debug('App', 'Map loaded - setting up MapControlsPanel event listeners');
             this.mapControlsPanel.setupMapEventListeners();
 
-            // Initialize shape renderer AFTER map style is loaded
-            // This prevents "Style is not done loading" errors
             this.shapeRenderer = new ShapeRenderer(this.mapDisplay, this.stateManager);
             this.shapeRenderer.initialize();
-            logger.debug('App', 'Shape renderer initialized after map style loaded');
 
-            // Initialize the navdata overlay (airports + waypoints vector
-            // tiles). Done before the aircraft overlay so aircraft draw on top.
+            // Navdata overlay (airports + waypoints vector tiles). Done before
+            // the aircraft overlay so aircraft draw on top.
             this.navdataRenderer = new NavdataRenderer(this.mapDisplay, this.stateManager);
             this.navdataRenderer.initialize();
-            logger.debug('App', 'Navdata renderer initialized after map style loaded');
 
-            // Initialize the map overlay with display options AFTER map style is loaded
-            // This prevents "Style is not done loading" errors for aircraft routes
             this.mapOverlay = new MapOverlay(this.mapDisplay, this.stateManager);
             const displayOptions = this.stateManager.getState().displayOptions;
             await this.mapOverlay.initialize(displayOptions);
-            logger.debug('App', 'Map overlay initialized after map style loaded');
+            logger.debug('App', 'Map renderers initialized after map style loaded');
 
-            // Update overlay with any aircraft data that arrived before map was ready
+            // Replay any aircraft data/selection that arrived before the map
+            // was ready.
             const currentState = this.stateManager.getState();
             if (currentState.aircraftData && currentState.aircraftData.id.length > 0) {
-                logger.debug('App', 'Updating map overlay with existing aircraft data:', currentState.aircraftData.id.length, 'aircraft');
                 this.mapOverlay.updateFromAircraftData(currentState.aircraftData);
             }
-
-            // Update with selected aircraft if any
             if (currentState.selectedAircraft) {
                 this.mapOverlay.setSelectedAircraft(currentState.selectedAircraft);
             }
         });
 
-        // Set up style change callback to notify overlay and shape renderer
         this.mapDisplay.onStyleChange(() => {
-            if (this.mapOverlay) {
-                this.mapOverlay.onStyleChange();
-            }
-            if (this.shapeRenderer) {
-                this.shapeRenderer.onStyleChange();
-            }
-            if (this.navdataRenderer) {
-                this.navdataRenderer.onStyleChange();
-            }
+            this.mapOverlay?.onStyleChange();
+            this.shapeRenderer?.onStyleChange();
+            this.navdataRenderer?.onStyleChange();
 
-            // Trigger a display options update to force all renderers to re-render
-            // This ensures shapes, aircraft, and routes all appear after style change
-            // We use requestAnimationFrame to ensure layers are fully set up first
+            // Re-emit the display options so all renderers re-render after the
+            // style swap; requestAnimationFrame lets the layers finish setting
+            // up first.
             requestAnimationFrame(() => {
                 const currentOptions = this.stateManager.getDisplayOptions();
                 this.stateManager.updateDisplayOptions({...currentOptions});
             });
         });
 
-        // Initialize map interaction managers
         this.shapeDrawingManager = new ShapeDrawingManager(this.mapDisplay, this, this.navaidSnapper);
         this.aircraftCreationManager = new AircraftCreationManager(this.mapDisplay, this.navaidSnapper);
         this.aircraftInteractionManager = new AircraftInteractionManager(
@@ -448,35 +387,29 @@ export class App {
             );
         }
 
-        // Now that AircraftInteractionManager is initialized, set up the route data handler
-        // This needs to happen after AircraftInteractionManager creation to check for explicit POS commands
+        // Must come after AircraftInteractionManager creation so the handler
+        // can check for explicit POS commands.
         this.setupRouteDataHandler();
 
-        // Initialize the airport/waypoint "go to" search box, applying the
-        // saved show/hide preference.
+        // Airport/waypoint "go to" search box, applying the saved show/hide
+        // preference.
         this.navSearchBox = new NavSearchBox(this.mapDisplay);
         this.navSearchBox.init();
         this.navSearchBox.setVisible(this.stateManager.getDisplayOptions().showSearchBar);
 
-        // Connect managers to MapControlsPanel
         this.mapControlsPanel.setShapeDrawingManager(this.shapeDrawingManager);
         this.mapControlsPanel.setAircraftCreationManager(this.aircraftCreationManager);
         this.mapControlsPanel.setRouteDrawingManager(this.routeDrawingManager);
 
-        logger.debug('App', 'Map display initialized');
-        logger.debug('App', 'Shape drawing manager initialized');
-        logger.debug('App', 'Aircraft creation manager initialized');
-        logger.debug('App', 'Aircraft interaction manager initialized');
-        logger.debug('App', 'Route drawing manager initialized');
+        logger.debug('App', 'Map display and interaction managers initialized');
     }
 
     /**
      * Initialize modal dialogs
      */
     private initializeModals(): void {
-        // Force initialize the modals system to set up all event handlers
         modals.forceInitialize();
-        logger.debug('App', 'Modal system initialized - All modals ready');
+        logger.debug('App', 'Modal system initialized');
     }
 
     /**
@@ -484,15 +417,6 @@ export class App {
      */
     private setupGlobalEventListeners(): void {
         const { signal } = this.globalListenerAbort;
-
-        // Handle page visibility changes
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                this.handlePageHidden();
-            } else {
-                this.handlePageVisible();
-            }
-        }, { signal });
 
         // Handle before page unload
         window.addEventListener('beforeunload', () => {
@@ -546,15 +470,11 @@ export class App {
                 }
             },
             onReset: () => {
-                // IMPORTANT: Clear 3D aircraft models BEFORE state reset
-                // This ensures proper cleanup of 3D models when simulation reset occurs
-                if (this.mapOverlay) {
-                    this.mapOverlay.reset();
-                    logger.info('App', 'Map overlay reset - 3D aircraft models cleared before state reset');
-                }
+                // Clear 3D aircraft models BEFORE the state reset.
+                this.mapOverlay?.reset();
 
-                // Reset state (clears shapes, aircraft data, etc.)
-                // NOTE: This overrides SocketManager's built-in onReset, so we must call it explicitly
+                // This handler overrides SocketManager's built-in onReset, so
+                // the state reset it normally performs must happen here.
                 this.stateManager.reset();
                 logger.info('App', 'Simulation reset - connection maintained');
             }
@@ -562,31 +482,12 @@ export class App {
     }
 
     /**
-     * Handle page becoming hidden
-     */
-    private handlePageHidden(): void {
-        // Reduce update frequency when page is not visible
-        this.socketManager.setReducedUpdates(true);
-    }
-
-    /**
-     * Handle page becoming visible
-     */
-    private handlePageVisible(): void {
-        // Resume normal update frequency
-        this.socketManager.setReducedUpdates(false);
-    }
-
-    /**
      * Handle window resize
      */
     private handleResize(): void {
-        // Notify components about resize
-        // This will trigger map resize, panel adjustments, etc.
         if (this.mapDisplay && this.mapDisplay.isInitialized()) {
             this.mapDisplay.resize();
         }
-        logger.debug('App', 'Window resized - updating components');
     }
 
     /**
@@ -636,53 +537,36 @@ export class App {
         this.stateManager.setActiveNode(nodeId);
     }
 
-    /**
-     * Get current application state
-     */
     public getState(): AppState {
         return this.stateManager.getState();
     }
 
-    /**
-     * Get socket manager instance
-     */
     public getSocketManager(): SocketManager {
         return this.socketManager;
     }
 
-    /**
-     * Get state manager instance
-     */
     public getStateManager(): StateManager {
         return this.stateManager;
     }
 
-    /**
-     * Get console instance
-     */
     public getConsole(): Console {
         return this.console;
     }
 
-    /**
-     * Get map display instance
-     */
     public getMapDisplay(): MapDisplay {
         return this.mapDisplay;
     }
 
-    /**
-     * Get map overlay instance
-     */
     public getMapOverlay(): MapOverlay | null {
         return this.mapOverlay;
     }
 
-    /**
-     * Get map controls panel instance
-     */
     public getMapControlsPanel(): MapControlsPanel {
         return this.mapControlsPanel;
+    }
+
+    public getDisplayOptionsPanel(): DisplayOptionsPanel {
+        return this.displayOptionsPanel;
     }
 
     /**
@@ -693,8 +577,8 @@ export class App {
     private clearAllVisualElements(): void {
         logger.info('App', 'Clearing all visual elements (aircraft, shapes, routes, trails, protected zones)');
 
-        // First, explicitly clear aircraft from map with empty data
-        // This ensures the map overlay actually clears the display
+        // Push an empty aircraft update so the overlay removes the markers -
+        // no further data will arrive to do it once disconnected.
         if (this.mapOverlay) {
             const emptyAircraftData: AircraftData = {
                 id: [],
@@ -715,14 +599,10 @@ export class App {
             this.mapOverlay.updateFromAircraftData(emptyAircraftData);
         }
 
-        // Clear all routes
         this.mapOverlay?.clearRouteDisplay();
 
-        // Now use existing reset logic to clear simulation state
-        // This clears: simInfo, aircraftData, selectedAircraft, activeNode, shapes
+        // Clears simInfo, aircraftData, selectedAircraft, activeNode, shapes.
         this.stateManager.reset();
-
-        logger.info('App', 'All visual elements cleared successfully');
     }
 
     /**
