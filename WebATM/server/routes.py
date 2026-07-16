@@ -7,7 +7,6 @@ configuration, health/status endpoints, and BlueSky file management
 
 import json
 import os
-import socket
 import time
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from flask import current_app, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
 from ..logger import get_logger
+from .bluesky_server_status import probe_bluesky_ports
 
 logger = get_logger()
 
@@ -535,22 +535,11 @@ def register_basic_routes(app, session_manager):
             ``config`` sections, or 503 with the error on failure.
         """
         try:
-            # Check BlueSky connectivity using the same approach as check_bluesky_running
-            def is_port_listening(port):
-                hostname = getattr(current_app.bluesky_proxy, "server_ip", "localhost")
-                try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(0.5)  # Quick check for status endpoint
-                    result = sock.connect_ex((hostname, port))
-                    sock.close()
-                    return result == 0
-                except Exception:
-                    return False
-
-            # Check if BlueSky ports are accessible (same logic as server_control.py)
-            port_11000_listening = is_port_listening(11000)
-            port_11001_listening = is_port_listening(11001)
-            bluesky_running = port_11000_listening or port_11001_listening
+            hostname = getattr(current_app.bluesky_proxy, "server_ip", None)
+            listening, _ = probe_bluesky_ports(hostname)
+            port_11000_listening = 11000 in listening
+            port_11001_listening = 11001 in listening
+            bluesky_running = bool(listening)
 
             # Additional check: if we have a proxy connection, see if it's receiving data
             proxy_running = False

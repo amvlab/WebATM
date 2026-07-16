@@ -110,16 +110,17 @@ export class SettingsModal {
      * Initialize logger controls with current settings
      */
     private initializeLoggerControls(): void {
+        const config = logger.getConfig();
         if (this.elements.logLevelSelect) {
-            this.elements.logLevelSelect.value = logger.getLevel().toString();
+            this.elements.logLevelSelect.value = config.level.toString();
         }
-        
+
         if (this.elements.logTimestampsCheckbox) {
-            this.elements.logTimestampsCheckbox.checked = logger.getConfig().enableTimestamps;
+            this.elements.logTimestampsCheckbox.checked = config.enableTimestamps;
         }
-        
+
         if (this.elements.logPrefixesCheckbox) {
-            this.elements.logPrefixesCheckbox.checked = logger.getConfig().enableComponentPrefixes;
+            this.elements.logPrefixesCheckbox.checked = config.enableComponentPrefixes;
         }
     }
 
@@ -152,7 +153,6 @@ export class SettingsModal {
      * Bind logger-specific event handlers
      */
     private bindLoggerEventHandlers(): void {
-        // Log level select
         if (this.elements.logLevelSelect) {
             this.elements.logLevelSelect.addEventListener('change', (e) => {
                 const target = e.target as HTMLSelectElement;
@@ -162,7 +162,6 @@ export class SettingsModal {
             });
         }
 
-        // Timestamps checkbox
         if (this.elements.logTimestampsCheckbox) {
             this.elements.logTimestampsCheckbox.addEventListener('change', (e) => {
                 const target = e.target as HTMLInputElement;
@@ -171,7 +170,6 @@ export class SettingsModal {
             });
         }
 
-        // Component prefixes checkbox
         if (this.elements.logPrefixesCheckbox) {
             this.elements.logPrefixesCheckbox.addEventListener('change', (e) => {
                 const target = e.target as HTMLInputElement;
@@ -180,16 +178,14 @@ export class SettingsModal {
             });
         }
 
-        // Reset logging button
         if (this.elements.resetLoggingButton) {
             this.elements.resetLoggingButton.addEventListener('click', () => {
                 logger.resetConfig();
-                this.initializeLoggerControls(); // Update UI controls
+                this.initializeLoggerControls();
                 logger.info('SettingsModal', 'Logging settings reset to defaults');
             });
         }
 
-        // Developer toggle button
         if (this.elements.developerToggle) {
             this.elements.developerToggle.addEventListener('click', () => {
                 this.toggleDeveloperSection();
