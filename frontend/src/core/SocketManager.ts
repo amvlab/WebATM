@@ -51,8 +51,7 @@ export class SocketManager {
     private socket: Socket | null = null;
     private connected: boolean = false;
     private handlers: SocketEventHandlers = {};
-    private reconnectAttempts: number = 0;
-    private maxReconnectAttempts: number = 10;
+    private readonly maxReconnectAttempts = 10;
     private stateManager: StateManager;
 
     constructor(stateManager: StateManager) {
@@ -199,7 +198,6 @@ export class SocketManager {
         s.on('connect', () => {
             logger.info('SocketManager', 'Connected to WebATM');
             this.connected = true;
-            this.reconnectAttempts = 0;
             this.handlers.onConnect?.();
         });
 
@@ -209,16 +207,17 @@ export class SocketManager {
             this.handlers.onDisconnect?.(reason);
         });
 
-        s.on('reconnect', (attemptNumber: number) => {
+        // socket.io v4 emits the reconnect lifecycle on the Manager (s.io),
+        // not on the Socket itself - listeners registered on the Socket for
+        // these events never fire.
+        s.io.on('reconnect', (attemptNumber: number) => {
             logger.info('SocketManager', 'Reconnected after', attemptNumber, 'attempts');
             this.connected = true;
-            this.reconnectAttempts = 0;
             this.handlers.onReconnect?.(attemptNumber);
         });
 
-        s.on('reconnect_error', (error: Error) => {
+        s.io.on('reconnect_error', (error: Error) => {
             logger.warn('SocketManager', 'Reconnection failed:', error);
-            this.reconnectAttempts++;
             this.handlers.onReconnectError?.(error);
         });
 
@@ -323,16 +322,13 @@ export class SocketManager {
         return this.connected && this.socket?.connected === true;
     }
 
-    sendCommand(command: string): Promise<boolean> {
-        return new Promise((resolve) => {
-            if (this.isConnected() && this.socket) {
-                this.socket.emit('command', { command });
-                resolve(true);
-            } else {
-                logger.warn('SocketManager', 'Cannot send command: not connected to WebATM');
-                resolve(false);
-            }
-        });
+    async sendCommand(command: string): Promise<boolean> {
+        if (this.isConnected() && this.socket) {
+            this.socket.emit('command', { command });
+            return true;
+        }
+        logger.warn('SocketManager', 'Cannot send command: not connected to WebATM');
+        return false;
     }
 
     setActiveNode(nodeId: string): void {
@@ -351,18 +347,6 @@ export class SocketManager {
         }
     }
 
-    getReconnectAttempts(): number {
-        return this.reconnectAttempts;
-    }
-
-    getMaxReconnectAttempts(): number {
-        return this.maxReconnectAttempts;
-    }
-
-    setMaxReconnectAttempts(attempts: number): void {
-        this.maxReconnectAttempts = attempts;
-    }
-
     destroy(): void {
         if (this.socket) {
             this.socket.removeAllListeners();
@@ -375,11 +359,6 @@ export class SocketManager {
 
     getSocket(): Socket | null {
         return this.socket;
-    }
-
-    setReducedUpdates(enabled: boolean): void {
-        // Placeholder for throttling updates while the page is hidden.
-        logger.debug('SocketManager', `Reduced updates mode: ${enabled}`);
     }
 
     async initialize(): Promise<void> {

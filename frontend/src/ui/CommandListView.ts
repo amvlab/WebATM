@@ -8,7 +8,7 @@
 import type { StateManager } from '../core/StateManager';
 import type { Console } from './Console';
 import type { CommandDict } from '../data/types';
-import { scoreCommand, getDisplaySignature } from '../data/CommandSignature';
+import { scoreCommand, getDisplaySignature, LOCAL_COMMAND_SIGNATURES } from '../data/CommandSignature';
 import { storage } from '../utils/StorageManager';
 import { logger } from '../utils/Logger';
 
@@ -125,14 +125,18 @@ export class CommandListView {
         this.container.appendChild(this.listElement);
     }
 
-    private render(): void {
-        if (!this.cmddict) {
-            this.listElement.innerHTML =
-                '<div class="cmd-empty">Waiting for command list from server…</div>';
-            return;
-        }
+    /**
+     * The dictionary the palette renders: WebATM's client-side commands
+     * (PAN, SWRAD, SHOW*, ...) merged with the server's cmddict, which wins
+     * on name collisions. Available even before the server list arrives.
+     */
+    private effectiveDict(): CommandDict {
+        return { ...LOCAL_COMMAND_SIGNATURES, ...(this.cmddict ?? {}) };
+    }
 
-        const allNames = Object.keys(this.cmddict).sort();
+    private render(): void {
+        const dict = this.effectiveDict();
+        const allNames = Object.keys(dict).sort();
         if (allNames.length === 0) {
             this.listElement.innerHTML =
                 '<div class="cmd-empty">No commands available.</div>';
@@ -145,13 +149,19 @@ export class CommandListView {
             this.renderSection('Favorites', this.filterExisting(this.favorites));
             this.renderSection('Recent', this.filterExisting(this.recents));
             this.renderSection('All commands', allNames, ALL_LIST_LIMIT);
+            if (!this.cmddict) {
+                const waiting = document.createElement('div');
+                waiting.className = 'cmd-empty';
+                waiting.textContent = 'Waiting for command list from server…';
+                this.listElement.appendChild(waiting);
+            }
             return;
         }
 
         // Score every command against the query and sort best-first.
         const scored: Array<{ name: string; score: number }> = [];
         for (const name of allNames) {
-            const sig = this.cmddict[name] ?? '';
+            const sig = dict[name] ?? '';
             const s = scoreCommand(this.query, name, sig);
             if (s !== null) scored.push({ name, score: s });
         }
@@ -170,10 +180,9 @@ export class CommandListView {
         );
     }
 
-    /** Drop favorite/recent entries that aren't in the current cmddict. */
+    /** Drop favorite/recent entries that aren't in the current dictionary. */
     private filterExisting(names: string[]): string[] {
-        if (!this.cmddict) return [];
-        const dict = this.cmddict;
+        const dict = this.effectiveDict();
         return names.filter(n => Object.prototype.hasOwnProperty.call(dict, n));
     }
 
@@ -203,7 +212,7 @@ export class CommandListView {
     }
 
     private buildRow(name: string): HTMLElement {
-        const rawSig = (this.cmddict && this.cmddict[name]) ?? '';
+        const rawSig = this.effectiveDict()[name] ?? '';
         // Show the user-facing signature in the palette row so commands like
         // MCRE don't advertise lat/lon args that CommandHandler injects.
         const sig = getDisplaySignature(name, rawSig);

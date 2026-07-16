@@ -549,34 +549,36 @@ export class ConnectionStatusService {
             return;
         }
 
-        // Mark that we've started the initial load check
         this.markInitialLoadComplete();
 
-        // Wait for connection to establish
+        if (this.status.blueSkyConnected) {
+            logger.info('ConnectionStatus', 'Initial load: Already connected to BlueSky server');
+            return;
+        }
+
+        // Give the connection a moment to establish before prompting.
         this.initialConnectionCheckTimer = window.setTimeout(() => {
+            this.initialConnectionCheckTimer = null;
             if (!this.status.blueSkyConnected) {
                 logger.info('ConnectionStatus', 'Initial load: Not connected to BlueSky server');
                 onNotConnected();
-            } else {
-                logger.info('ConnectionStatus', 'Initial load: Already connected to BlueSky server');
             }
         }, this.INITIAL_CONNECTION_CHECK_DELAY_MS);
 
-        // Also listen for early connection
-        const checkConnection = () => {
-            if (this.status.blueSkyConnected && this.initialConnectionCheckTimer !== null) {
+        // Cancel the pending prompt as soon as a connection is confirmed.
+        // subscribe() invokes the listener synchronously, but the early return
+        // above guarantees that first call sees blueSkyConnected === false, so
+        // `unsubscribe` is never read before it is assigned.
+        const unsubscribe = this.subscribe((status) => {
+            if (!status.blueSkyConnected) {
+                return;
+            }
+            if (this.initialConnectionCheckTimer !== null) {
                 window.clearTimeout(this.initialConnectionCheckTimer);
                 this.initialConnectionCheckTimer = null;
                 logger.info('ConnectionStatus', 'BlueSky connected during initial load');
             }
-        };
-
-        // Subscribe to status changes for early connection detection
-        const unsubscribe = this.subscribe((status) => {
-            if (status.blueSkyConnected) {
-                checkConnection();
-                unsubscribe();
-            }
+            unsubscribe();
         });
     }
 

@@ -30,6 +30,31 @@ const DISPLAY_SIGNATURE_OVERRIDES: Record<string, string> = {
 };
 
 /**
+ * Client-side commands handled by `CommandHandler` (never sent to the
+ * server), with user-facing signatures. The server's cmddict knows nothing
+ * about these, so the command palette merges this map into its list.
+ *
+ * Keep in sync with `CommandHandler`'s LOCAL_COMMANDS/PREPROCESSED_COMMANDS
+ * (a CommandHandler test asserts every handled command has an entry here).
+ */
+export const LOCAL_COMMAND_SIGNATURES: Record<string, string> = {
+    PAN: 'lat,lon/acid/LEFT/RIGHT/UP/DOWN',
+    ZOOM: 'level/IN/OUT',
+    ZOOMIN: '',
+    ZOOMOUT: '',
+    SWRAD: 'APT/WPT/LABEL/SYM/TRAIL/POLY,[level]',
+    SHOWTRAF: '[ON/OFF]',
+    SHOWPZ: '[ON/OFF]',
+    SHOWPOLY: '[ON/OFF]',
+    SHOWAPT: '[ON/OFF]',
+    SHOWWPT: '[ON/OFF]',
+    LABEL: '[0/1/2/ON/OFF]',
+    FILTERALT: '[ON/OFF,bottom,top]',
+    QUIT: '',
+    MCRE: 'n,[type,alt,spd]',
+};
+
+/**
  * Return the signature to render in user-facing surfaces (arg hint, palette
  * row). Falls back to the raw cmddict signature for everything that doesn't
  * have an override.

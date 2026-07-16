@@ -202,3 +202,12 @@ export const AIRCRAFT_SHAPES = {
     aircraft: { name: 'Aircraft', drawer: drawAircraftShape },
     drone: { name: 'Drone', drawer: drawDroneShape }
 } as const;
+
+/**
+ * Look up the drawer for a shape type, falling back to the chevron for
+ * unknown values (e.g. a stale setting from an older build).
+ */
+export function getShapeDrawer(shapeType: string): AircraftShapeDrawer {
+    const shapeConfig = AIRCRAFT_SHAPES[shapeType as keyof typeof AIRCRAFT_SHAPES];
+    return shapeConfig ? shapeConfig.drawer : AIRCRAFT_SHAPES.chevron.drawer;
+}

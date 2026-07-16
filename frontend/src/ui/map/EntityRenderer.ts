@@ -51,6 +51,21 @@ export interface EntityRenderConfig {
  * moving entity (aircraft, birds, drones, vehicles, etc.) on the MapLibre GL map.
  * Subclasses must implement entity-specific label building logic.
  */
+/**
+ * Sprite canvas resolution in pixels. Fixed and oversampled: MapLibre scales
+ * the sprite down to SPRITE_CSS_SIZE, so it stays crisp on high-DPI screens
+ * across the whole icon-size slider range.
+ */
+export const SPRITE_CANVAS_PX = 128;
+
+/**
+ * Rendered sprite size in CSS pixels at icon-size 1.0. The displayed size is
+ * SPRITE_CSS_SIZE * iconSize on every screen. The value keeps the default
+ * appearance (0.8 → ~31 px) of the previous renderer, which drew the sprite
+ * at 12 * iconSize * 4 canvas pixels.
+ */
+export const SPRITE_CSS_SIZE = 38.4;
+
 export abstract class EntityRenderer<T extends EntityData> {
     protected map: MapLibreMap;
     protected displayOptions: DisplayOptions;
@@ -75,20 +90,13 @@ export abstract class EntityRenderer<T extends EntityData> {
      * @param forceImmediate - Force immediate setup even if style check fails (use when called from map load callback)
      */
     public initialize(forceImmediate: boolean = false): void {
-        logger.debug(`${this.config.entityType}Renderer`, 'Initializing...');
-        logger.debug(`${this.config.entityType}Renderer`, 'Map style loaded?', this.map.isStyleLoaded());
-        logger.debug(`${this.config.entityType}Renderer`, 'Force immediate?', forceImmediate);
+        logger.debug(`${this.config.entityType}Renderer`, `Initializing (style loaded: ${this.map.isStyleLoaded()}, force: ${forceImmediate})`);
 
         // Wait for map style to be fully loaded before adding sprites and layers
         if (this.map.isStyleLoaded() || forceImmediate) {
-            logger.debug(`${this.config.entityType}Renderer`, 'Setting up entities immediately');
             this.setupEntities();
         } else {
-            logger.debug(`${this.config.entityType}Renderer`, 'Waiting for map style to load...');
-            this.map.once('style.load', () => {
-                logger.debug(`${this.config.entityType}Renderer`, 'Map style loaded, setting up entities');
-                this.setupEntities();
-            });
+            this.map.once('style.load', () => this.setupEntities());
         }
     }
 
@@ -106,18 +114,12 @@ export abstract class EntityRenderer<T extends EntityData> {
     }
 
     /**
-     * Create sprites for entity icons
-     * Creates sprites for different states: normal, selected, and optionally conflict
-     *
-     * The sprite size is dynamically calculated based on the icon size multiplier
-     * to avoid pixelation when scaled up. We render at 4x the needed resolution
-     * and let MapLibre scale down if needed, which looks much better than scaling up.
+     * Create sprites for entity states: normal, selected, and optionally
+     * conflict. Drawn once at a fixed oversampled resolution; the on-screen
+     * size is controlled solely by the layer's icon-size property.
      */
     protected createSprites(): void {
-        // Calculate optimal sprite size based on current icon size multiplier
-        const baseSize = 12;
-        const maxScale = this.config.iconSize;
-        const size = Math.ceil(baseSize * maxScale * 4); // 4x multiplier for crisp rendering at all scales
+        const size = SPRITE_CANVAS_PX;
 
         const canvas = document.createElement('canvas');
         canvas.width = size;
@@ -157,12 +159,13 @@ export abstract class EntityRenderer<T extends EntityData> {
             ctx.fill();
             ctx.stroke();
 
-            // Convert canvas to ImageData and add to map
             const imageData = ctx.getImageData(0, 0, size, size);
 
             const options = {
-                pixelRatio: window.devicePixelRatio || 1,
-                sdf: false // We use high-res sprites instead of SDF for better quality
+                // Scale the oversampled canvas down to SPRITE_CSS_SIZE so the
+                // rendered size is DPR-independent and linear in icon-size.
+                pixelRatio: size / SPRITE_CSS_SIZE,
+                sdf: false
             };
 
             // If the image already exists, remove it first
@@ -174,7 +177,7 @@ export abstract class EntityRenderer<T extends EntityData> {
             this.map.addImage(spriteName, imageData, options);
         }
 
-        logger.debug(`${this.config.entityType}Renderer`, `Sprites created at ${size}x${size}px for scale ${maxScale.toFixed(1)}x`);
+        logger.debug(`${this.config.entityType}Renderer`, `Sprites created at ${size}x${size}px`);
     }
 
     /**
@@ -335,17 +338,11 @@ export abstract class EntityRenderer<T extends EntityData> {
                     'text-offset': [0, 1.5],
                     'text-anchor': 'top',
                     'text-size': this.displayOptions.mapLabelsTextSize,
-                    // Smart labelling: let MapLibre's collision engine hide
-                    // labels that would overlap other labels. Icons stay
-                    // always-visible (see icon-*-overlap above); only the
-                    // text is subject to collision. When two aircraft are
-                    // close enough that their labels would overlap, only
-                    // one label is drawn (priority: selected > in-conflict
-                    // > others, via symbol-sort-key below).
+                    // Icons stay always-visible (icon-*-overlap above); labels
+                    // use MapLibre's collision engine, so overlapping labels are
+                    // hidden by priority: selected > in-conflict > normal.
                     'text-allow-overlap': false,
                     'text-ignore-placement': false,
-                    // Draw order for collision: lower sort keys win the
-                    // space. 0 = selected, 1 = in conflict, 2 = normal.
                     'symbol-sort-key': [
                         'case',
                         ['==', ['get', 'selected'], true], 0,
@@ -617,18 +614,9 @@ export abstract class EntityRenderer<T extends EntityData> {
      * Updates the selected state and refreshes the display
      */
     public setSelectedEntity(entityId: string | null): void {
-        const previousSelection = this.selectedEntity;
         this.selectedEntity = entityId;
 
-        // Update the selected property in cached features
-        if (previousSelection && this.featureCache.has(previousSelection)) {
-            this.featureCache.get(previousSelection)!.properties!.selected = false;
-        }
-        if (entityId && this.featureCache.has(entityId)) {
-            this.featureCache.get(entityId)!.properties!.selected = true;
-        }
-
-        // Refresh the display with updated selection
+        // Refresh the display; it recomputes the 'selected' property of every feature
         if (this.entityData) {
             this.updateEntityDisplay(this.entityData);
         }
@@ -639,25 +627,11 @@ export abstract class EntityRenderer<T extends EntityData> {
      * @param iconSize - New icon size multiplier
      */
     public updateIconSize(iconSize: number): void {
-        const oldIconSize = this.config.iconSize;
         this.config.iconSize = iconSize;
 
-        // Recreate sprites if the size change is significant
-        const needsSpriteRegeneration = this.shouldRegenerateSprites(oldIconSize, iconSize);
-
-        if (needsSpriteRegeneration && this.map.getLayer(`${this.config.layerPrefix}-points`)) {
-            logger.debug(`${this.config.entityType}Renderer`, `Size changed significantly (${oldIconSize.toFixed(1)} → ${iconSize.toFixed(1)}), regenerating sprites...`);
-            this.createSprites();
-        }
-
-        // Update the icon size in the layer
+        // Sprites are resolution-independent, so only the layer property changes
         if (this.map.getLayer(`${this.config.layerPrefix}-points`)) {
             this.map.setLayoutProperty(`${this.config.layerPrefix}-points`, 'icon-size', iconSize);
-        }
-
-        // Refresh display with new options
-        if (this.entityData) {
-            this.updateEntityDisplay(this.entityData);
         }
     }
 
@@ -718,15 +692,6 @@ export abstract class EntityRenderer<T extends EntityData> {
         if (this.entityData) {
             this.updateEntityDisplay(this.entityData);
         }
-    }
-
-    /**
-     * Determine if sprites need to be regenerated based on size change
-     */
-    protected shouldRegenerateSprites(oldSize: number, newSize: number): boolean {
-        const oldBucket = Math.floor(oldSize / 0.3);
-        const newBucket = Math.floor(newSize / 0.3);
-        return oldBucket !== newBucket;
     }
 
     /**

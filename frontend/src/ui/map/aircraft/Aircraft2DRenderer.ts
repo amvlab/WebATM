@@ -3,7 +3,7 @@ import type { IEntityRenderer } from '../rendering/IEntityRenderer';
 import type { AircraftData, DisplayOptions } from '../../../data/types';
 import type { StateManager } from '../../../core/StateManager';
 import { AircraftRenderer } from './AircraftRenderer';
-import type { AircraftShapeDrawer } from './AircraftRenderer';
+import { getShapeDrawer } from './AircraftShapes';
 import { logger } from '../../../utils/Logger';
 
 /**
@@ -14,16 +14,10 @@ import { logger } from '../../../utils/Logger';
 export class Aircraft2DRenderer implements IEntityRenderer<AircraftData> {
     private renderer: AircraftRenderer | null = null;
     private displayOptions: DisplayOptions;
-    private shapeDrawer: AircraftShapeDrawer;
     private stateManager: StateManager;
 
-    constructor(
-        displayOptions: DisplayOptions,
-        shapeDrawer: AircraftShapeDrawer,
-        stateManager: StateManager
-    ) {
+    constructor(displayOptions: DisplayOptions, stateManager: StateManager) {
         this.displayOptions = displayOptions;
-        this.shapeDrawer = shapeDrawer;
         this.stateManager = stateManager;
     }
 
@@ -36,7 +30,7 @@ export class Aircraft2DRenderer implements IEntityRenderer<AircraftData> {
         this.renderer = new AircraftRenderer(
             map,
             this.displayOptions,
-            this.shapeDrawer,
+            getShapeDrawer(this.displayOptions.aircraftShape),
             this.stateManager
         );
         this.renderer.initialize();
@@ -59,10 +53,15 @@ export class Aircraft2DRenderer implements IEntityRenderer<AircraftData> {
     }
 
     updateDisplayOptions(options: DisplayOptions): void {
+        const shapeChanged = options.aircraftShape !== this.displayOptions.aircraftShape;
         this.displayOptions = options;
 
         if (this.renderer) {
             this.renderer.updateDisplayOptions(options);
+            if (shapeChanged) {
+                this.renderer.setAircraftShape(getShapeDrawer(options.aircraftShape));
+                logger.info('Aircraft2DRenderer', 'Aircraft shape updated to:', options.aircraftShape);
+            }
         }
     }
 

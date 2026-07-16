@@ -1,5 +1,6 @@
 import type { App } from '../core/App';
 import type { MapDisplay } from '../ui/map/MapDisplay';
+import type { DisplayOptions } from './types';
 import { connectionStatus } from '../core/ConnectionStatusService';
 import { echoManager } from '../ui/EchoManager';
 import { logger } from '../utils/Logger';
@@ -35,6 +36,7 @@ export class CommandHandler {
         'ZOOM',
         'ZOOMIN',
         'ZOOMOUT',
+        'SWRAD',
         'SHOWWPT',
         'SHOWAPT',
         'SHOWPOLY',
@@ -51,6 +53,30 @@ export class CommandHandler {
         'MCRE',
         'QUIT'
     ];
+
+    /**
+     * BlueSky's GUI registers QUIT with these aliases (see
+     * bluesky/ui/qtgl/mainwindow.py); intercept them the same way so none of
+     * them reaches the server. Kept out of getAllHandledCommands() so
+     * autocomplete only offers the canonical QUIT.
+     */
+    private static readonly QUIT_ALIASES = ['CLOSE', 'END', 'EXIT', 'Q', 'STOP'];
+
+    /**
+     * SHOW* display-toggle commands (mirroring BlueSky's GUI commands of the
+     * same names) → the DisplayOptions flag they drive and a label for echo
+     * feedback.
+     */
+    private static readonly SHOW_COMMAND_OPTIONS: Readonly<Record<string, {
+        stateKey: keyof DisplayOptions;
+        label: string;
+    }>> = {
+        SHOWTRAF: { stateKey: 'showAircraft', label: 'Aircraft' },
+        SHOWPZ: { stateKey: 'showProtectedZones', label: 'Protected zones' },
+        SHOWPOLY: { stateKey: 'showShapes', label: 'Shapes' },
+        SHOWAPT: { stateKey: 'showAirports', label: 'Airports' },
+        SHOWWPT: { stateKey: 'showWaypoints', label: 'Waypoints' }
+    };
 
     constructor(app: App) {
         this.app = app;
@@ -77,8 +103,19 @@ export class CommandHandler {
 
         // Parse command and arguments
         const parts = trimmed.split(/\s+/);
-        const cmd = parts[0].toUpperCase();
+        let cmd = parts[0].toUpperCase();
         const args = parts.slice(1).join(' ');
+
+        // BlueSky console shorthand: a token of +/= zooms in, - zooms out
+        // (one sqrt(2) step per character, mirroring bluesky's clientstack)
+        if (/^[+=-]+$/.test(cmd)) {
+            return this.handleZoomShorthand(cmd);
+        }
+
+        // Map BlueSky's GUI quit aliases onto QUIT
+        if (CommandHandler.QUIT_ALIASES.includes(cmd)) {
+            cmd = 'QUIT';
+        }
 
         // Warn (non-blocking) if CRE/MCRE uses a type not in the openap list,
         // mirroring the warning shown in the Create Aircraft modal.
@@ -118,7 +155,11 @@ export class CommandHandler {
             case 'SHOWPOLY':
             case 'SHOWPZ':
             case 'SHOWTRAF':
+                return this.handleShowToggleCommand(cmd, args);
             case 'LABEL':
+                return this.handleLabelCommand(args);
+            case 'SWRAD':
+                return this.handleSwradCommand(args);
             case 'FILTERALT':
                 return this.handleNotImplemented(cmd);
             default:
@@ -141,18 +182,25 @@ export class CommandHandler {
     }
 
     /**
-     * Handle PAN command - pan map to coordinates or aircraft
+     * Handle PAN command - pan map to coordinates, an aircraft, or a direction
      * Usage: PAN <lat>,<lon> or PAN <lat> <lon> or PAN <aircraft_id>
+     *        or PAN LEFT/RIGHT/UP/DOWN (half a screen, like BlueSky's GUI)
      */
     private handlePanCommand(args: string): CommandResult {
         if (!args || args.trim().length === 0) {
-            this.sendEcho('PAN command requires coordinates (e.g., PAN 52.3,4.8) or aircraft ID (e.g., PAN AF265)', 'warning');
+            this.sendEcho('PAN command requires coordinates (e.g., PAN 52.3,4.8), an aircraft ID (e.g., PAN AF265), or LEFT/RIGHT/UP/DOWN', 'warning');
             return { handled: true, sendToServer: false };
         }
 
         const mapDisplay = this.requireMapInitialized();
         if (!mapDisplay) {
             return { handled: true, sendToServer: false };
+        }
+
+        // Directional pan (BlueSky: PAN LEFT/RIGHT/UP/DOWN)
+        const direction = args.trim().toUpperCase();
+        if (['LEFT', 'RIGHT', 'UP', 'DOWN'].includes(direction)) {
+            return this.handlePanDirection(direction, mapDisplay);
         }
 
         // Try to parse as coordinates first (format: "lat,lon" or "lat lon")
@@ -257,6 +305,247 @@ export class CommandHandler {
         this.sendEcho('Zoomed out', 'success');
 
         return { handled: true, sendToServer: false };
+    }
+
+    /**
+     * Pan half the visible span in a screen direction (BlueSky: PAN LEFT/...)
+     */
+    private handlePanDirection(direction: string, mapDisplay: MapDisplay): CommandResult {
+        const bounds = mapDisplay.getCurrentBounds();
+        if (!bounds || bounds.length !== 4) {
+            this.sendEcho('Unable to get map bounds', 'error');
+            return { handled: true, sendToServer: false };
+        }
+
+        const [west, south, east, north] = bounds;
+        const latStep = (north - south) / 2;
+        const lonStep = (east - west) / 2;
+
+        const [lon, lat] = mapDisplay.getCenter();
+        let newLat = lat;
+        let newLon = lon;
+        switch (direction) {
+            case 'UP': newLat += latStep; break;
+            case 'DOWN': newLat -= latStep; break;
+            case 'LEFT': newLon -= lonStep; break;
+            case 'RIGHT': newLon += lonStep; break;
+        }
+        newLat = Math.max(-90, Math.min(90, newLat));
+
+        mapDisplay.panTo(newLat, newLon);
+        this.sendEcho(`Panned ${direction.toLowerCase()}`, 'success');
+
+        return { handled: true, sendToServer: false };
+    }
+
+    /**
+     * Handle BlueSky's +/- console shorthand: each + or = zooms in one
+     * sqrt(2) step, each - zooms out one. On MapLibre's log2 zoom scale a
+     * sqrt(2) factor is 0.5 zoom levels.
+     */
+    private handleZoomShorthand(token: string): CommandResult {
+        const mapDisplay = this.requireMapInitialized();
+        if (!mapDisplay) {
+            return { handled: true, sendToServer: false };
+        }
+
+        let steps = 0;
+        for (const ch of token) {
+            steps += ch === '-' ? -1 : 1;
+        }
+
+        const newZoom = mapDisplay.getZoom() + 0.5 * steps;
+        mapDisplay.setZoom(newZoom);
+        this.sendEcho(`Zoom set to ${newZoom.toFixed(1)}`, 'success');
+
+        return { handled: true, sendToServer: false };
+    }
+
+    /**
+     * Handle the SHOW* display toggles (SHOWTRAF, SHOWPZ, SHOWPOLY, SHOWAPT,
+     * SHOWWPT). Without an argument the option is toggled; with ON/OFF or a
+     * number (BlueSky uses 0/1/2 detail levels for some) it is set.
+     */
+    private handleShowToggleCommand(cmd: string, args: string): CommandResult {
+        const { stateKey, label } = CommandHandler.SHOW_COMMAND_OPTIONS[cmd];
+
+        const flag = this.parseToggleFlag(args.trim().split(/\s+/)[0] || '');
+        if (flag === null) {
+            this.sendEcho(`Invalid argument for ${cmd}. Use ON/OFF, or no argument to toggle`, 'warning');
+            return { handled: true, sendToServer: false };
+        }
+
+        const applied = this.setDisplayOption(stateKey, flag);
+        if (applied !== null) {
+            this.sendEcho(`${label} ${applied ? 'shown' : 'hidden'}`, 'success');
+        }
+
+        return { handled: true, sendToServer: false };
+    }
+
+    /**
+     * Handle LABEL command - cycle or set the aircraft label detail level,
+     * mirroring BlueSky's LABEL 0/1/2:
+     *   0 = labels off, 1 = callsign only, 2 = full detail
+     * Without an argument the level cycles 0 → 1 → 2 → 0.
+     */
+    private handleLabelCommand(args: string): CommandResult {
+        const arg = args.trim().split(/\s+/)[0] || '';
+        const upper = arg.toUpperCase();
+
+        let level: number;
+        if (!arg) {
+            level = (this.currentLabelLevel() + 1) % 3;
+        } else if (upper === 'ON' || upper === 'TRUE' || upper === 'YES') {
+            level = 2;
+        } else if (upper === 'OFF' || upper === 'FALSE' || upper === 'NO') {
+            level = 0;
+        } else {
+            const parsed = parseInt(arg, 10);
+            if (isNaN(parsed)) {
+                this.sendEcho('Invalid argument for LABEL. Use 0 (off), 1 (callsign), 2 (full), or no argument to cycle', 'warning');
+                return { handled: true, sendToServer: false };
+            }
+            level = Math.max(0, Math.min(2, parsed));
+        }
+
+        if (level === 0) {
+            this.setDisplayOption('showAircraftLabels', false);
+        } else {
+            // Enabling the master toggle switches every sub-option on, so the
+            // detail sub-options must be set after it.
+            this.setDisplayOption('showAircraftLabels', true);
+            this.setDisplayOption('showAircraftId', true);
+            const detail = level === 2;
+            this.setDisplayOption('showAircraftType', detail);
+            this.setDisplayOption('showAircraftSpeed', detail);
+            this.setDisplayOption('showAircraftAltitude', detail);
+        }
+
+        const description = ['off', 'callsign only', 'full detail'][level];
+        this.sendEcho(`Aircraft labels: ${description}`, 'success');
+
+        return { handled: true, sendToServer: false };
+    }
+
+    /**
+     * Current LABEL detail level derived from the display options:
+     * 0 = labels off, 1 = callsign only, 2 = any further detail shown.
+     */
+    private currentLabelLevel(): number {
+        const options = this.app.getStateManager().getDisplayOptions();
+        if (!options.showAircraftLabels) return 0;
+        return (options.showAircraftType || options.showAircraftSpeed || options.showAircraftAltitude) ? 2 : 1;
+    }
+
+    /**
+     * Handle SWRAD command - BlueSky's classic radar-display switch:
+     *   SWRAD APT/WPT/LABEL/SYM/TRAIL/POLY [level]
+     * Each switch maps onto the matching WebATM display option. GEO/SAT
+     * (coastlines/satellite background) have no equivalent here because the
+     * basemap is a fixed part of the MapLibre style.
+     */
+    private handleSwradCommand(args: string): CommandResult {
+        const parts = args.trim().split(/\s+/).filter(p => p.length > 0);
+        const usage = 'Usage: SWRAD APT/WPT/LABEL/SYM/TRAIL/POLY [level]';
+        if (parts.length === 0) {
+            this.sendEcho(usage, 'warning');
+            return { handled: true, sendToServer: false };
+        }
+
+        const sw = parts[0].toUpperCase();
+        const rawArg = parts[1];
+        const numArg = rawArg !== undefined ? parseInt(rawArg, 10) : undefined;
+        if (rawArg !== undefined && (numArg === undefined || isNaN(numArg))) {
+            this.sendEcho(`Invalid level for SWRAD ${sw}: ${rawArg}`, 'warning');
+            return { handled: true, sendToServer: false };
+        }
+        // Numeric level: 0 hides, anything above shows (BlueSky's higher
+        // levels add detail the web renderer does not distinguish)
+        const flag = numArg === undefined ? undefined : numArg > 0;
+
+        switch (sw) {
+            case 'APT':
+                return this.applySwradToggle('showAirports', 'Airports', flag);
+            case 'WPT':
+            case 'VOR':
+                return this.applySwradToggle('showWaypoints', 'Waypoints', flag);
+            case 'POLY':
+                return this.applySwradToggle('showShapes', 'Shapes', flag);
+            case 'TRAIL':
+            case 'TRAILS':
+                return this.applySwradToggle('showAircraftTrails', 'Aircraft trails', flag);
+            case 'LABEL':
+                return this.handleLabelCommand(rawArg ?? '');
+            case 'SYM':
+                return this.handleSymSwitch(numArg);
+            case 'GEO':
+            case 'SAT':
+            case 'GRID':
+            case 'ADSBCOVERAGE':
+                this.sendEcho(`SWRAD ${sw} is not applicable in WebATM - the map background is part of the basemap style (see Map Controls)`, 'info');
+                return { handled: true, sendToServer: false };
+            default:
+                this.sendEcho(`Unknown SWRAD switch: ${sw}. ${usage}`, 'warning');
+                return { handled: true, sendToServer: false };
+        }
+    }
+
+    /** Set or toggle one display option for SWRAD and echo the result. */
+    private applySwradToggle(stateKey: keyof DisplayOptions, label: string, flag?: boolean): CommandResult {
+        const applied = this.setDisplayOption(stateKey, flag);
+        if (applied !== null) {
+            this.sendEcho(`${label} ${applied ? 'shown' : 'hidden'}`, 'success');
+        }
+        return { handled: true, sendToServer: false };
+    }
+
+    /**
+     * SWRAD SYM mirrors BlueSky's symbol level: 0 = no aircraft, 1 = aircraft
+     * only, 2 = aircraft + protected zones. Without a level it cycles the way
+     * BlueSky's GUI does.
+     */
+    private handleSymSwitch(numArg?: number): CommandResult {
+        let level = numArg;
+        if (level === undefined) {
+            const options = this.app.getStateManager().getDisplayOptions();
+            level = options.showProtectedZones ? 0 : (options.showAircraft ? 2 : 1);
+        }
+
+        this.setDisplayOption('showAircraft', level > 0);
+        this.setDisplayOption('showProtectedZones', level > 1);
+        this.sendEcho(`Aircraft symbols ${level > 0 ? 'shown' : 'hidden'}, protected zones ${level > 1 ? 'shown' : 'hidden'}`, 'success');
+
+        return { handled: true, sendToServer: false };
+    }
+
+    /**
+     * Parse an optional ON/OFF-style toggle argument.
+     * Returns true/false for a recognized value, undefined for an empty
+     * argument (meaning: toggle), and null for an unparseable one.
+     */
+    private parseToggleFlag(arg: string): boolean | undefined | null {
+        if (!arg) return undefined;
+        const upper = arg.toUpperCase();
+        if (upper === 'ON' || upper === 'TRUE' || upper === 'YES') return true;
+        if (upper === 'OFF' || upper === 'FALSE' || upper === 'NO') return false;
+        const num = Number(arg);
+        if (!isNaN(num)) return num > 0;
+        return null;
+    }
+
+    /**
+     * Set (or toggle, when value is undefined) a boolean display option via
+     * the DisplayOptionsPanel, so the panel checkbox, localStorage, and
+     * StateManager all stay in sync. Echoes an error when the option cannot
+     * be applied (e.g. panel not wired up yet).
+     */
+    private setDisplayOption(stateKey: keyof DisplayOptions, value?: boolean): boolean | null {
+        const applied = this.app.getDisplayOptionsPanel().setBooleanOption(stateKey, value);
+        if (applied === null) {
+            this.sendEcho('Display options are not available yet', 'error');
+        }
+        return applied;
     }
 
     /**

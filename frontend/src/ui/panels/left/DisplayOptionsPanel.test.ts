@@ -183,4 +183,37 @@ describe('DisplayOptionsPanel', () => {
             expect(storage.get<boolean>('show-route-lines')).toBe(false);
         });
     });
+
+    describe('setBooleanOption (console command API)', () => {
+        it('toggles an independent option and syncs storage and state', () => {
+            const { panel, stateManager } = createPanel();
+
+            // showAircraft defaults to true; toggling flips it off
+            expect(panel.setBooleanOption('showAircraft')).toBe(false);
+            expect(stateManager.getDisplayOptions().showAircraft).toBe(false);
+            expect(storage.get<boolean>('show-aircraft')).toBe(false);
+
+            // Explicit value is applied as-is
+            expect(panel.setBooleanOption('showAircraft', true)).toBe(true);
+            expect(stateManager.getDisplayOptions().showAircraft).toBe(true);
+        });
+
+        it('drives a master toggle exactly like a checkbox click', () => {
+            const { panel, stateManager } = createPanel();
+
+            expect(panel.setBooleanOption('showRoutes', false)).toBe(false);
+
+            expect(stateManager.getDisplayOptions().showRoutes).toBe(false);
+            expect(stateManager.getDisplayOptions().showRouteLines).toBe(false);
+            expect(checkbox('show-routes').checked).toBe(false);
+            expect(checkbox('show-route-lines').checked).toBe(false);
+            expect(containerDisplay('show-route-labels-container')).toBe('none');
+            expect(storage.get<boolean>('show-routes')).toBe(false);
+        });
+
+        it('returns null for a non-boolean display option', () => {
+            const { panel } = createPanel();
+            expect(panel.setBooleanOption('aircraftIconColor')).toBe(null);
+        });
+    });
 });

@@ -19,6 +19,16 @@ const mockSocket = vi.hoisted(() => ({
     fire(event: string, data?: unknown) {
         this.listeners.get(event)?.(data);
     },
+    // The Manager (socket.io) - carries the reconnect lifecycle events.
+    io: {
+        listeners: new Map<string, EventCallback>(),
+        on(event: string, cb: EventCallback) {
+            this.listeners.set(event, cb);
+        },
+        fire(event: string, data?: unknown) {
+            this.listeners.get(event)?.(data);
+        },
+    },
     emit: vi.fn(),
     connect: vi.fn(),
     disconnect: vi.fn(),
@@ -47,6 +57,7 @@ describe('SocketManager initial_data snapshot', () => {
 
     beforeEach(() => {
         mockSocket.listeners.clear();
+        mockSocket.io.listeners.clear();
         stateManager = new StateManager();
         new SocketManager(stateManager);
     });
@@ -94,6 +105,7 @@ describe('SocketManager shape events', () => {
 
     beforeEach(() => {
         mockSocket.listeners.clear();
+        mockSocket.io.listeners.clear();
         stateManager = new StateManager();
         new SocketManager(stateManager);
     });
@@ -113,5 +125,66 @@ describe('SocketManager shape events', () => {
     it('ignores an empty polyline envelope', () => {
         mockSocket.fire('polyline', { polys: {} });
         expect(stateManager.getShapeCount()).toBe(0);
+    });
+});
+
+describe('SocketManager reconnect lifecycle', () => {
+    let socketManager: SocketManager;
+
+    beforeEach(() => {
+        mockSocket.listeners.clear();
+        mockSocket.io.listeners.clear();
+        socketManager = new SocketManager(new StateManager());
+    });
+
+    // socket.io v4 emits these on the Manager; a listener on the Socket
+    // itself never fires (the pre-fix bug).
+    it('registers reconnect listeners on the manager, not the socket', () => {
+        expect(mockSocket.io.listeners.has('reconnect')).toBe(true);
+        expect(mockSocket.io.listeners.has('reconnect_error')).toBe(true);
+        expect(mockSocket.listeners.has('reconnect')).toBe(false);
+        expect(mockSocket.listeners.has('reconnect_error')).toBe(false);
+    });
+
+    it('invokes onReconnect when the manager reconnects', () => {
+        const onReconnect = vi.fn();
+        socketManager.setEventHandlers({ onReconnect });
+
+        mockSocket.io.fire('reconnect', 3);
+        expect(onReconnect).toHaveBeenCalledWith(3);
+    });
+
+    it('invokes onReconnectError on a failed reconnection attempt', () => {
+        const onReconnectError = vi.fn();
+        socketManager.setEventHandlers({ onReconnectError });
+
+        const error = new Error('server unreachable');
+        mockSocket.io.fire('reconnect_error', error);
+        expect(onReconnectError).toHaveBeenCalledWith(error);
+    });
+});
+
+describe('SocketManager sendCommand', () => {
+    let socketManager: SocketManager;
+
+    beforeEach(() => {
+        mockSocket.listeners.clear();
+        mockSocket.io.listeners.clear();
+        mockSocket.emit.mockClear();
+        socketManager = new SocketManager(new StateManager());
+    });
+
+    it('emits the command and resolves true when connected', async () => {
+        mockSocket.fire('connect');
+
+        await expect(socketManager.sendCommand('MCRE 5')).resolves.toBe(true);
+        expect(mockSocket.emit).toHaveBeenCalledWith('command', { command: 'MCRE 5' });
+    });
+
+    it('resolves false without emitting when not connected', async () => {
+        mockSocket.fire('disconnect', 'transport close');
+
+        await expect(socketManager.sendCommand('MCRE 5')).resolves.toBe(false);
+        expect(mockSocket.emit).not.toHaveBeenCalledWith('command', expect.anything());
     });
 });

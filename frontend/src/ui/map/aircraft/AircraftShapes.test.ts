@@ -7,7 +7,7 @@
  * by hand. These tests fail if the two ever diverge.
  */
 import { describe, it, expect } from 'vitest';
-import { AIRCRAFT_SHAPES } from './AircraftShapes';
+import { AIRCRAFT_SHAPES, getShapeDrawer } from './AircraftShapes';
 import type { AircraftShapeType } from '../../../data/types';
 
 // Compile-time guard (verified by `tsc --noEmit`): the catalogue keys and the
@@ -30,5 +30,15 @@ describe('AIRCRAFT_SHAPES', () => {
 
     it('keeps chevron available as the default shape', () => {
         expect(AIRCRAFT_SHAPES.chevron?.drawer).toBeTypeOf('function');
+    });
+});
+
+describe('getShapeDrawer', () => {
+    it('returns the drawer for a known shape', () => {
+        expect(getShapeDrawer('drone')).toBe(AIRCRAFT_SHAPES.drone.drawer);
+    });
+
+    it('falls back to the chevron drawer for unknown shapes', () => {
+        expect(getShapeDrawer('no-such-shape')).toBe(AIRCRAFT_SHAPES.chevron.drawer);
     });
 });

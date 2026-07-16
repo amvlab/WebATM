@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CommandHandler } from './CommandHandler';
+import { LOCAL_COMMAND_SIGNATURES } from './CommandSignature';
 import { echoManager } from '../ui/EchoManager';
 import { connectionStatus } from '../core/ConnectionStatusService';
 import type { App } from '../core/App';
@@ -27,8 +28,19 @@ function createAppMock() {
         setZoom: vi.fn(),
         zoomIn: vi.fn(),
         zoomOut: vi.fn(),
+        getZoom: vi.fn(() => 8),
+        getCenter: vi.fn((): [number, number] => [4.5, 52.5]),
         // [west, south, east, north]
         getCurrentBounds: vi.fn(() => [4.0, 52.0, 5.0, 53.0]),
+    };
+    const displayOptions = {
+        showAircraft: true,
+        showProtectedZones: false,
+        showAircraftLabels: true,
+        showAircraftId: true,
+        showAircraftType: true,
+        showAircraftSpeed: true,
+        showAircraftAltitude: true,
     };
     const stateManager = {
         getState: vi.fn(() => ({
@@ -39,14 +51,21 @@ function createAppMock() {
                 tas: [250, 260],
             },
         })),
+        getDisplayOptions: vi.fn(() => ({ ...displayOptions })),
+    };
+    const displayOptionsPanel = {
+        // Mirrors the real contract: an explicit value is applied as-is, no
+        // value toggles (the mock always "toggles" to true).
+        setBooleanOption: vi.fn((_stateKey: string, value?: boolean) => value ?? true),
     };
     const socketManager = { disconnect: vi.fn() };
     const app = {
         getMapDisplay: () => mapDisplay,
         getStateManager: () => stateManager,
         getSocketManager: () => socketManager,
+        getDisplayOptionsPanel: () => displayOptionsPanel,
     } as unknown as App;
-    return { app, mapDisplay, stateManager, socketManager };
+    return { app, mapDisplay, stateManager, displayOptions, displayOptionsPanel, socketManager };
 }
 
 describe('CommandHandler', () => {
@@ -69,6 +88,15 @@ describe('CommandHandler', () => {
 
     it('passes unknown commands through to the server', () => {
         expect(handler.handleCommand('HDG KL123 90')).toEqual({ handled: false, sendToServer: true });
+    });
+
+    it('every handled command has a palette signature entry', () => {
+        // Keeps LOCAL_COMMAND_SIGNATURES (command palette) in sync with the
+        // commands CommandHandler actually intercepts.
+        for (const cmd of handler.getAllHandledCommands()) {
+            expect(LOCAL_COMMAND_SIGNATURES, `missing palette signature for ${cmd}`)
+                .toHaveProperty(cmd);
+        }
     });
 
     describe('PAN', () => {
@@ -164,10 +192,182 @@ describe('CommandHandler', () => {
     });
 
     it('reports not-yet-implemented local commands as handled', () => {
-        const result = handler.handleCommand('SHOWWPT');
+        const result = handler.handleCommand('FILTERALT');
         expect(result).toEqual({ handled: true, sendToServer: false });
         expect(addMessage).toHaveBeenCalledWith(
             expect.stringContaining('not yet implemented'), 'warning', 'webatm');
+    });
+
+    describe('PAN directions', () => {
+        it('pans up by half the visible latitude span', () => {
+            const result = handler.handleCommand('PAN UP');
+            // center [4.5, 52.5], lat span 1 → up = 52.5 + 0.5
+            expect(mocks.mapDisplay.panTo).toHaveBeenCalledWith(53.0, 4.5);
+            expect(result).toEqual({ handled: true, sendToServer: false });
+        });
+
+        it('pans left by half the visible longitude span', () => {
+            handler.handleCommand('PAN left');
+            expect(mocks.mapDisplay.panTo).toHaveBeenCalledWith(52.5, 4.0);
+        });
+    });
+
+    describe('+/- zoom shorthand', () => {
+        it('zooms in half a level per + or =', () => {
+            const result = handler.handleCommand('++');
+            expect(mocks.mapDisplay.setZoom).toHaveBeenCalledWith(9);
+            expect(result).toEqual({ handled: true, sendToServer: false });
+        });
+
+        it('zooms out half a level per -', () => {
+            handler.handleCommand('-');
+            expect(mocks.mapDisplay.setZoom).toHaveBeenCalledWith(7.5);
+        });
+
+        it('combines mixed tokens like BlueSky (+- is net zero, ++- is +0.5)', () => {
+            handler.handleCommand('++-');
+            expect(mocks.mapDisplay.setZoom).toHaveBeenCalledWith(8.5);
+        });
+    });
+
+    describe('SHOW* display toggles', () => {
+        it.each([
+            ['SHOWTRAF', 'showAircraft'],
+            ['SHOWPZ', 'showProtectedZones'],
+            ['SHOWPOLY', 'showShapes'],
+            ['SHOWAPT', 'showAirports'],
+            ['SHOWWPT', 'showWaypoints'],
+        ])('%s toggles %s without an argument', (cmd, stateKey) => {
+            const result = handler.handleCommand(cmd);
+            expect(mocks.displayOptionsPanel.setBooleanOption).toHaveBeenCalledWith(stateKey, undefined);
+            expect(result).toEqual({ handled: true, sendToServer: false });
+        });
+
+        it('applies explicit ON/OFF arguments', () => {
+            handler.handleCommand('SHOWTRAF OFF');
+            expect(mocks.displayOptionsPanel.setBooleanOption).toHaveBeenCalledWith('showAircraft', false);
+            handler.handleCommand('SHOWAPT ON');
+            expect(mocks.displayOptionsPanel.setBooleanOption).toHaveBeenCalledWith('showAirports', true);
+        });
+
+        it('treats numeric levels as 0 = off, >0 = on', () => {
+            handler.handleCommand('SHOWWPT 0');
+            expect(mocks.displayOptionsPanel.setBooleanOption).toHaveBeenCalledWith('showWaypoints', false);
+            handler.handleCommand('SHOWWPT 2');
+            expect(mocks.displayOptionsPanel.setBooleanOption).toHaveBeenCalledWith('showWaypoints', true);
+        });
+
+        it('warns on an unparseable argument', () => {
+            const result = handler.handleCommand('SHOWTRAF MAYBE');
+            expect(mocks.displayOptionsPanel.setBooleanOption).not.toHaveBeenCalled();
+            expect(result).toEqual({ handled: true, sendToServer: false });
+            expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('Invalid argument'), 'warning', 'webatm');
+        });
+    });
+
+    describe('LABEL', () => {
+        it('LABEL 0 switches labels off', () => {
+            handler.handleCommand('LABEL 0');
+            expect(mocks.displayOptionsPanel.setBooleanOption).toHaveBeenCalledWith('showAircraftLabels', false);
+        });
+
+        it('LABEL 1 shows callsign only', () => {
+            handler.handleCommand('LABEL 1');
+            const calls = mocks.displayOptionsPanel.setBooleanOption.mock.calls;
+            expect(calls).toContainEqual(['showAircraftLabels', true]);
+            expect(calls).toContainEqual(['showAircraftId', true]);
+            expect(calls).toContainEqual(['showAircraftType', false]);
+            expect(calls).toContainEqual(['showAircraftSpeed', false]);
+            expect(calls).toContainEqual(['showAircraftAltitude', false]);
+        });
+
+        it('LABEL 2 shows full detail', () => {
+            handler.handleCommand('LABEL 2');
+            const calls = mocks.displayOptionsPanel.setBooleanOption.mock.calls;
+            expect(calls).toContainEqual(['showAircraftLabels', true]);
+            expect(calls).toContainEqual(['showAircraftAltitude', true]);
+        });
+
+        it('cycles 2 → 0 without an argument (full detail is level 2)', () => {
+            // Mock display options show full labels, i.e. level 2 → next is 0
+            handler.handleCommand('LABEL');
+            expect(mocks.displayOptionsPanel.setBooleanOption).toHaveBeenCalledWith('showAircraftLabels', false);
+        });
+    });
+
+    describe('SWRAD', () => {
+        it('shows usage without arguments', () => {
+            const result = handler.handleCommand('SWRAD');
+            expect(result).toEqual({ handled: true, sendToServer: false });
+            expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('Usage: SWRAD'), 'warning', 'webatm');
+        });
+
+        it.each([
+            ['SWRAD APT', 'showAirports'],
+            ['SWRAD WPT', 'showWaypoints'],
+            ['SWRAD POLY', 'showShapes'],
+            ['SWRAD TRAIL', 'showAircraftTrails'],
+        ])('%s toggles %s', (cmd, stateKey) => {
+            handler.handleCommand(cmd);
+            expect(mocks.displayOptionsPanel.setBooleanOption).toHaveBeenCalledWith(stateKey, undefined);
+        });
+
+        it('SWRAD APT 0 hides airports', () => {
+            handler.handleCommand('SWRAD APT 0');
+            expect(mocks.displayOptionsPanel.setBooleanOption).toHaveBeenCalledWith('showAirports', false);
+        });
+
+        it('SWRAD SYM 2 shows aircraft and protected zones', () => {
+            handler.handleCommand('SWRAD SYM 2');
+            const calls = mocks.displayOptionsPanel.setBooleanOption.mock.calls;
+            expect(calls).toContainEqual(['showAircraft', true]);
+            expect(calls).toContainEqual(['showProtectedZones', true]);
+        });
+
+        it('SWRAD SYM without a level cycles from the current state', () => {
+            // Mock state: aircraft shown, PZ hidden → BlueSky cycles to level 2
+            handler.handleCommand('SWRAD SYM');
+            const calls = mocks.displayOptionsPanel.setBooleanOption.mock.calls;
+            expect(calls).toContainEqual(['showAircraft', true]);
+            expect(calls).toContainEqual(['showProtectedZones', true]);
+        });
+
+        it('SWRAD LABEL 1 drives the LABEL logic', () => {
+            handler.handleCommand('SWRAD LABEL 1');
+            const calls = mocks.displayOptionsPanel.setBooleanOption.mock.calls;
+            expect(calls).toContainEqual(['showAircraftLabels', true]);
+            expect(calls).toContainEqual(['showAircraftSpeed', false]);
+        });
+
+        it('explains that GEO/SAT are part of the basemap', () => {
+            handler.handleCommand('SWRAD GEO');
+            expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('basemap'), 'info', 'webatm');
+        });
+
+        it('warns on unknown switches', () => {
+            handler.handleCommand('SWRAD NOPE');
+            expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('Unknown SWRAD switch'), 'warning', 'webatm');
+        });
+    });
+
+    describe('QUIT aliases', () => {
+        it.each(['CLOSE', 'END', 'EXIT', 'Q', 'STOP'])('%s behaves like QUIT', (alias) => {
+            const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+            vi.stubGlobal('fetch', fetchMock);
+
+            const result = handler.handleCommand(alias);
+
+            expect(fetchMock).toHaveBeenCalledWith(
+                '/api/server/disconnect',
+                expect.objectContaining({ method: 'POST' }),
+            );
+            expect(setBlueSkyConnected).toHaveBeenCalledWith(false);
+            expect(result).toEqual({ handled: true, sendToServer: false });
+        });
     });
 
     describe('aircraft type warnings for CRE/MCRE', () => {

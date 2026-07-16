@@ -2,8 +2,6 @@ import type { IEntityRenderer } from '../rendering/IEntityRenderer';
 import { Aircraft2DRenderer } from './Aircraft2DRenderer';
 import type { AircraftData, DisplayOptions } from '../../../data/types';
 import type { StateManager } from '../../../core/StateManager';
-import { AIRCRAFT_SHAPES } from './AircraftShapes';
-import type { AircraftShapeDrawer } from './AircraftRenderer';
 import type { AircraftRoute3DRenderer } from './AircraftRoute3DRenderer';
 import { logger } from '../../../utils/Logger';
 
@@ -19,8 +17,7 @@ export class AircraftRendererFactory {
         displayOptions: DisplayOptions,
         stateManager: StateManager
     ): IEntityRenderer<AircraftData> {
-        const shapeDrawer = this.getShapeDrawer(displayOptions.aircraftShape);
-        return new Aircraft2DRenderer(displayOptions, shapeDrawer, stateManager);
+        return new Aircraft2DRenderer(displayOptions, stateManager);
     }
 
     /**
@@ -57,10 +54,5 @@ export class AircraftRendererFactory {
             logger.warn('AircraftRendererFactory', 'Failed to load 3D route renderer:', error);
             return null;
         }
-    }
-
-    private static getShapeDrawer(shapeType: string): AircraftShapeDrawer {
-        const shapeConfig = AIRCRAFT_SHAPES[shapeType as keyof typeof AIRCRAFT_SHAPES];
-        return shapeConfig ? shapeConfig.drawer : AIRCRAFT_SHAPES.chevron.drawer;
     }
 }
