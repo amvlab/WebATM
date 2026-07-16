@@ -873,6 +873,8 @@
                     <select id="shape-type-select">
                         <option value="area">Area (Polygon)</option>
                         <option value="line">Line (Polyline)</option>
+                        <option value="circle">Circle</option>
+                        <option value="box">Box (Rectangle)</option>
                     </select>
                     <small class="setting-help">Choose the type of shape to draw</small>
                 </div>
@@ -887,8 +889,8 @@
                     <input type="number" id="polygon-bottom-input" placeholder="e.g. 5000" min="0" max="99999" step="1">
                     <label for="polygon-top-input">Top Altitude (ft):</label>
                     <input type="number" id="polygon-top-input" placeholder="e.g. 10000" min="1" max="99999" step="1">
-                    <small class="setting-help">Leave altitudes blank for 2D area, or fill both for 3D altitude
-                        area</small>
+                    <small class="setting-help">Leave altitudes blank for a 2D shape, or fill both for a 3D
+                        volume</small>
                 </div>
             </div>
             <div class="modal-footer">

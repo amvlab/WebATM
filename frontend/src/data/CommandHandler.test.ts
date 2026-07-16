@@ -68,6 +68,14 @@ function createAppMock() {
     return { app, mapDisplay, stateManager, displayOptions, displayOptionsPanel, socketManager };
 }
 
+/** Stub global fetch to answer /api/navdata/search with the given results. */
+function stubNavdataSearch(results: object[]) {
+    const fetchMock = vi.fn(() =>
+        Promise.resolve({ json: () => Promise.resolve({ success: true, results }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+}
+
 describe('CommandHandler', () => {
     let mocks: ReturnType<typeof createAppMock>;
     let handler: CommandHandler;
@@ -116,12 +124,51 @@ describe('CommandHandler', () => {
             expect(mocks.mapDisplay.panTo).toHaveBeenCalledWith(48.8, 2.3);
         });
 
-        it('rejects out-of-range coordinates and falls back to callsign lookup', () => {
+        it('rejects out-of-range coordinates and falls back to ident lookup', async () => {
+            stubNavdataSearch([]);
             const result = handler.handleCommand('PAN 95,200');
-            expect(mocks.mapDisplay.panTo).not.toHaveBeenCalled();
             expect(result).toEqual({ handled: true, sendToServer: false });
+            await vi.waitFor(() => expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('not found'), 'warning', 'webatm'));
+            expect(mocks.mapDisplay.panTo).not.toHaveBeenCalled();
+        });
+
+        it('pans to an airport/waypoint via the navdata index', async () => {
+            stubNavdataSearch([
+                { kind: 'airport', ident: 'EHAM', name: 'Amsterdam Schiphol', lat: 52.31, lon: 4.76 },
+            ]);
+            const result = handler.handleCommand('PAN eham');
+            expect(result).toEqual({ handled: true, sendToServer: false });
+            await vi.waitFor(() =>
+                expect(mocks.mapDisplay.panTo).toHaveBeenCalledWith(52.31, 4.76));
             expect(addMessage).toHaveBeenCalledWith(
-                expect.stringContaining('not found'), 'warning', 'webatm');
+                expect.stringContaining('airport EHAM'), 'success', 'webatm');
+        });
+
+        it('prefers a matching aircraft over the navdata index', () => {
+            const fetchMock = stubNavdataSearch([
+                { kind: 'waypoint', ident: 'AF265', name: '', lat: 0, lon: 0 },
+            ]);
+            handler.handleCommand('PAN AF265');
+            expect(mocks.mapDisplay.panTo).toHaveBeenCalledWith(48.8, 2.3);
+            expect(fetchMock).not.toHaveBeenCalled();
+        });
+
+        it('ignores navdata results that only prefix-match the ident', async () => {
+            stubNavdataSearch([
+                { kind: 'airport', ident: 'EHAMX', name: 'Not it', lat: 1, lon: 2 },
+            ]);
+            handler.handleCommand('PAN EHAM');
+            await vi.waitFor(() => expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('not found'), 'warning', 'webatm'));
+            expect(mocks.mapDisplay.panTo).not.toHaveBeenCalled();
+        });
+
+        it('warns instead of throwing when the navdata request fails', async () => {
+            vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+            handler.handleCommand('PAN EHAM');
+            await vi.waitFor(() => expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('not found'), 'warning', 'webatm'));
         });
 
         it('warns when called without arguments', () => {

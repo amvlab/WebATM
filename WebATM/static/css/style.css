@@ -1786,6 +1786,88 @@ html.wa-open-threeD-controls #threeD-controls {
     color: var(--text-primary);
 }
 
+/* PAN destination autocomplete dropdown (aircraft + airports/waypoints) */
+.pan-autocomplete-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 40px;
+    right: 60px;
+    max-height: 220px;
+    overflow-y: auto;
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--accent-primary);
+    border-radius: 4px 4px 0 0;
+    z-index: 100;
+    box-shadow: 0 -4px 12px var(--shadow-medium);
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-primary) var(--bg-elevated);
+}
+
+.pan-dropdown-item {
+    padding: 4px 10px;
+    color: var(--console-success);
+    font-family: var(--font-family-mono);
+    font-size: var(--console-input-font-size);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pan-dropdown-item:hover,
+.pan-dropdown-item.selected {
+    background-color: var(--accent-primary-bg);
+    color: var(--text-primary);
+}
+
+.pan-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.pan-badge {
+    flex: 0 0 auto;
+    width: 32px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 0;
+    border-radius: 3px;
+    color: var(--bg-sunken);
+}
+
+.pan-badge-aircraft {
+    background: var(--accent-primary);
+}
+
+.pan-badge-airport {
+    background: var(--accent-info);
+}
+
+.pan-badge-heliport {
+    background: var(--accent-warning-strong);
+}
+
+.pan-badge-waypoint {
+    background: var(--text-muted);
+}
+
+.pan-item-ident {
+    flex: 0 0 auto;
+    font-weight: 600;
+}
+
+.pan-item-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
 /* Aircraft Type dropdown inside the Create Aircraft modal */
 .actype-input-wrapper {
     position: relative;
