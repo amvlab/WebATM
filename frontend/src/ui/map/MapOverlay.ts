@@ -7,7 +7,6 @@ import { AircraftRendererFactory } from './aircraft/AircraftRendererFactory';
 import type { IEntityRenderer } from './rendering/IEntityRenderer';
 import { AircraftRoutes } from './aircraft/AircraftRoutes';
 import type { AircraftRoute3DRenderer } from './aircraft/AircraftRoute3DRenderer';
-import { AIRCRAFT_SHAPES } from './aircraft/AircraftShapes';
 import { StateManager } from '../../core/StateManager';
 import { logger } from '../../utils/Logger';
 
@@ -290,20 +289,12 @@ export class MapOverlay {
                 this.aircraft3DRenderer.updateEntities(aircraftMap, simTime);
             }
 
-            // Feed selected aircraft position/altitude into the 3D route renderer
-            // so unconstrained route segments track the aircraft's current altitude.
-            if (this.is3DOverlayActive && this.aircraftRoute3DRenderer) {
-                const selectedId = this.stateManager.getState().selectedAircraft;
-                if (selectedId && aircraftData.id) {
-                    const idx = aircraftData.id.indexOf(selectedId);
-                    if (idx >= 0) {
-                        this.aircraftRoute3DRenderer.setAircraftState(
-                            aircraftData.lat[idx],
-                            aircraftData.lon[idx],
-                            aircraftData.alt[idx]
-                        );
-                    }
-                }
+            // Keep unconstrained 3D route segments tracking the selected
+            // aircraft's current altitude. This handler runs from the
+            // aircraftData state subscription, so the state already holds
+            // the data the helper reads.
+            if (this.is3DOverlayActive) {
+                this.seedAircraftStateFor3DRoute();
             }
         }
     }
@@ -373,19 +364,9 @@ export class MapOverlay {
         // Get full display options by merging partial with current
         const fullOptions = { ...this.stateManager.getDisplayOptions(), ...options };
 
-        // Always update 2D renderer
+        // Always update 2D renderer (it also handles aircraft shape changes)
         if (this.aircraft2DRenderer) {
             this.aircraft2DRenderer.updateDisplayOptions(fullOptions);
-
-            // If aircraft shape changed, update the shape
-            if (options.aircraftShape) {
-                const renderer2D = this.getAircraftRenderer();
-                const shapeConfig = AIRCRAFT_SHAPES[options.aircraftShape];
-                if (renderer2D && shapeConfig) {
-                    renderer2D.setAircraftShape(shapeConfig.drawer);
-                    logger.info('MapOverlay', 'Aircraft shape updated to:', options.aircraftShape);
-                }
-            }
         }
 
         // Update 3D renderer if active
@@ -499,8 +480,9 @@ export class MapOverlay {
     }
 
     /**
-     * Push the selected aircraft's current position/altitude to the 3D route
-     * renderer from the state manager. Used when enabling the overlay.
+     * Push the selected aircraft's current position/altitude from the state
+     * manager to the 3D route renderer. Called when enabling the overlay, on
+     * selection changes, and on every aircraft data update.
      */
     private seedAircraftStateFor3DRoute(): void {
         if (!this.aircraftRoute3DRenderer) return;
