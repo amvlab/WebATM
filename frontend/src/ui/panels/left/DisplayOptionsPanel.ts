@@ -507,10 +507,13 @@ export class DisplayOptionsPanel extends BasePanel {
      * mirrors into a DisplayOptions flag.
      */
     private bindBooleanOption(id: string, stateKey: keyof DisplayOptions): void {
-        this.bindCheckbox(id, (checked) => {
-            storage.set(id, checked);
-            this.stateManager?.updateDisplayOptions({ [stateKey]: checked } as Partial<DisplayOptions>);
-        });
+        this.bindCheckbox(id, (checked) => this.applyBooleanOption({ id, stateKey }, checked));
+    }
+
+    /** Persist and mirror a single boolean option into state. */
+    private applyBooleanOption(spec: BooleanOptionSpec, checked: boolean): void {
+        storage.set(spec.id, checked);
+        this.stateManager?.updateDisplayOptions({ [spec.stateKey]: checked } as Partial<DisplayOptions>);
     }
 
     /**
@@ -523,17 +526,57 @@ export class DisplayOptionsPanel extends BasePanel {
         stateKey: keyof DisplayOptions,
         subOptions: ReadonlyArray<BooleanOptionSpec>
     ): void {
-        this.bindCheckbox(id, (checked) => {
-            storage.set(id, checked);
-            const update: Partial<DisplayOptions> = { [stateKey]: checked } as Partial<DisplayOptions>;
-            for (const sub of subOptions) {
-                storage.set(sub.id, checked);
-                this.setChecked(sub.id, checked);
-                (update as Record<string, unknown>)[sub.stateKey] = checked;
-            }
-            this.toggleSubOptionContainers(subOptions.map(sub => `${sub.id}-container`), checked);
-            this.stateManager?.updateDisplayOptions(update);
-        });
+        this.bindCheckbox(id, (checked) => this.applyMasterToggle({ id, stateKey, subOptions }, checked));
+    }
+
+    /**
+     * Apply a master toggle: persists every key, syncs the sub checkboxes and
+     * their `<sub-id>-container` visibility, and pushes one combined state
+     * update.
+     */
+    private applyMasterToggle(
+        toggle: { id: string; stateKey: keyof DisplayOptions; subOptions: ReadonlyArray<BooleanOptionSpec> },
+        checked: boolean
+    ): void {
+        storage.set(toggle.id, checked);
+        const update: Partial<DisplayOptions> = { [toggle.stateKey]: checked } as Partial<DisplayOptions>;
+        for (const sub of toggle.subOptions) {
+            storage.set(sub.id, checked);
+            this.setChecked(sub.id, checked);
+            (update as Record<string, unknown>)[sub.stateKey] = checked;
+        }
+        this.toggleSubOptionContainers(toggle.subOptions.map(sub => `${sub.id}-container`), checked);
+        this.stateManager?.updateDisplayOptions(update);
+    }
+
+    /**
+     * Set (or toggle, when `value` is omitted) one of the boolean map display
+     * options from outside the panel. Console commands (SHOWTRAF, SWRAD, ...)
+     * use this so they drive the exact same storage + checkbox + state
+     * pipeline as a click on the corresponding checkbox.
+     *
+     * Returns the applied value, or null when the stateKey is not a known
+     * boolean option (or the panel has no state manager yet).
+     */
+    public setBooleanOption(stateKey: keyof DisplayOptions, value?: boolean): boolean | null {
+        if (!this.stateManager) return null;
+        const next = value ?? !(this.stateManager.getDisplayOptions()[stateKey] as boolean);
+
+        const master = DisplayOptionsPanel.MASTER_TOGGLES.find(t => t.stateKey === stateKey);
+        if (master) {
+            this.setChecked(master.id, next);
+            this.applyMasterToggle(master, next);
+            return next;
+        }
+
+        const spec = DisplayOptionsPanel.allBooleanOptions().find(s => s.stateKey === stateKey);
+        if (spec) {
+            this.setChecked(spec.id, next);
+            this.applyBooleanOption(spec, next);
+            return next;
+        }
+
+        return null;
     }
 
     /**
