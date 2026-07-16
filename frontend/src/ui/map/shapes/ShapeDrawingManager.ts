@@ -13,16 +13,47 @@ import {
     setLayerVisibility,
     updateSourceFeatures
 } from '../../../utils/maplibre';
-import { buildShapeCommand } from './shapeCommand';
+import { buildShapeCommand, ShapeType } from './shapeCommand';
+import { boxCornerPoints, circleRingPoints, distanceNm } from './shapeGeometry';
+
+/** Modal title per shape type. */
+const SHAPE_TITLES: Record<ShapeType, string> = {
+    area: 'Draw Area',
+    line: 'Draw Line',
+    circle: 'Draw Circle',
+    box: 'Draw Box'
+};
+
+/** Word used in user-facing messages per shape type. */
+const SHAPE_WORDS: Record<ShapeType, string> = {
+    area: 'polygon',
+    line: 'line',
+    circle: 'circle',
+    box: 'box'
+};
+
+/** First-click instruction shown in the banner when drawing starts. */
+const START_INSTRUCTIONS: Record<ShapeType, string> = {
+    area: 'Click to add points, Right-click to finish, Esc to cancel',
+    line: 'Click to add points, Right-click to finish, Esc to cancel',
+    circle: 'Click the centre, then click to set the radius, Esc to cancel',
+    box: 'Click one corner, then the opposite corner, Esc to cancel'
+};
+
+/** Smallest accepted circle radius in nautical miles (~18 m). */
+const MIN_CIRCLE_RADIUS_NM = 0.01;
 
 /**
- * ShapeDrawingManager - Interactive polygon/polyline drawing on the map,
- * generating the POLY / POLYALT / POLYLINE command when the draw finishes.
+ * ShapeDrawingManager - Interactive shape drawing on the map, generating the
+ * POLY / POLYALT / POLYLINE / BOX / CIRCLE command when the draw finishes.
+ * Areas and lines are point-by-point (right-click finishes); boxes and
+ * circles are two clicks (corner/opposite-corner, centre/radius) and finish
+ * on the second click.
  */
 export class ShapeDrawingManager extends BaseDrawingManager {
     private app: App;
     private currentShapeName: string | null = null;
-    private currentShapeType: 'area' | 'line' = 'area';
+    private currentShapeType: ShapeType = 'area';
     private drawingPoints: DrawingPoint[] = [];
     private topAltitude: number | null = null;
     private bottomAltitude: number | null = null;
@@ -82,17 +113,19 @@ export class ShapeDrawingManager extends BaseDrawingManager {
 
     /** Sync the modal title and altitude-field visibility with the shape type. */
     private updateShapeTypeUI(): void {
-        const shapeType = (document.getElementById('shape-type-select') as HTMLSelectElement)?.value || 'area';
+        const shapeType = this.getSelectedShapeType();
         const modalTitle = document.getElementById('polygon-modal-title');
         const altitudeFields = document.getElementById('altitude-fields');
 
-        if (shapeType === 'area') {
-            if (modalTitle) modalTitle.textContent = 'Draw Area';
-            if (altitudeFields) altitudeFields.style.display = 'block';
-        } else {
-            if (modalTitle) modalTitle.textContent = 'Draw Line';
-            if (altitudeFields) altitudeFields.style.display = 'none';
-        }
+        if (modalTitle) modalTitle.textContent = SHAPE_TITLES[shapeType];
+        // Areas, boxes and circles all support a vertical extent; lines don't.
+        if (altitudeFields) altitudeFields.style.display = shapeType === 'line' ? 'none' : 'block';
+    }
+
+    /** Read the shape type from the modal's selector, defaulting to area. */
+    private getSelectedShapeType(): ShapeType {
+        const value = (document.getElementById('shape-type-select') as HTMLSelectElement | null)?.value;
+        return value && value in SHAPE_TITLES ? value as ShapeType : 'area';
     }
 
     /** Validate the modal inputs, then close it and start drawing. */
@@ -100,10 +133,9 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         const nameInput = document.getElementById('polygon-name-input') as HTMLInputElement;
         const topInput = document.getElementById('polygon-top-input') as HTMLInputElement;
         const bottomInput = document.getElementById('polygon-bottom-input') as HTMLInputElement;
-        const shapeTypeSelect = document.getElementById('shape-type-select') as HTMLSelectElement;
 
         const name = nameInput?.value.trim();
-        const shapeType = shapeTypeSelect?.value || 'area';
+        const shapeType = this.getSelectedShapeType();
 
         if (!name) {
             alert('Please enter a name for the shape');
@@ -120,10 +152,12 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         }
 
         this.currentShapeName = name;
-        this.currentShapeType = shapeType as 'area' | 'line';
+        this.currentShapeType = shapeType;
 
-        // Altitudes only apply to areas; both filled makes a POLYALT.
-        if (shapeType === 'area') {
+        // Altitudes apply to everything but lines; on an area both filled
+        // makes a POLYALT, on a box/circle they become the trailing
+        // [top,bottom] arguments.
+        if (shapeType !== 'line') {
             const topValue = topInput?.value;
             const bottomValue = bottomInput?.value;
 
@@ -158,11 +192,9 @@ export class ShapeDrawingManager extends BaseDrawingManager {
             drawBtn.classList.add('active');
         }
 
-        let bannerMessage = `Drawing "${this.currentShapeName}" - Click to add points, Right-click to finish, Esc to cancel`;
-        if (this.topAltitude !== null && this.bottomAltitude !== null) {
-            bannerMessage = `Drawing "${this.currentShapeName}" (${this.bottomAltitude}-${this.topAltitude}ft) - Click to add points, Right-click to finish, Esc to cancel`;
-        }
-        this.showDrawingBanner(bannerMessage);
+        this.showDrawingBanner(
+            `${this.getBannerPrefix()} - ${START_INSTRUCTIONS[this.currentShapeType]}`
+        );
         this.enableMapDrawing();
 
         logger.info('ShapeDrawingManager', `Started drawing ${this.currentShapeType}: ${this.currentShapeName}`);
@@ -206,10 +238,22 @@ export class ShapeDrawingManager extends BaseDrawingManager {
     protected onPointAdded(point: DrawingPoint): void {
         this.drawingPoints.push(point);
 
+        logger.debug('ShapeDrawingManager', `Added point ${this.drawingPoints.length}: ${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`);
+
+        // Boxes and circles are fully determined by two points - finish
+        // immediately instead of waiting for a right-click.
+        if (this.isTwoPointShape() && this.drawingPoints.length >= 2) {
+            void this.finishDrawing();
+            return;
+        }
+
         this.showDrawingBanner(this.getBannerMessage());
         this.updateTemporaryDrawing();
+    }
 
-        logger.debug('ShapeDrawingManager', `Added point ${this.drawingPoints.length}: ${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`);
+    /** Whether the current shape type finishes itself on the second click. */
+    private isTwoPointShape(): boolean {
+        return this.currentShapeType === 'box' || this.currentShapeType === 'circle';
     }
 
     /**
@@ -220,24 +264,43 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         this.updateCursorPreview(point);
     }
 
-    private getBannerMessage(): string {
-        const pointCount = this.drawingPoints.length;
-        let message = `Drawing "${this.currentShapeName}" - ${pointCount} point(s) (Right-click to finish, Esc to cancel)`;
+    /** Shared banner lead-in: shape name plus vertical extent when set. */
+    private getBannerPrefix(): string {
+        const alts = this.topAltitude !== null && this.bottomAltitude !== null
+            ? ` (${this.bottomAltitude}-${this.topAltitude}ft)`
+            : '';
+        return `Drawing "${this.currentShapeName}"${alts}`;
+    }
 
-        if (this.topAltitude !== null && this.bottomAltitude !== null) {
-            message = `Drawing "${this.currentShapeName}" (${this.bottomAltitude}-${this.topAltitude}ft) - ${pointCount} point(s) (Right-click to finish, Esc to cancel)`;
+    private getBannerMessage(liveRadiusNm?: number): string {
+        switch (this.currentShapeType) {
+            case 'box':
+                return `${this.getBannerPrefix()} - Click the opposite corner (Esc to cancel)`;
+            case 'circle': {
+                const radius = liveRadiusNm !== undefined ? ` - radius ${liveRadiusNm.toFixed(2)} nm` : '';
+                return `${this.getBannerPrefix()}${radius} - Click to set the radius (Esc to cancel)`;
+            }
+            default:
+                return `${this.getBannerPrefix()} - ${this.drawingPoints.length} point(s) (Right-click to finish, Esc to cancel)`;
         }
-
-        return message;
     }
 
     /** Finish the draw: build the shape command and send it to BlueSky. */
     protected async finishDrawing(): Promise<void> {
-        const minPoints = this.currentShapeType === 'line' ? 2 : 3;
-        const shapeType = this.currentShapeType === 'line' ? 'line' : 'polygon';
+        const minPoints = this.currentShapeType === 'area' ? 3 : 2;
 
         if (this.drawingPoints.length < minPoints) {
-            alert(`Need at least ${minPoints} points to create a ${shapeType}`);
+            alert(`Need at least ${minPoints} points to create a ${SHAPE_WORDS[this.currentShapeType]}`);
+            return;
+        }
+
+        // A circle whose rim click landed on the centre has no radius; drop
+        // the bad click and keep drawing instead of sending a degenerate
+        // CIRCLE command.
+        if (this.currentShapeType === 'circle'
+            && distanceNm(this.drawingPoints[0], this.drawingPoints[1]) < MIN_CIRCLE_RADIUS_NM) {
+            this.drawingPoints.pop();
+            alert('Click a point away from the centre to set the circle radius');
             return;
         }
 
@@ -383,24 +446,41 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         const features: GeoJSON.Feature[] = [];
 
         if (this.drawingPoints.length >= 1) {
-            // Line from last placed point to the cursor.
-            const lastPoint = this.drawingPoints[this.drawingPoints.length - 1];
-            features.push(lineStringFeature(
-                toLngLatCoords([lastPoint, cursorPoint]),
-                { preview: 'next-line' }
-            ));
-
-            // For areas with 2+ points, also preview the closing line and fill.
-            if (this.drawingPoints.length >= 2 && this.currentShapeType !== 'line') {
-                const firstPoint = this.drawingPoints[0];
+            if (this.currentShapeType === 'box') {
+                // Rectangle spanned by the first corner and the cursor.
+                const ring = toLngLatCoords(boxCornerPoints(this.drawingPoints[0], cursorPoint));
+                features.push(lineStringFeature([...ring, ring[0]], { preview: 'box-outline' }));
+                features.push(polygonFeature(ring, { preview: 'polygon-fill' }));
+            } else if (this.currentShapeType === 'circle') {
+                // Circle around the centre with the cursor on its rim; keep
+                // the live radius visible in the banner while aiming.
+                const radiusNm = distanceNm(this.drawingPoints[0], cursorPoint);
+                if (radiusNm >= MIN_CIRCLE_RADIUS_NM) {
+                    const ring = toLngLatCoords(circleRingPoints(this.drawingPoints[0], radiusNm));
+                    features.push(lineStringFeature([...ring, ring[0]], { preview: 'circle-outline' }));
+                    features.push(polygonFeature(ring, { preview: 'polygon-fill' }));
+                }
+                this.showDrawingBanner(this.getBannerMessage(radiusNm));
+            } else {
+                // Line from last placed point to the cursor.
+                const lastPoint = this.drawingPoints[this.drawingPoints.length - 1];
                 features.push(lineStringFeature(
-                    toLngLatCoords([cursorPoint, firstPoint]),
-                    { preview: 'closing-line' }
+                    toLngLatCoords([lastPoint, cursorPoint]),
+                    { preview: 'next-line' }
                 ));
-                features.push(polygonFeature(
-                    toLngLatCoords([...this.drawingPoints, cursorPoint]),
-                    { preview: 'polygon-fill' }
-                ));
+
+                // For areas with 2+ points, also preview the closing line and fill.
+                if (this.drawingPoints.length >= 2 && this.currentShapeType !== 'line') {
+                    const firstPoint = this.drawingPoints[0];
+                    features.push(lineStringFeature(
+                        toLngLatCoords([cursorPoint, firstPoint]),
+                        { preview: 'closing-line' }
+                    ));
+                    features.push(polygonFeature(
+                        toLngLatCoords([...this.drawingPoints, cursorPoint]),
+                        { preview: 'polygon-fill' }
+                    ));
+                }
             }
         }
 

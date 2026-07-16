@@ -52,6 +52,54 @@ describe('buildShapeCommand', () => {
         expect(cmd).toBe('POLY A3,1.000000,2.000000');
     });
 
+    it('builds a BOX from two opposite corners without altitudes', () => {
+        const cmd = buildShapeCommand({
+            name: 'B1',
+            type: 'box',
+            points: [{ lat: 52, lng: 4 }, { lat: 53, lng: 5.5 }],
+            topAltitude: null,
+            bottomAltitude: null
+        });
+        expect(cmd).toBe('BOX B1,52.000000,4.000000,53.000000,5.500000');
+    });
+
+    it('builds a BOX with trailing top,bottom altitudes', () => {
+        const cmd = buildShapeCommand({
+            name: 'B2',
+            type: 'box',
+            points: [{ lat: 52, lng: 4 }, { lat: 53, lng: 5.5 }],
+            topAltitude: 10000,
+            bottomAltitude: 2000
+        });
+        expect(cmd).toBe('BOX B2,52.000000,4.000000,53.000000,5.500000,10000,2000');
+    });
+
+    it('builds a CIRCLE from centre + rim point with the radius in nm', () => {
+        // Rim due north of the centre: 1 degree of latitude ~= 60.04 nm
+        // (haversine on the 6371 km mean Earth radius).
+        const cmd = buildShapeCommand({
+            name: 'C1',
+            type: 'circle',
+            points: [{ lat: 52, lng: 4 }, { lat: 53, lng: 4 }],
+            topAltitude: null,
+            bottomAltitude: null
+        });
+        const match = cmd.match(/^CIRCLE C1,52\.000000,4\.000000,(\d+\.\d{3})$/);
+        expect(match).not.toBeNull();
+        expect(parseFloat(match![1])).toBeCloseTo(60.04, 1);
+    });
+
+    it('builds a CIRCLE with trailing top,bottom altitudes', () => {
+        const cmd = buildShapeCommand({
+            name: 'C2',
+            type: 'circle',
+            points: [{ lat: 0, lng: 0 }, { lat: 0.5, lng: 0 }],
+            topAltitude: 5000,
+            bottomAltitude: 1000
+        });
+        expect(cmd).toMatch(/^CIRCLE C2,0\.000000,0\.000000,\d+\.\d{3},5000,1000$/);
+    });
+
     it('formats coordinates to six decimal places', () => {
         const cmd = buildShapeCommand({
             name: 'P',

@@ -18,7 +18,7 @@ vi.mock('../../ModalManager', () => ({
 function setupDom(): void {
     document.body.innerHTML = `
         <button id="create-polygon-btn"></button>
-        <select id="shape-type-select"><option value="area">area</option><option value="line">line</option></select>
+        <select id="shape-type-select"><option value="area">area</option><option value="line">line</option><option value="circle">circle</option><option value="box">box</option></select>
         <input id="polygon-name-input" />
         <input id="polygon-top-input" />
         <input id="polygon-bottom-input" />
@@ -146,8 +146,11 @@ describe('ShapeDrawingManager create validation and finish', () => {
         vi.restoreAllMocks();
     });
 
-    function fillModal(name: string): void {
+    function fillModal(name: string, shapeType?: string): void {
         (document.getElementById('polygon-name-input') as HTMLInputElement).value = name;
+        if (shapeType) {
+            (document.getElementById('shape-type-select') as HTMLSelectElement).value = shapeType;
+        }
     }
 
     function clickCreate(): void {
@@ -184,6 +187,66 @@ describe('ShapeDrawingManager create validation and finish', () => {
             'POLY AREA1,52.000000,4.000000,53.000000,5.000000,52.500000,6.000000'
         );
         // Drawing mode ends immediately, not only after the send resolves.
+        expect(manager.isDrawing()).toBe(false);
+    });
+
+    it('draws a box with two corner clicks and finishes without a right-click', () => {
+        fillModal('BOX1', 'box');
+        clickCreate();
+        expect(manager.isDrawing()).toBe(true);
+
+        mapClick(52, 4);
+        expect(manager.isDrawing()).toBe(true);
+        mapClick(53, 5.5);
+
+        expect(sendCommandMock).toHaveBeenCalledExactlyOnceWith(
+            'BOX BOX1,52.000000,4.000000,53.000000,5.500000'
+        );
+        expect(manager.isDrawing()).toBe(false);
+    });
+
+    it('sends box altitudes as trailing top,bottom arguments', () => {
+        fillModal('BOX2', 'box');
+        (document.getElementById('polygon-top-input') as HTMLInputElement).value = '10000';
+        (document.getElementById('polygon-bottom-input') as HTMLInputElement).value = '2000';
+        clickCreate();
+
+        mapClick(52, 4);
+        mapClick(53, 5);
+
+        expect(sendCommandMock).toHaveBeenCalledExactlyOnceWith(
+            'BOX BOX2,52.000000,4.000000,53.000000,5.000000,10000,2000'
+        );
+    });
+
+    it('draws a circle from centre + rim click, sending the radius in nm', () => {
+        fillModal('CIR1', 'circle');
+        clickCreate();
+
+        mapClick(52, 4);
+        mapClick(52, 5); // ~37 nm east of the centre at lat 52
+
+        expect(sendCommandMock).toHaveBeenCalledTimes(1);
+        const cmd = sendCommandMock.mock.calls[0][0] as string;
+        const match = cmd.match(/^CIRCLE CIR1,52\.000000,4\.000000,(\d+\.\d{3})$/);
+        expect(match).not.toBeNull();
+        expect(parseFloat(match![1])).toBeCloseTo(36.96, 1);
+        expect(manager.isDrawing()).toBe(false);
+    });
+
+    it('rejects a zero-radius circle and lets the user click the rim again', () => {
+        fillModal('CIR2', 'circle');
+        clickCreate();
+
+        mapClick(52, 4);
+        mapClick(52, 4); // rim click on the centre -> no radius
+
+        expect(alertMock).toHaveBeenCalledWith('Click a point away from the centre to set the circle radius');
+        expect(sendCommandMock).not.toHaveBeenCalled();
+        expect(manager.isDrawing()).toBe(true);
+
+        mapClick(52, 5);
+        expect(sendCommandMock).toHaveBeenCalledTimes(1);
         expect(manager.isDrawing()).toBe(false);
     });
 
