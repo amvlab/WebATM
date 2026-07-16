@@ -149,3 +149,29 @@ export function findAcidContext(
 
     return { partialAcid: partialText, isCreCommand, acidArgIndex: currentArgIndex, isMidInput };
 }
+
+export interface PanContext {
+    /** What the user has typed in PAN's first argument slot so far. */
+    partialQuery: string;
+    /** See AcidContext.isMidInput. */
+    isMidInput: boolean;
+}
+
+/**
+ * Check whether the cursor sits on the first argument of a PAN command -
+ * the slot that accepts an aircraft ID, airport/waypoint ident, direction,
+ * or latitude. Returns null when the user appears to be typing coordinates
+ * (a purely numeric token) so the suggestion dropdown stays out of the way.
+ */
+export function findPanContext(value: string, cursorPos: number): PanContext | null {
+    const { currentArgIndex, partialText, tokenEnd, parts } = getArgAtCursor(value, cursorPos);
+    if (parts.length < 1) return null;
+    if (parts[0].toUpperCase() !== 'PAN') return null;
+    if (currentArgIndex !== 0) return null;
+
+    // Numeric token => the user is entering "PAN lat,lon" coordinates.
+    if (partialText.length > 0 && /^[-+]?\d*\.?\d*$/.test(partialText)) return null;
+
+    const isMidInput = value.substring(tokenEnd).trim().length > 0;
+    return { partialQuery: partialText, isMidInput };
+}

@@ -5,6 +5,7 @@ import { connectionStatus } from '../core/ConnectionStatusService';
 import { echoManager } from '../ui/EchoManager';
 import { logger } from '../utils/Logger';
 import { isOpenapAircraftType } from './aircraftTypes';
+import { searchNavdata } from './navdataSearch';
 
 /**
  * Result of command processing
@@ -182,13 +183,15 @@ export class CommandHandler {
     }
 
     /**
-     * Handle PAN command - pan map to coordinates, an aircraft, or a direction
+     * Handle PAN command - pan map to coordinates, an aircraft, an
+     * airport/waypoint, or a direction
      * Usage: PAN <lat>,<lon> or PAN <lat> <lon> or PAN <aircraft_id>
+     *        or PAN <airport/waypoint ident> (e.g., PAN EHAM)
      *        or PAN LEFT/RIGHT/UP/DOWN (half a screen, like BlueSky's GUI)
      */
     private handlePanCommand(args: string): CommandResult {
         if (!args || args.trim().length === 0) {
-            this.sendEcho('PAN command requires coordinates (e.g., PAN 52.3,4.8), an aircraft ID (e.g., PAN AF265), or LEFT/RIGHT/UP/DOWN', 'warning');
+            this.sendEcho('PAN command requires coordinates (e.g., PAN 52.3,4.8), an aircraft ID (e.g., PAN AF265), an airport/waypoint (e.g., PAN EHAM), or LEFT/RIGHT/UP/DOWN', 'warning');
             return { handled: true, sendToServer: false };
         }
 
@@ -212,31 +215,50 @@ export class CommandHandler {
             return { handled: true, sendToServer: false };
         }
 
-        // Try as aircraft ID
-        const stateManager = this.app.getStateManager();
-        const aircraftData = stateManager.getState().aircraftData;
+        // Try as aircraft ID (case-insensitive); aircraft win over navaids
+        const aircraftData = this.app.getStateManager().getState().aircraftData;
+        const upperArgs = args.trim().toUpperCase();
+        const index = aircraftData?.id
+            ? aircraftData.id.findIndex(id => id.toUpperCase() === upperArgs)
+            : -1;
 
-        if (!aircraftData || !aircraftData.id || aircraftData.id.length === 0) {
-            this.sendEcho('No aircraft data available', 'warning');
+        if (index !== -1 && aircraftData) {
+            mapDisplay.panTo(aircraftData.lat[index], aircraftData.lon[index]);
+            this.sendEcho(`Panned to aircraft ${aircraftData.id[index]}`, 'success');
             return { handled: true, sendToServer: false };
         }
 
-        // Find aircraft (case-insensitive)
-        const upperArgs = args.toUpperCase();
-        const index = aircraftData.id.findIndex(id => id.toUpperCase() === upperArgs);
-
-        if (index === -1) {
-            this.sendEcho(`Aircraft ${args} not found`, 'warning');
-            return { handled: true, sendToServer: false };
-        }
-
-        const lat = aircraftData.lat[index];
-        const lon = aircraftData.lon[index];
-
-        mapDisplay.panTo(lat, lon);
-        this.sendEcho(`Panned to aircraft ${aircraftData.id[index]}`, 'success');
-
+        // Fall back to the navdata index (airports/heliports/waypoints).
+        // Async: the command is already handled, the pan follows when the
+        // lookup resolves.
+        void this.panToNavaid(args.trim(), mapDisplay);
         return { handled: true, sendToServer: false };
+    }
+
+    /**
+     * Resolve an airport/heliport/waypoint ident via the navdata search
+     * index and pan to it. The index orders exact-ident matches first with
+     * airports ahead of waypoints, so a duplicate ident resolves to the
+     * airport. Echoes a warning when nothing matches.
+     */
+    private async panToNavaid(ident: string, mapDisplay: MapDisplay): Promise<void> {
+        let exact;
+        try {
+            const results = await searchNavdata(ident, 5);
+            const upper = ident.toUpperCase();
+            exact = results.find(r => r.ident.toUpperCase() === upper);
+        } catch (err) {
+            logger.warn('CommandHandler', 'PAN navdata lookup failed:', err);
+        }
+
+        if (!exact) {
+            this.sendEcho(`PAN: ${ident} not found (no matching aircraft, airport or waypoint)`, 'warning');
+            return;
+        }
+
+        mapDisplay.panTo(exact.lat, exact.lon);
+        const name = exact.name ? ` (${exact.name})` : '';
+        this.sendEcho(`Panned to ${exact.kind} ${exact.ident}${name}`, 'success');
     }
 
     /**

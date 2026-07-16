@@ -8,6 +8,8 @@ import {
     commandFromInput,
     scoreCommand,
     getDisplaySignature,
+    getEffectiveDict,
+    LOCAL_COMMAND_SIGNATURES,
 } from './CommandSignature';
 
 describe('parseSignature', () => {
@@ -43,6 +45,27 @@ describe('parseSignature', () => {
         const args = parseSignature('callsign/ALL/WIND,Shape');
         expect(args[0].name).toBe('callsign');
         expect(args[1].name).toBe('shape');
+    });
+
+    it('keeps variants and casing in the label, but strips brackets', () => {
+        const args = parseSignature('lat/acid/LEFT,[lon]');
+        expect(args[0].label).toBe('lat/acid/LEFT');
+        expect(args[1].label).toBe('lon');
+        expect(args[1].optional).toBe(true);
+    });
+});
+
+describe('getEffectiveDict', () => {
+    it('provides the local client-side commands without a server cmddict', () => {
+        expect(getEffectiveDict(null).PAN).toBe(LOCAL_COMMAND_SIGNATURES.PAN);
+    });
+
+    it('merges the server cmddict, with local signatures winning collisions', () => {
+        const dict = getEffectiveDict({ HDG: 'acid,hdg', PAN: 'latlon/txt' });
+        expect(dict.HDG).toBe('acid,hdg');
+        // CommandHandler intercepts PAN locally, so the local signature
+        // describes what actually happens.
+        expect(dict.PAN).toBe(LOCAL_COMMAND_SIGNATURES.PAN);
     });
 });
 

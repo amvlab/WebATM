@@ -1,4 +1,5 @@
 import type { StateManager } from '../core/StateManager';
+import type { CommandDict } from '../data/types';
 import { CommandHandler } from '../data/CommandHandler';
 import { OPENAP_AIRCRAFT_TYPES } from '../data/aircraftTypes';
 import { logger } from '../utils/Logger';
@@ -9,8 +10,10 @@ import {
     parseSignature,
     commandFromInput,
     getDisplaySignature,
+    getEffectiveDict,
     SignatureArg,
 } from '../data/CommandSignature';
+import { searchNavdata } from '../data/navdataSearch';
 import { CommandHistory } from './CommandHistory';
 import { argStartIndex, getArgAtCursor } from './consoleTokens';
 import { CommandListView } from './CommandListView';
@@ -33,8 +36,9 @@ export class Console {
 
     constructor() {
         this.autocomplete = new ConsoleAutocomplete({
-            getCommandDict: () => this.stateManager?.getCommandDict() ?? null,
+            getCommandDict: () => this.getEffectiveCommandDict(),
             getAircraftIds: () => this.stateManager?.getState().aircraftData?.id ?? [],
+            searchNavdata: (query) => searchNavdata(query, 8),
             onAfterSelect: () => {
                 this.updateSuggestion();
                 this.updateMapPicker();
@@ -92,6 +96,16 @@ export class Console {
      */
     public setStateManager(stateManager: StateManager): void {
         this.stateManager = stateManager;
+    }
+
+    /**
+     * The command dictionary every console lookup (arg hint, ghost
+     * suggestion, autocomplete, map picker) resolves against: the server's
+     * cmddict merged with WebATM's client-side commands (PAN, ZOOM, ...),
+     * so those resolve even before/without a server connection.
+     */
+    private getEffectiveCommandDict(): CommandDict {
+        return getEffectiveDict(this.stateManager?.getCommandDict() ?? null);
     }
 
     /**
@@ -415,19 +429,8 @@ export class Console {
         const command = parts[0].toUpperCase();
         const argsEntered = parts.length - 1;
 
-        // Get command parameters from cmddict
-        if (!this.stateManager) {
-            this.hideSuggestion();
-            return;
-        }
-
-        const cmddict = this.stateManager.getCommandDict();
-        if (!cmddict || !cmddict[command]) {
-            this.hideSuggestion();
-            return;
-        }
-
-        const rawParamString = cmddict[command];
+        // Get command parameters from the effective (server + local) dict
+        const rawParamString = this.getEffectiveCommandDict()[command];
         if (!rawParamString) {
             this.hideSuggestion();
             return;
@@ -525,12 +528,8 @@ export class Console {
             return;
         }
 
-        if (!this.stateManager) {
-            this.hideArgHint();
-            return;
-        }
-        const cmddict = this.stateManager.getCommandDict();
-        const rawSig = cmddict ? cmddict[command] : undefined;
+        const cmddict = this.stateManager?.getCommandDict() ?? null;
+        const rawSig = this.getEffectiveCommandDict()[command];
 
         if (rawSig === undefined) {
             // Only render the unknown-command hint once cmddict has loaded -
@@ -568,7 +567,10 @@ export class Console {
                 chip.className = 'cmd-arg-chip';
                 if (arg.optional) chip.classList.add('optional');
                 if (i === idx) chip.classList.add('current');
-                chip.textContent = arg.optional ? `[${arg.name}]` : arg.name;
+                // Use the label (variants kept) so a slot that accepts
+                // several forms - e.g. PAN's lat/acid/wpt/... - hints at
+                // all of them instead of collapsing to the first.
+                chip.textContent = arg.optional ? `[${arg.label}]` : arg.label;
                 this.argHint!.appendChild(chip);
             });
         }
@@ -714,11 +716,7 @@ export class Console {
 
         const command = parts[0].toUpperCase();
 
-        if (!this.stateManager) return null;
-        const cmddict = this.stateManager.getCommandDict();
-        if (!cmddict || !cmddict[command]) return null;
-
-        const rawParamString = cmddict[command];
+        const rawParamString = this.getEffectiveCommandDict()[command];
         if (!rawParamString) return null;
 
         // Honour user-facing overrides so commands like MCRE don't engage

@@ -8,6 +8,7 @@ import {
     getArgAtCursor,
     argStartIndex,
     findAcidContext,
+    findPanContext,
 } from './consoleTokens';
 
 describe('tokenizeInput', () => {
@@ -138,5 +139,41 @@ describe('findAcidContext', () => {
         // MCRE's user-facing signature is 'n,[type,alt,spd]' - none of
         // those are acid parameters, so no acid context anywhere.
         expect(findAcidContext('MCRE 5 A320', 7, cmddict)).toBeNull();
+    });
+});
+
+describe('findPanContext', () => {
+    it('matches on the first argument of PAN, case-insensitively', () => {
+        expect(findPanContext('PAN EHA', 7)).toEqual({
+            partialQuery: 'EHA',
+            isMidInput: false,
+        });
+        expect(findPanContext('pan kl1', 7)).toEqual({
+            partialQuery: 'kl1',
+            isMidInput: false,
+        });
+    });
+
+    it('matches the empty slot right after the command', () => {
+        expect(findPanContext('PAN ', 4)).toEqual({
+            partialQuery: '',
+            isMidInput: false,
+        });
+    });
+
+    it('flags mid-input editing of the first argument', () => {
+        expect(findPanContext('PAN EH 4.8', 6)?.isMidInput).toBe(true);
+    });
+
+    it('returns null for other commands and later argument slots', () => {
+        expect(findPanContext('HDG KL123', 9)).toBeNull();
+        expect(findPanContext('PAN 52.3, EH', 12)).toBeNull(); // arg 1
+        expect(findPanContext('PAN', 2)).toBeNull(); // still on the command
+    });
+
+    it('stays out of the way of coordinate entry (numeric tokens)', () => {
+        expect(findPanContext('PAN 52', 6)).toBeNull();
+        expect(findPanContext('PAN 52.3', 8)).toBeNull();
+        expect(findPanContext('PAN -4', 6)).toBeNull();
     });
 });

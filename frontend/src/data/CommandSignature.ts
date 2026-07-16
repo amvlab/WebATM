@@ -8,11 +8,19 @@
  * ui/consoleTokens.ts.)
  */
 
+import type { CommandDict } from './types';
+
 export interface SignatureArg {
     /** Normalized arg name (lowercased, brackets/slash-variants stripped). */
     name: string;
     /** Original token as it appeared in the signature, brackets included. */
     raw: string;
+    /**
+     * User-facing label: the raw token with the optional-arg brackets
+     * stripped but slash variants and casing kept, so hints can show
+     * `lat/acid/LEFT/...` instead of collapsing it to `lat`.
+     */
+    label: string;
     /** True when the arg is wrapped in `[...]` brackets in the signature. */
     optional: boolean;
 }
@@ -38,7 +46,7 @@ const DISPLAY_SIGNATURE_OVERRIDES: Record<string, string> = {
  * (a CommandHandler test asserts every handled command has an entry here).
  */
 export const LOCAL_COMMAND_SIGNATURES: Record<string, string> = {
-    PAN: 'lat,lon/acid/LEFT/RIGHT/UP/DOWN',
+    PAN: 'lat/acid/wpt/apt/LEFT/RIGHT/UP/DOWN,[lon]',
     ZOOM: 'level/IN/OUT',
     ZOOMIN: '',
     ZOOMOUT: '',
@@ -61,6 +69,19 @@ export const LOCAL_COMMAND_SIGNATURES: Record<string, string> = {
  */
 export function getDisplaySignature(name: string, rawSig: string): string {
     return DISPLAY_SIGNATURE_OVERRIDES[name.toUpperCase()] ?? rawSig;
+}
+
+/**
+ * Merge the server's cmddict with WebATM's client-side command signatures.
+ *
+ * The local signatures win on name collisions: `CommandHandler` intercepts
+ * those commands before they ever reach the server, so the local signature
+ * describes what actually happens. This is the dictionary every user-facing
+ * lookup (arg hint, ghost suggestion, autocomplete, palette) should use, so
+ * client-side commands like PAN resolve even before/without a server cmddict.
+ */
+export function getEffectiveDict(cmddict: CommandDict | null): CommandDict {
+    return { ...(cmddict ?? {}), ...LOCAL_COMMAND_SIGNATURES };
 }
 
 /**
@@ -87,11 +108,11 @@ export function parseSignature(sig: string): SignatureArg[] {
         const closes = (trimmedRaw.match(/\]/g) ?? []).length;
         const optional = depth > 0 || opens > 0 || closes > 0;
         depth += opens - closes;
-        let name = trimmedRaw.toLowerCase();
-        name = name.replace(/^\[+/, '').replace(/\]+$/, '');
+        const label = trimmedRaw.replace(/^\[+/, '').replace(/\]+$/, '').trim();
+        let name = label.toLowerCase();
         const slashIdx = name.indexOf('/');
         if (slashIdx >= 0) name = name.substring(0, slashIdx);
-        return { name: name.trim(), raw: trimmedRaw, optional };
+        return { name: name.trim(), raw: trimmedRaw, label, optional };
     });
 }
 

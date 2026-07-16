@@ -8,7 +8,7 @@
 import type { StateManager } from '../core/StateManager';
 import type { Console } from './Console';
 import type { CommandDict } from '../data/types';
-import { scoreCommand, getDisplaySignature, LOCAL_COMMAND_SIGNATURES } from '../data/CommandSignature';
+import { scoreCommand, getDisplaySignature, getEffectiveDict } from '../data/CommandSignature';
 import { storage } from '../utils/StorageManager';
 import { logger } from '../utils/Logger';
 
@@ -126,12 +126,13 @@ export class CommandListView {
     }
 
     /**
-     * The dictionary the palette renders: WebATM's client-side commands
-     * (PAN, SWRAD, SHOW*, ...) merged with the server's cmddict, which wins
-     * on name collisions. Available even before the server list arrives.
+     * The dictionary the palette renders: the server's cmddict merged with
+     * WebATM's client-side commands (PAN, SWRAD, SHOW*, ...), which win on
+     * name collisions since CommandHandler intercepts them locally.
+     * Available even before the server list arrives.
      */
     private effectiveDict(): CommandDict {
-        return { ...LOCAL_COMMAND_SIGNATURES, ...(this.cmddict ?? {}) };
+        return getEffectiveDict(this.cmddict);
     }
 
     private render(): void {

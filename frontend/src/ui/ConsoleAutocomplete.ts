@@ -1,8 +1,35 @@
 import { Dropdown } from '../utils/dropdown';
 import { OPENAP_AIRCRAFT_TYPES } from '../data/aircraftTypes';
 import { parseSignature, getDisplaySignature } from '../data/CommandSignature';
-import { getArgAtCursor, findAcidContext, AcidContext } from './consoleTokens';
+import { getArgAtCursor, findAcidContext, findPanContext, AcidContext } from './consoleTokens';
 import type { CommandDict } from '../data/types';
+import type { NavdataSearchResult } from '../data/navdataSearch';
+
+/**
+ * One entry in the PAN destination dropdown: an aircraft currently in the
+ * simulation, or an airport/heliport/waypoint from the navdata index.
+ */
+export interface PanSuggestion {
+    kind: 'aircraft' | NavdataSearchResult['kind'];
+    ident: string;
+    /** Human-readable name (navdata results only). */
+    name?: string;
+}
+
+/** Badge text shown next to each PAN suggestion, keyed by kind. */
+const PAN_KIND_BADGES: Record<PanSuggestion['kind'], string> = {
+    aircraft: 'AC',
+    airport: 'APT',
+    heliport: 'HEL',
+    waypoint: 'WPT',
+};
+
+/** Cap per source so the merged PAN dropdown stays scannable. */
+const PAN_MAX_AIRCRAFT = 6;
+const PAN_MAX_NAVDATA = 6;
+
+/** Debounce for navdata searches while the user types a PAN argument. */
+const PAN_SEARCH_DEBOUNCE_MS = 200;
 
 /**
  * Rank candidates for an autocomplete slot: case-insensitive prefix matches
@@ -37,6 +64,11 @@ export interface ConsoleAutocompleteDeps {
     /** Aircraft IDs currently in the simulation. */
     getAircraftIds: () => string[];
     /**
+     * Search the navdata index (airports/heliports/waypoints) for the PAN
+     * dropdown. Should resolve to [] when the index is unavailable.
+     */
+    searchNavdata: (query: string) => Promise<NavdataSearchResult[]>;
+    /**
      * Called after a suggestion is inserted so the console can refresh
      * its ghost suggestion and map picker for the new input value.
      */
@@ -47,12 +79,15 @@ export interface ConsoleAutocompleteDeps {
  * ConsoleAutocomplete - the ACID and aircraft-type dropdowns attached to
  * the console input, extracted from Console.
  *
- * Owns two cmddict-aware autocompletes:
+ * Owns three cmddict-aware autocompletes:
  * - ACID: suggests existing aircraft IDs whenever the cursor sits on an
  *   acid-parameter slot. For CRE/MCRE it instead warns when the typed ID
  *   already exists.
  * - Aircraft type: suggests openap types on the type slot of CRE/MCRE,
  *   warning when a non-openap type is being entered.
+ * - PAN destination: on PAN's first argument, suggests aircraft first and
+ *   then airports/waypoints from the navdata index, each labeled with a
+ *   kind badge (AC/APT/HEL/WPT) since the slot accepts all of them.
  */
 export class ConsoleAutocomplete {
     private readonly aircraftTypes: string[] = [...OPENAP_AIRCRAFT_TYPES];
@@ -62,6 +97,11 @@ export class ConsoleAutocomplete {
 
     private typeDropdown: Dropdown<string> | null = null;
     private typeWarning: HTMLDivElement | null = null;
+
+    private panDropdown: Dropdown<PanSuggestion> | null = null;
+    private panDebounceTimer: number | null = null;
+    /** Monotonic counter that invalidates in-flight navdata searches. */
+    private panSearchSeq = 0;
 
     constructor(private readonly deps: ConsoleAutocompleteDeps) {}
 
@@ -98,6 +138,14 @@ export class ConsoleAutocomplete {
         this.typeWarning.className = 'actype-warning';
         this.typeWarning.style.display = 'none';
         inputContainer.appendChild(this.typeWarning);
+
+        this.panDropdown = new Dropdown<PanSuggestion>({
+            container: inputContainer as HTMLElement,
+            rootClass: 'pan-autocomplete-dropdown',
+            itemClass: 'pan-dropdown-item',
+            renderItem: (s) => this.renderPanSuggestion(s),
+            onSelect: (_s, index) => this.selectPanSuggestion(index)
+        });
     }
 
     /**
@@ -107,13 +155,15 @@ export class ConsoleAutocomplete {
      */
     public handleKey(key: string): boolean {
         if (this.typeDropdown?.handleKey(key)) return true;
-        return this.acidDropdown?.handleKey(key) ?? false;
+        if (this.acidDropdown?.handleKey(key)) return true;
+        return this.panDropdown?.handleKey(key) ?? false;
     }
 
-    /** Refresh both autocompletes for the current input value and cursor. */
+    /** Refresh all autocompletes for the current input value and cursor. */
     public update(): void {
         this.updateAcidAutocomplete();
         this.updateTypeAutocomplete();
+        this.updatePanAutocomplete();
     }
 
     /**
@@ -125,6 +175,7 @@ export class ConsoleAutocomplete {
         this.hideAcidDropdown();
         this.hideTypeDropdown();
         this.hideTypeWarning();
+        this.hidePanDropdown();
     }
 
     /** Hide every dropdown and warning. Used when the input is cleared. */
@@ -392,5 +443,133 @@ export class ConsoleAutocomplete {
         if (this.typeWarning) {
             this.typeWarning.style.display = 'none';
         }
+    }
+
+    /**
+     * Update the PAN destination dropdown based on current input.
+     *
+     * Aircraft matches render immediately (they're already in memory);
+     * airport/waypoint matches from the navdata index are fetched on a
+     * debounce and appended below the aircraft when they arrive.
+     */
+    private updatePanAutocomplete(): void {
+        const input = this.getInput();
+        if (!input) return;
+
+        const value = input.value;
+        const context = value.trim()
+            ? findPanContext(value, this.getCursorPos(input))
+            : null;
+        if (!context) {
+            this.hidePanDropdown();
+            return;
+        }
+
+        this.cancelPanSearch();
+        const { partialQuery, isMidInput } = context;
+        const upperPartial = partialQuery.toUpperCase();
+
+        const aircraft: PanSuggestion[] = rankByPrefixThenContains(
+            this.deps.getAircraftIds(), upperPartial
+        )
+            .slice(0, PAN_MAX_AIRCRAFT)
+            .map(id => ({ kind: 'aircraft', ident: id }));
+
+        this.showPanSuggestions(aircraft, upperPartial, isMidInput);
+
+        // Navdata needs at least one character to search on.
+        if (partialQuery.length === 0) return;
+
+        const seq = this.panSearchSeq;
+        this.panDebounceTimer = window.setTimeout(() => {
+            this.panDebounceTimer = null;
+            void this.deps.searchNavdata(partialQuery)
+                .catch(() => [] as NavdataSearchResult[])
+                .then(results => {
+                    if (seq !== this.panSearchSeq) return; // superseded
+                    const navaids: PanSuggestion[] = results
+                        .slice(0, PAN_MAX_NAVDATA)
+                        .map(r => ({ kind: r.kind, ident: r.ident, name: r.name }));
+                    this.showPanSuggestions(
+                        [...aircraft, ...navaids], upperPartial, isMidInput
+                    );
+                });
+        }, PAN_SEARCH_DEBOUNCE_MS);
+    }
+
+    /**
+     * Render the merged PAN suggestion list, hiding the dropdown when it is
+     * empty or when the slot already holds the single remaining match.
+     */
+    private showPanSuggestions(
+        items: PanSuggestion[],
+        upperPartial: string,
+        isMidInput: boolean
+    ): void {
+        if (items.length === 0) {
+            this.panDropdown?.hide();
+            return;
+        }
+        if (isCompletedSlot(items.map(i => i.ident), upperPartial, isMidInput)) {
+            this.panDropdown?.hide();
+            return;
+        }
+        this.panDropdown?.setItems(items);
+    }
+
+    /**
+     * Build the DOM for one PAN suggestion: a kind badge (AC/APT/HEL/WPT),
+     * the ident, and - for navdata results - the human-readable name.
+     */
+    private renderPanSuggestion(s: PanSuggestion): HTMLElement {
+        const row = document.createElement('span');
+        row.className = 'pan-item';
+
+        const badge = document.createElement('span');
+        badge.className = `pan-badge pan-badge-${s.kind}`;
+        badge.textContent = PAN_KIND_BADGES[s.kind];
+        row.appendChild(badge);
+
+        const ident = document.createElement('span');
+        ident.className = 'pan-item-ident';
+        ident.textContent = s.ident;
+        row.appendChild(ident);
+
+        if (s.name) {
+            const name = document.createElement('span');
+            name.className = 'pan-item-name';
+            name.textContent = s.name;
+            row.appendChild(name);
+        }
+        return row;
+    }
+
+    /**
+     * Select a PAN suggestion and insert its ident into the input
+     */
+    private selectPanSuggestion(index: number): void {
+        const input = this.getInput();
+        const items = this.panDropdown?.getItems() ?? [];
+        if (!input || index < 0 || index >= items.length) return;
+
+        this.replaceTokenAtCursor(input, items[index].ident);
+
+        this.hidePanDropdown();
+        input.focus();
+        this.deps.onAfterSelect();
+    }
+
+    /** Cancel any pending/in-flight navdata search for the PAN dropdown. */
+    private cancelPanSearch(): void {
+        this.panSearchSeq++;
+        if (this.panDebounceTimer !== null) {
+            window.clearTimeout(this.panDebounceTimer);
+            this.panDebounceTimer = null;
+        }
+    }
+
+    private hidePanDropdown(): void {
+        this.cancelPanSearch();
+        this.panDropdown?.hide();
     }
 }
