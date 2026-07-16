@@ -7,66 +7,62 @@ exposes this status to the web client.
 
 import socket
 
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 
 from ..logger import get_logger
 
 logger = get_logger()
 
+# BlueSky's fixed command and data ports (not configurable, per project docs).
+BLUESKY_PORTS = (11000, 11001)
 
-def is_port_listening(port: int, timeout: float = 1.0, hostname: str = None) -> bool:
+
+def is_port_listening(
+    port: int, timeout: float = 1.0, hostname: str | None = None
+) -> bool:
     """Check if a TCP port is listening for connections.
 
     Args:
         port (int): Port number to check.
         timeout (float): Connection timeout in seconds.
-        hostname (str): Hostname to check. Defaults to ``localhost`` when
-            ``None``.
+        hostname (str | None): Hostname to check. Defaults to ``localhost``
+            when ``None``.
 
     Returns:
         bool: True if the port is listening, False otherwise.
     """
-    if hostname is None:
-        hostname = "localhost"
-
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        result = sock.connect_ex((hostname, port))
-        sock.close()
-        return result == 0
-    except Exception:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            return sock.connect_ex((hostname or "localhost", port)) == 0
+    except OSError:
+        # e.g. DNS failure (socket.gaierror) for an unresolvable hostname;
+        # the context manager still closes the socket.
         return False
 
 
-def check_bluesky_running() -> tuple[bool, str]:
-    """Check if a local BlueSky server is running.
+def probe_bluesky_ports(
+    hostname: str | None = None, timeout: float = 0.5
+) -> tuple[list[int], str]:
+    """Probe the BlueSky ports and summarize the result.
 
-    Probes the BlueSky command (11000) and data (11001) ports on localhost; the
-    server is considered running when at least one port is listening.
+    The server is considered running when at least one port is listening.
+
+    Args:
+        hostname (str | None): Host to probe. Defaults to ``localhost`` when
+            ``None``.
+        timeout (float): Per-port connection timeout in seconds.
 
     Returns:
-        tuple[bool, str]: A ``(is_running, status_message)`` pair, where the
-            message lists the listening ports or explains that the server is
-            not accessible.
+        tuple[list[int], str]: The listening ports (empty when none) and a
+            human-readable status message.
     """
-
-    # Check if BlueSky ports are accessible (same logic as routes.py)
-    port_11000_listening = is_port_listening(11000, 0.5)  # Use consistent timeout
-    port_11001_listening = is_port_listening(11001, 0.5)  # Use consistent timeout
-
-    if port_11000_listening or port_11001_listening:
-        # At least one BlueSky port is listening - server is functional
-        ports_info = []
-        if port_11000_listening:
-            ports_info.append("11000")
-        if port_11001_listening:
-            ports_info.append("11001")
-
-        return True, f"Server running (Ports: {', '.join(ports_info)})"
+    listening = [p for p in BLUESKY_PORTS if is_port_listening(p, timeout, hostname)]
+    if listening:
+        message = f"Server running (Ports: {', '.join(map(str, listening))})"
     else:
-        # No ports are accessible - server is not running or not ready
-        return False, "Server not accessible (Ports not listening)"
+        message = "Server not accessible (Ports not listening)"
+    return listening, message
 
 
 def register_server_status_routes(app):
@@ -94,45 +90,21 @@ def register_server_status_routes(app):
                 500.
         """
         try:
-            # Get hostname from request (supports both GET query param and POST JSON body)
-            hostname = None
-
-            if request.method == "POST" and request.json:
-                hostname = request.json.get("hostname")
-            elif request.method == "GET":
+            if request.method == "POST":
+                hostname = (request.get_json(silent=True) or {}).get("hostname")
+            else:
                 hostname = request.args.get("hostname")
 
-            # If no hostname specified, use current server IP from proxy
             if not hostname:
-                from flask import current_app
-
                 hostname = getattr(current_app.bluesky_proxy, "server_ip", None)
-
-            # If still no hostname, default to localhost
             if not hostname:
                 hostname = "localhost"
 
-            # Check both BlueSky ports
-            port_11000_listening = is_port_listening(11000, 0.5, hostname)
-            port_11001_listening = is_port_listening(11001, 0.5, hostname)
-            running = port_11000_listening or port_11001_listening
-
-            if running:
-                # At least one BlueSky port is listening - server is functional
-                ports_info = []
-                if port_11000_listening:
-                    ports_info.append("11000")
-                if port_11001_listening:
-                    ports_info.append("11001")
-                message = f"Server running (Ports: {', '.join(ports_info)})"
-            else:
-                # No ports are accessible - server is not running or not ready
-                message = "Server not accessible (Ports not listening)"
-
+            listening, message = probe_bluesky_ports(hostname)
             return jsonify(
                 {
                     "status": "success",
-                    "running": running,
+                    "running": bool(listening),
                     "message": message,
                     "hostname": hostname,
                 }

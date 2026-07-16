@@ -4,7 +4,7 @@ import socket
 
 import pytest
 
-from WebATM.server.bluesky_server_status import check_bluesky_running, is_port_listening
+from WebATM.server.bluesky_server_status import is_port_listening, probe_bluesky_ports
 
 
 @pytest.fixture
@@ -46,20 +46,46 @@ class TestIsPortListening:
             is_port_listening(80, timeout=0.5, hostname="invalid.host.invalid") is False
         )
 
+    def test_socket_closed_when_connect_raises(self, monkeypatch):
+        """The probe socket must be closed even when connect_ex raises.
 
-class TestCheckBlueSkyRunning:
-    def test_returns_tuple(self):
-        running, message = check_bluesky_running()
-        assert isinstance(running, bool)
-        assert isinstance(message, str)
+        Regression test: the old implementation only reached ``close()`` on
+        the success path, so a probe against an unresolvable hostname left the
+        socket to be reclaimed by garbage collection (a ResourceWarning, and
+        an fd leak on runtimes without refcounting).
+        """
+        closed = []
 
-    def test_not_running_message(self, monkeypatch):
+        class FakeSocket:
+            def settimeout(self, timeout):
+                pass
+
+            def connect_ex(self, address):
+                raise socket.gaierror("name resolution failed")
+
+            def close(self):
+                closed.append(True)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.close()
+                return False
+
+        monkeypatch.setattr(socket, "socket", lambda *a, **k: FakeSocket())
+        assert is_port_listening(80, timeout=0.5, hostname="nope.invalid") is False
+        assert closed, "probe socket leaked after connect_ex raised"
+
+
+class TestProbeBlueSkyPorts:
+    def test_no_ports_listening(self, monkeypatch):
         monkeypatch.setattr(
             "WebATM.server.bluesky_server_status.is_port_listening",
             lambda *a, **k: False,
         )
-        running, message = check_bluesky_running()
-        assert running is False
+        listening, message = probe_bluesky_ports()
+        assert listening == []
         assert "not accessible" in message
 
     def test_running_message_lists_ports(self, monkeypatch):
@@ -67,7 +93,69 @@ class TestCheckBlueSkyRunning:
             "WebATM.server.bluesky_server_status.is_port_listening",
             lambda port, *a, **k: port == 11000,
         )
-        running, message = check_bluesky_running()
-        assert running is True
+        listening, message = probe_bluesky_ports()
+        assert listening == [11000]
         assert "11000" in message
         assert "11001" not in message
+
+    def test_forwards_hostname_and_timeout(self, monkeypatch):
+        probes = []
+
+        def fake_lister(port, timeout, hostname):
+            probes.append((port, timeout, hostname))
+            return True
+
+        monkeypatch.setattr(
+            "WebATM.server.bluesky_server_status.is_port_listening", fake_lister
+        )
+        listening, message = probe_bluesky_ports("example.org", timeout=0.25)
+        assert listening == [11000, 11001]
+        assert probes == [(11000, 0.25, "example.org"), (11001, 0.25, "example.org")]
+
+
+class TestServerStatusRoute:
+    @pytest.fixture
+    def client(self, monkeypatch):
+        from WebATM.app import create_app
+        from WebATM.proxy import set_bluesky_proxy
+
+        app, _socketio = create_app()
+        app.config.update(TESTING=True)
+        with app.test_client() as test_client:
+            yield test_client
+        set_bluesky_proxy(None)
+
+    @pytest.fixture(autouse=True)
+    def no_real_probes(self, monkeypatch):
+        """Keep the route tests off the network."""
+        monkeypatch.setattr(
+            "WebATM.server.bluesky_server_status.is_port_listening",
+            lambda *a, **k: False,
+        )
+
+    def test_get_defaults_to_localhost(self, client):
+        response = client.get("/api/server/status")
+        data = response.get_json()
+        assert response.status_code == 200
+        assert data["status"] == "success"
+        assert data["running"] is False
+        assert data["hostname"] == "localhost"
+
+    def test_post_with_json_hostname(self, client):
+        response = client.post("/api/server/status", json={"hostname": "example.org"})
+        data = response.get_json()
+        assert response.status_code == 200
+        assert data["hostname"] == "example.org"
+
+    def test_post_without_json_body_is_not_an_error(self, client):
+        """Regression test: a JSON-less POST must not surface as HTTP 500.
+
+        The old handler touched ``request.json``, which raises
+        ``UnsupportedMediaType`` for non-JSON content types; the broad except
+        then masked it as a 500 with a confusing message.
+        """
+        response = client.post("/api/server/status", data="hostname=example.org")
+        data = response.get_json()
+        assert response.status_code == 200
+        assert data["status"] == "success"
+        assert data["hostname"] == "localhost"
