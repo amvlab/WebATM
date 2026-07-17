@@ -263,25 +263,25 @@ export class StateManager {
     }
 
     updateDisplayOptions(options: Partial<DisplayOptions>): void {
-        const newDisplayOptions = { ...this.state.displayOptions, ...options };
-        this.updateState('displayOptions', newDisplayOptions);
+        const previous = this.state.displayOptions;
+        this.updateState('displayOptions', { ...previous, ...options });
 
         // When the user changes the global 3D model selection, drop all
-        // per-aircraft overrides — the new global choice should win. Any
-        // previously pinned aircraft revert to "Auto" / forced global.
+        // per-aircraft overrides — the new global choice should win. Only
+        // an actual value change counts: panels re-commit unchanged values
+        // (e.g. on input blur), which must not wipe overrides.
         if (
-            'selectedAircraftModel' in options
-            && options.selectedAircraftModel !== undefined
+            options.selectedAircraftModel !== undefined
+            && options.selectedAircraftModel !== previous.selectedAircraftModel
             && Object.keys(this.state.aircraftModelOverrides).length > 0
         ) {
             this.updateState('aircraftModelOverrides', {});
         }
 
-        // Same policy for the global 3D scale: changing it wipes any
-        // per-aircraft scale overrides so the new global value wins.
+        // Same policy for the global 3D scale.
         if (
-            'aircraft3DScale' in options
-            && options.aircraft3DScale !== undefined
+            options.aircraft3DScale !== undefined
+            && options.aircraft3DScale !== previous.aircraft3DScale
             && Object.keys(this.state.aircraftScaleOverrides).length > 0
         ) {
             this.updateState('aircraftScaleOverrides', {});

@@ -137,6 +137,20 @@ describe('StateManager display options and overrides', () => {
         expect(sm.getAircraftScaleOverride('KL123')).toBeNull();
     });
 
+    it('re-committing the unchanged global model selection keeps overrides', () => {
+        sm.setAircraftModelOverride('KL123', 'B747.glb');
+        sm.updateDisplayOptions({
+            selectedAircraftModel: sm.getDisplayOptions().selectedAircraftModel,
+        });
+        expect(sm.getAircraftModelOverride('KL123')).toBe('B747.glb');
+    });
+
+    it('re-committing the unchanged global 3D scale keeps scale overrides', () => {
+        sm.setAircraftScaleOverride('KL123', 3.5);
+        sm.updateDisplayOptions({ aircraft3DScale: sm.getDisplayOptions().aircraft3DScale });
+        expect(sm.getAircraftScaleOverride('KL123')).toBe(3.5);
+    });
+
     it('unrelated display option changes leave overrides intact', () => {
         sm.setAircraftModelOverride('KL123', 'B747.glb');
         sm.updateDisplayOptions({ speedUnit: 'mph' });
