@@ -126,6 +126,14 @@ export class ServerLogStreamManager {
                 this.ingest(data.lines);
             }
         });
+        // A reconnect leaves a gap: lines broadcast while the socket was down
+        // never reach this client. The backend buffers them for replay, so
+        // re-request the history (seq dedup makes the overlap harmless).
+        this.socket.on('connect', () => {
+            if (this.historyRequested) {
+                this.socket?.emit('request_log_history');
+            }
+        });
     }
 
     /** Switch to the Server Log tab (also called by ProcessControlManager). */

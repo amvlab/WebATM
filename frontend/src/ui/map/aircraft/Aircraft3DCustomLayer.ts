@@ -73,21 +73,14 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
     protected onSceneReady(): void {
         logger.debug('Aircraft3DCustomLayer', '3D scene ready');
 
-        // Create two separate groups for different projection modes
-        // This allows us to handle coordinate systems differently for each mode
-
-        // Mercator group: uses scene-based coordinate system with rotation only.
-        // Coordinate system: (x=east, y=up, z=north).
-        // A single rotateX(π/2) maps (east, up, north) → (east, -north, up), which,
-        // paired with a positive-scaled projection below, lands in MapLibre mercator
-        // coords (Y = south). No mirror/negative scales are used so text on the 3D
-        // models (registration IDs, liveries, etc.) never renders reversed.
+        // Mercator group: rotateX(π/2) maps the (east, up, north) scene frame
+        // into MapLibre mercator coords (Y = south) without any mirror/negative
+        // scale, so text on the models never renders reversed.
         this.mercatorGroup = new THREE.Group();
         this.mercatorGroup.rotateX(Math.PI / 2);
         this.scene.add(this.mercatorGroup);
 
-        // Globe group: uses raw getMatrixForModel transforms (no scene rotation)
-        // MapLibre's getMatrixForModel provides the correct transform for globe projection
+        // Globe group: raw MapLibre getMatrixForModel transforms, no scene rotation
         this.globeGroup = new THREE.Group();
         this.scene.add(this.globeGroup);
 
@@ -270,15 +263,9 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
 
     /**
      * Re-aim the scene's directional lights for the active projection.
-     *
-     * The lights live in world space, but the two mesh groups use different
-     * world frames: mercator meshes sit in the rotateX(π/2) group (model
-     * "up" along world −Z), while globe meshes are origin-relative
-     * getMatrixForModel frames (model "up" along world +Y). With the lights
-     * fixed in the mercator orientation, globe aircraft were lit edge-on —
-     * their visible top surfaces received almost no directional light and
-     * rendered noticeably darker than in mercator mode. Reproduce the same
-     * key/fill geometry (≈100 above, ±70 horizontal tilt) in each frame.
+     * The two mesh groups use different world frames (mercator "up" is
+     * world −Z, globe "up" is world +Y); without this, globe aircraft are
+     * lit edge-on and render noticeably darker than in mercator mode.
      */
     private updateLightsForProjection(isGlobe: boolean): void {
         if (!this.directionalLight1 || !this.directionalLight2) return;

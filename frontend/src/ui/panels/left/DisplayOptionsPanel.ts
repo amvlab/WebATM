@@ -377,16 +377,20 @@ export class DisplayOptionsPanel extends BasePanel {
     private apply3DScaleValue(inputElement: HTMLInputElement): void {
         const raw = inputElement.value.trim();
         const value = parseFloat(raw);
+        const currentScale = this.stateManager?.getDisplayOptions().aircraft3DScale || 2.0;
 
         // Reject empty or non-positive input: restore the last valid value
         if (isNaN(value) || value <= 0) {
-            const currentScale = this.stateManager?.getDisplayOptions().aircraft3DScale || 2.0;
             inputElement.value = currentScale.toString();
             if (raw !== '') {
                 logger.warn('DisplayOptionsPanel', 'Invalid 3D aircraft scale, must be a positive number');
             }
             return;
         }
+
+        // Blur commits unconditionally; skip the no-op so an untouched
+        // field doesn't churn storage and state subscribers.
+        if (value === currentScale) return;
 
         storage.set('aircraft-3d-scale', value);
         this.stateManager?.updateDisplayOptions({ aircraft3DScale: value });

@@ -232,9 +232,14 @@ class BlueSkyProcessManager:
 
         Returns:
             dict: The ``start()`` result, with the message adjusted to
-                "restarted" on success.
+                "restarted" on success. If the old tree could not be stopped,
+                its failure result is returned instead of starting a new one
+                (``start()`` would just report the surviving process as
+                "already running").
         """
-        self.stop()
+        stop_result = self.stop()
+        if not stop_result.get("success"):
+            return stop_result
         result = self.start()
         if result.get("success"):
             result["message"] = "BlueSky server restarted"

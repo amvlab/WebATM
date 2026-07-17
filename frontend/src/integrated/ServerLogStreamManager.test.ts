@@ -53,6 +53,16 @@ function serverLogListener(socket: MockSocket): ServerLogListener {
     return call[1] as ServerLogListener;
 }
 
+function connectListener(socket: MockSocket): () => void {
+    const call = socket.on.mock.calls.find((c) => c[0] === 'connect');
+    if (!call) throw new Error('connect handler was not registered');
+    return call[1] as () => void;
+}
+
+function historyRequestCount(socket: MockSocket): number {
+    return socket.emit.mock.calls.filter((c) => c[0] === 'request_log_history').length;
+}
+
 function lines(...seqs: number[]): ServerLogLine[] {
     return seqs.map((seq) => ({ seq, t: 0, line: `line ${seq}` }));
 }
@@ -131,8 +141,20 @@ describe('ServerLogStreamManager', () => {
         expect(byId('echo-tab-btn').classList.contains('active')).toBe(false);
 
         manager.activate();
-        const historyCalls = socket.emit.mock.calls.filter((c) => c[0] === 'request_log_history');
-        expect(historyCalls).toHaveLength(1);
+        expect(historyRequestCount(socket)).toBe(1);
+    });
+
+    it('re-requests history on reconnect to backfill lines missed while down', () => {
+        manager.activate();
+        expect(historyRequestCount(socket)).toBe(1);
+
+        connectListener(socket)();
+        expect(historyRequestCount(socket)).toBe(2);
+    });
+
+    it('does not request history on connect if the tab was never opened', () => {
+        connectListener(socket)();
+        expect(historyRequestCount(socket)).toBe(0);
     });
 
     it('hides the pane and deactivates its tab when the Echo tab is clicked', () => {

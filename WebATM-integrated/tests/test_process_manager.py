@@ -147,6 +147,24 @@ def test_reader_keeps_draining_when_on_line_raises():
         manager.kill()
 
 
+def test_restart_propagates_stop_failure_instead_of_claiming_success():
+    """restart() must not report "restarted" while the old tree is still alive."""
+    manager = BlueSkyProcessManager(cmd=[sys.executable, "-c", "pass"])
+    failure = {
+        "success": False,
+        "status": "error",
+        "message": "BlueSky server did not exit after SIGKILL",
+    }
+    manager.stop = lambda: failure  # type: ignore[method-assign]
+
+    result = manager.restart()
+
+    assert result["success"] is False
+    assert result["message"] == "BlueSky server did not exit after SIGKILL"
+    # start() was never attempted, so nothing is running.
+    assert manager.status()["running"] is False
+
+
 def test_status_and_restart():
     """status() tracks running/stopped; restart() yields a fresh pid."""
     cmd = [sys.executable, "-c", "import time; time.sleep(30)"]
