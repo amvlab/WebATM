@@ -31,11 +31,7 @@ logger = get_logger()
 # Either one listening means the server is up enough to connect to.
 _BLUESKY_PORTS = (11000, 11001)
 
-# Marker recording that auto-start already fired this boot. On tmpfs (/dev/shm)
-# by default so it survives a replaced gunicorn worker re-running register()
-# (once-per-boot, never resurrecting a manually-stopped server) yet clears when
-# the container restarts. Override with WEBATM_AUTOSTART_MARKER (e.g. a persistent
-# volume to auto-start only on the very first deployment).
+# Once-per-boot marker; see claim_first_boot() for the full rationale.
 _DEFAULT_MARKER = "/dev/shm/webatm_autostart.done"
 
 
@@ -73,8 +69,6 @@ def claim_first_boot(marker_path: str | None = None) -> bool:
     """
     path = marker_path or os.environ.get("WEBATM_AUTOSTART_MARKER", _DEFAULT_MARKER)
     try:
-        # O_EXCL makes "create the marker" the atomic claim: only the first
-        # caller succeeds; everyone else sees FileExistsError and stands down.
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
     except FileExistsError:
         logger.info("Auto-start: already performed this boot; skipping")

@@ -52,20 +52,13 @@ def register(app, socketio, *, session_manager=None, bluesky_proxy=None):
         dict: The created ``manager`` (BlueSkyProcessManager) and ``streamer``
             (LogStreamer), handy for tests.
     """
-    # Imported lazily so `import webatm_integrated.process_manager` /
-    # `.log_streamer` stay Flask-free (importable for unit tests). They are only
-    # needed here, where the Flask app + socketio already exist. `bluesky_paths`
-    # and `auto_start` import the core `WebATM` package, so they are deferred for
-    # the same reason.
+    # Imported lazily so the Flask-importing modules stay out of flask-free
+    # unit-test imports of process_manager / log_streamer.
     from .auto_start import auto_start_enabled, claim_first_boot, schedule_auto_start
     from .bluesky_paths import configure_file_management
     from .routes import register_integrated_routes
     from .socket_handlers import register_integrated_socket_handlers
 
-    # Point WebATM's file-management routes straight at BlueSky's working
-    # directory (scenario/plugins/output). BlueSky runs in this container, so
-    # that path is fixed -- the user never configures a base path here (the
-    # standalone build keeps its manual base-path step untouched).
     configure_file_management(app)
 
     streamer = LogStreamer(socketio)
@@ -86,11 +79,8 @@ def register(app, socketio, *, session_manager=None, bluesky_proxy=None):
     # Reap the whole bluesky process group if the worker process exits.
     atexit.register(manager.kill)
 
-    # On first boot, auto-start the bundled BlueSky server and connect the proxy
-    # so the user lands on a live, connected map. claim_first_boot() guards it to
-    # once per boot (a replaced worker re-running register() won't resurrect a
-    # manually-stopped server); it runs in the background so app creation returns
-    # promptly. Disable with WEBATM_AUTO_START=0 to drive the lifecycle manually.
+    # First boot only (see the docstring above): auto-start BlueSky and connect
+    # the proxy in the background so app creation returns promptly.
     if auto_start_enabled() and claim_first_boot():
         schedule_auto_start(socketio, manager, bluesky_proxy)
 
