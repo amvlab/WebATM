@@ -1,10 +1,5 @@
-import type { Socket } from 'socket.io-client';
 import { connectionStatus } from '../core/ConnectionStatusService';
-import {
-    ServerStatus,
-    ServerStatusResponse,
-    ServerControlResponse
-} from '../data/types';
+import { ServerStatus, ServerStatusResponse } from '../data/types';
 import { logger } from '../utils/Logger';
 import { onDOMReady } from '../utils/dom';
 import { StatusDisplayManager } from './StatusDisplayManager';
@@ -15,7 +10,6 @@ import { StatusDisplayManager } from './StatusDisplayManager';
  * status monitoring, and log management
  */
 export class ServerManager {
-    private socket: Socket | null = null;
     private statusCheckInterval: number | null = null;
     private currentServerStatus: ServerStatus = 'unknown';
     private isInitialized = false;
@@ -70,23 +64,6 @@ export class ServerManager {
 
 
     /**
-     * Set socket connection for real-time updates
-     */
-    public setSocket(socket: Socket | null): void {
-        this.socket = socket;
-        this.bindSocketHandlers();
-    }
-
-    private bindSocketHandlers(): void {
-        if (!this.socket) return;
-
-        this.socket.on('server_status_update', (data: ServerStatusResponse) => {
-            this.handleStatusUpdate(data);
-        });
-    }
-
-
-    /**
      * Check current server status
      * @param hostname Optional hostname to check (defaults to current server)
      */
@@ -108,7 +85,7 @@ export class ServerManager {
                 response = await fetch('/api/server/status');
             }
 
-            const data = await response.json();
+            const data: ServerStatusResponse = await response.json();
 
             if (data.status === 'success') {
                 const status: ServerStatus = data.running ? 'running' : 'stopped';
@@ -169,42 +146,10 @@ export class ServerManager {
             this.elements.statusIndicatorModal
         ).update(message, status);
 
-        this.updateButtonStates(status);
-
         const event = new CustomEvent('serverStatusUpdate', {
             detail: { status, message }
         });
         document.dispatchEvent(event);
-    }
-
-    /**
-     * Update button states based on server status (no longer needed)
-     */
-    private updateButtonStates(_status: ServerStatus): void {
-        // No buttons to update - status display only
-    }
-
-    /**
-     * Handle status update from server response
-     */
-    private handleStatusUpdate(data: ServerStatusResponse | ServerControlResponse): void {
-        if (data.success) {
-            let status: ServerStatus = 'unknown';
-            
-            if ('status' in data && data.status) {
-                status = data.status;
-            } else {
-                // Parse status from message
-                const message = data.message || '';
-                if (message.includes('running')) status = 'running';
-                else if (message.includes('Starting') || message.includes('Restarting')) status = 'starting';
-                else if (message.includes('stopped') || message.includes('Stopped')) status = 'stopped';
-            }
-            
-            this.updateStatus(data.message || 'Status updated', status);
-        } else {
-            this.updateStatus(data.message || 'Unknown error', 'unknown');
-        }
     }
 
     /**
