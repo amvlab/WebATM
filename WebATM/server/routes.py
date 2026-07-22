@@ -150,11 +150,10 @@ def register_basic_routes(app, session_manager):
         """Update server config and reconnect (POST /api/server/config).
 
         Expects a JSON body with ``server_ip``. Tears down the existing
-        BlueSky proxy completely (stop, close, delete, garbage-collect),
-        creates a fresh proxy instance preserving the Socket.IO wiring,
-        connects it to the requested server, re-registers the data
-        subscribers, then waits up to 10 seconds for BlueSky nodes to be
-        detected before confirming.
+        BlueSky proxy, creates a fresh proxy instance preserving the
+        Socket.IO wiring, connects it to the requested server, re-registers
+        the data subscribers, then waits up to 10 seconds for BlueSky nodes
+        to be detected before confirming.
 
         Returns:
             JSON with ``success: True`` and the ``server_ip`` once nodes are
@@ -164,91 +163,38 @@ def register_basic_routes(app, session_manager):
         try:
             data = request.json if request.json else {}
             server_ip = data.get("server_ip", "localhost").strip() or "localhost"
-
-            # Always create a completely fresh client instance - like restarting the server
             logger.info(f"User requested connection to BlueSky server at {server_ip}")
-            logger.info(
-                "Completely destroying current client and creating fresh instance..."
-            )
 
-            # Store important state before deletion
-            old_socketio = (
-                current_app.bluesky_proxy.socketio
-                if hasattr(current_app, "bluesky_proxy")
-                else None
-            )
-            old_connected_clients = (
-                current_app.bluesky_proxy.connected_clients
-                if hasattr(current_app, "bluesky_proxy")
-                else 0
-            )
-
-            # Stop current client if it exists and is running
-            if (
-                hasattr(current_app, "bluesky_proxy")
-                and current_app.bluesky_proxy.running
-            ):
-                logger.info("Stopping existing client...")
-                current_app.bluesky_proxy.stop_client()
-                time.sleep(0.3)
-
-            # Completely delete the old client reference with full context destruction
-            if hasattr(current_app, "bluesky_proxy"):
-                logger.info("Completely destroying client with ZMQ context...")
-                current_app.bluesky_proxy.close()  # Close network client
-                del current_app.bluesky_proxy
-
-            # Force garbage collection to clean up the old client
-            try:
-                import gc
-
-                logger.debug("Forcing garbage collection to clean up old client...")
-                gc.collect()  # Force garbage collection
-                logger.info("Memory cleaned")
-            except Exception as e:
-                logger.warning(f"Cleanup note: {e}")
-
-            # Create completely fresh client instance (let BlueSky create its own ZMQ context)
             from ..proxy import BlueSkyProxy, register_subscribers, set_bluesky_proxy
 
-            logger.info("Creating brand new BlueSky Proxy instance...")
+            # Every (re)connect gets a completely fresh proxy: recreating the
+            # ZMQ client is the reliable way to shed any half-dead connection
+            # state. Only the Socket.IO wiring carries over. The old proxy is
+            # replaced in place (never deleted) so concurrent requests always
+            # find a usable current_app.bluesky_proxy.
+            old_proxy = getattr(current_app, "bluesky_proxy", None)
+            if old_proxy is not None:
+                if old_proxy.running:
+                    old_proxy.stop_client()
+                    time.sleep(0.3)  # let ZMQ teardown settle before reconnecting
+                old_proxy.close()
 
-            try:
-                current_app.bluesky_proxy = BlueSkyProxy()
-                # Note: network_client will be initialized when user connects
-                logger.info("BlueSky Proxy instance created successfully")
+            proxy = BlueSkyProxy()
+            proxy.socketio = old_proxy.socketio if old_proxy else None
+            proxy.connected_clients = old_proxy.connected_clients if old_proxy else 0
+            current_app.bluesky_proxy = proxy
+            set_bluesky_proxy(proxy)  # update the global the subscribers use
 
-                current_app.bluesky_proxy.socketio = old_socketio
-                current_app.bluesky_proxy.connected_clients = old_connected_clients
-                set_bluesky_proxy(current_app.bluesky_proxy)  # Update global reference
-                logger.info("Client configured with socketio and connected_clients")
-
-            except Exception as e:
-                logger.error(f"Error creating {e}")
-                import traceback
-
-                traceback.print_exc()
-                raise
-
-            # Network client already initialized in BlueSkyProxy.__init__
-
-            # Connect with fresh client FIRST
-            current_app.bluesky_proxy.server_ip = server_ip
-            current_app.bluesky_proxy.start_client(hostname=server_ip)
-
-            # Re-register subscribers AFTER successful connection
-            logger.info("Re-registering data subscribers after connection...")
+            proxy.server_ip = server_ip
+            proxy.start_client(hostname=server_ip)
+            # Subscribers attach to the client start_client just created.
             register_subscribers()
-            logger.info("Data subscribers registered successfully")
 
-            # Wait for node detection to confirm BlueSky server is actually running
-            logger.debug("Waiting for BlueSky nodes to be detected...")
-
-            timeout = 10.0  # 10 seconds timeout
+            # Confirm the server is real: wait for node detection.
+            timeout = 10.0
             start_time = time.time()
-
             while time.time() - start_time < timeout:
-                if len(current_app.bluesky_proxy.tracked_nodes) > 0:
+                if len(proxy.tracked_nodes) > 0:
                     logger.info("BlueSky nodes detected - connection confirmed")
                     return jsonify(
                         {
@@ -257,13 +203,12 @@ def register_basic_routes(app, session_manager):
                             "message": "Connected to BlueSky remote server hosted by amvlab",
                         }
                     )
-                time.sleep(0.1)  # Check every 100ms
+                time.sleep(0.1)
 
-            # Timeout reached - no nodes detected
             logger.info(
                 f"No BlueSky nodes detected after {timeout}s - server may be offline"
             )
-            current_app.bluesky_proxy.stop_client()
+            proxy.stop_client()
             return (
                 jsonify(
                     {
