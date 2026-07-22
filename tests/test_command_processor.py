@@ -27,13 +27,25 @@ class TestSendCommand:
         proxy.command_proc.send_command("HDG 90")
         assert fake_client.sent[0][2] == b"NODE\x81"
 
-    def test_help_command_is_handled_locally(self, proxy, fake_client, fake_socketio):
+    def test_bare_help_command_is_handled_locally(
+        self, proxy, fake_client, fake_socketio
+    ):
         proxy.bluesky_client = fake_client
         proxy.command_proc.send_command("HELP")
-        # HELP is local: nothing forwarded to the server...
+        # Bare HELP is local: nothing forwarded to the server...
         assert fake_client.sent == []
         # ...and an echo response is produced.
         assert fake_socketio.count("echo") == 1
+
+    def test_help_with_argument_is_forwarded_to_server(
+        self, proxy, fake_client, fake_socketio
+    ):
+        proxy.bluesky_client = fake_client
+        proxy.command_proc.send_command("HELP CRE")
+        # The per-command help text lives on the BlueSky server.
+        assert fake_client.sent[0][:2] == ("STACK", "HELP CRE")
+        # No local echo — the server sends its own response.
+        assert fake_socketio.count("echo") == 0
 
 
 class TestResolveTarget:
@@ -99,10 +111,15 @@ class TestExecuteLocalCommand:
         assert success is True
         assert "BlueSky Web Client" in text
 
-    def test_help_with_argument(self, proxy):
-        success, text = proxy.command_proc._execute_local_command("HELP", "CRE")
+    def test_question_mark_without_argument(self, proxy):
+        success, text = proxy.command_proc._execute_local_command("?", "")
         assert success is True
-        assert "CRE" in text
+        assert "BlueSky Web Client" in text
+
+    def test_help_with_argument_is_not_local(self, proxy):
+        success, text = proxy.command_proc._execute_local_command("HELP", "CRE")
+        assert success is False
+        assert "not implemented" in text
 
     def test_unknown_local_command(self, proxy):
         success, text = proxy.command_proc._execute_local_command("FOO", "")
@@ -127,17 +144,3 @@ class TestEchoResponse:
         # Still stored, just not emitted.
         assert proxy.echo_data["text"] == "hi"
         assert fake_socketio.count("echo") == 0
-
-
-class TestZoomCommand:
-    def test_zoom_in_emits_event(self, proxy, fake_socketio):
-        proxy.command_proc._handle_zoom_command("++")
-        payload = fake_socketio.last("zoom")
-        assert payload["direction"] == "in"
-        assert payload["factor"] == 2
-
-    def test_zoom_out_emits_event(self, proxy, fake_socketio):
-        proxy.command_proc._handle_zoom_command("--")
-        payload = fake_socketio.last("zoom")
-        assert payload["direction"] == "out"
-        assert payload["factor"] == 2

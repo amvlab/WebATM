@@ -263,10 +263,6 @@ class BlueSkyProxy:
         """Forward one or more stack commands to BlueSky server."""
         return self.command_proc.forward(*cmdlines, target_id=target_id)
 
-    def _handle_zoom_command(self, cmd):
-        """Handle zoom commands locally."""
-        return self.command_proc._handle_zoom_command(cmd)
-
     def _execute_local_command(self, cmd, argstring):
         """Execute local client command (like BlueSky Command.cmddict does)."""
         return self.command_proc._execute_local_command(cmd, argstring)

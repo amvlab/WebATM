@@ -11,8 +11,8 @@ class CommandProcessor:
     """Handle command processing, forwarding, and echo responses.
 
     Queues user/GUI commands on the network client's stack, forwards them to
-    the BlueSky server (answering HELP/? locally), and emits echo responses
-    back to connected web clients.
+    the BlueSky server (answering bare HELP/? locally), and emits echo
+    responses back to connected web clients.
     """
 
     def __init__(self, proxy):
@@ -59,7 +59,8 @@ class CommandProcessor:
     def _process_stack_commands(self):
         """Process queued user/GUI stack commands.
 
-        HELP and ? are answered locally; every other command is forwarded to
+        A bare HELP or ? is answered locally; every other command — including
+        ``HELP <cmd>``, whose help text lives on the server — is forwarded to
         BlueSky, which validates it and sends back its own echo response.
         Incoming server commands are handled separately by on_stack_received().
         """
@@ -74,7 +75,7 @@ class CommandProcessor:
             cmd = cmd_parts[0].upper()
             argstring = " ".join(cmd_parts[1:])
 
-            if cmd in ("HELP", "?"):
+            if cmd in ("HELP", "?") and not argstring:
                 _, echotext = self._execute_local_command(cmd, argstring)
                 if echotext:
                     self._echo_response(echotext, 0)
@@ -88,9 +89,8 @@ class CommandProcessor:
                 "STACK", cmdline, self._resolve_target()
             )
             if not sent:
-                # send() returns False when the outbound ZMQ buffer is full
-                # (command flood) or the socket is gone — don't let the command
-                # vanish silently; tell the user it was dropped.
+                # Full outbound ZMQ buffer or dead socket — tell the user
+                # instead of dropping the command silently.
                 logger.warning(f"Command not sent (send failed): {cmdline}")
                 self._echo_response(f"Command dropped (server busy): {cmdline}", 1)
         except Exception as e:
@@ -126,30 +126,11 @@ class CommandProcessor:
             logger.error(f"Error in forward(): {e}")
             self._echo_response(f"Error forwarding command: {e}", 1)
 
-    def _handle_zoom_command(self, cmd):
-        """Emit a map zoom event to web clients for +/- zoom commands."""
-        if cmd in ("+", "++", "+++", "="):
-            zoom_factor = cmd.count("+") + cmd.count("=")
-            if self.proxy.socketio and self.proxy.connected_clients > 0:
-                self.proxy.socketio.emit(
-                    "zoom", {"direction": "in", "factor": zoom_factor}
-                )
-        elif cmd in ("-", "--", "---"):
-            zoom_factor = cmd.count("-")
-            if self.proxy.socketio and self.proxy.connected_clients > 0:
-                self.proxy.socketio.emit(
-                    "zoom", {"direction": "out", "factor": zoom_factor}
-                )
-
     def _execute_local_command(self, cmd, argstring):
-        """Execute a command the web client handles itself (only HELP/?)."""
-        if cmd == "HELP" or cmd == "?":
-            if not argstring:
-                return True, "BlueSky Web Client: Enter commands to control simulation"
-            else:
-                return True, f"Help for {argstring}: Command forwarded to server"
-        else:
-            return False, f"Local command {cmd} not implemented in web client"
+        """Execute a command the web client handles itself (bare HELP/? only)."""
+        if cmd in ("HELP", "?") and not argstring:
+            return True, "BlueSky Web Client: Enter commands to control simulation"
+        return False, f"Local command {cmd} not implemented in web client"
 
     def _echo_response(self, text, flags):
         """Store an echo response and emit it to connected web clients."""
