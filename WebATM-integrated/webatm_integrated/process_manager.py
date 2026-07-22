@@ -75,12 +75,30 @@ class BlueSkyProcessManager:
         The process is started in a new session with merged, line-buffered
         stdout/stderr so the reader receives one ordered stream for the
         server and all node children. A no-op if the server is already
-        running.
+        running. If a concurrent :meth:`stop` is mid-shutdown, waits for it
+        to finish and then starts a fresh server instead of reporting the
+        doomed process as "already running".
 
         Returns:
             dict: Result with ``success``, ``status``, ``pid`` and
                 ``message`` (plus ``error`` on failure).
         """
+        with self._lock:
+            stopping_proc = self._proc if self._state == "stopping" else None
+        if stopping_proc is not None:
+            # A concurrent stop() owns this process's shutdown; treating it as
+            # "already running" would return a pid that is about to die. Wait
+            # out the stop (its worst case is escalate_after + the 5s SIGKILL
+            # wait), then start fresh below.
+            try:
+                stopping_proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                return {
+                    "success": False,
+                    "status": "error",
+                    "message": "BlueSky server is still stopping; retry shortly",
+                }
+
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 return {
