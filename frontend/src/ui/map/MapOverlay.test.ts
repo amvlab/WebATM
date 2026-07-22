@@ -5,6 +5,8 @@
  * off — the old factory fell back to a second 2D renderer, which MapOverlay
  * then initialized over the always-active one, colliding with its fixed map
  * layer IDs and marking the overlay active with no 3D renderer behind it.
+ * Also covers the toggle racing the lazy chunk load: a disable requested
+ * mid-load used to be dropped, leaving the overlay on with the toggle off.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Map as MapLibreMap } from 'maplibre-gl';
@@ -95,5 +97,50 @@ describe('MapOverlay 3D overlay lifecycle', () => {
 
         await overlay.updateDisplayOptions({ show3DOverlay: false });
         expect(renderer3D.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it('honors a disable requested while the 3D chunk is still loading', async () => {
+        // Deferred create3D simulates the lazy Three.js chunk still fetching.
+        const renderer3D = make3DRenderer();
+        let resolveLoad!: (r: IEntityRenderer<AircraftData>) => void;
+        vi.mocked(AircraftRendererFactory.create3D).mockReturnValue(
+            new Promise((resolve) => { resolveLoad = resolve; })
+        );
+
+        const enablePromise = overlay.updateDisplayOptions({ show3DOverlay: true });
+
+        // User unchecks the toggle before the chunk arrives. The overlay is
+        // not active yet, so the old code dropped this request entirely.
+        await overlay.updateDisplayOptions({ show3DOverlay: false });
+
+        resolveLoad(renderer3D);
+        await enablePromise;
+
+        // The overlay must end up off: torn down again after the late enable.
+        expect(renderer3D.destroy).toHaveBeenCalledTimes(1);
+
+        // And a fresh enable still works afterwards.
+        vi.mocked(AircraftRendererFactory.create3D).mockResolvedValue(make3DRenderer());
+        await overlay.updateDisplayOptions({ show3DOverlay: true });
+        expect(AircraftRendererFactory.create3D).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the overlay on when the toggle flips off then back on during the load', async () => {
+        const renderer3D = make3DRenderer();
+        let resolveLoad!: (r: IEntityRenderer<AircraftData>) => void;
+        vi.mocked(AircraftRendererFactory.create3D).mockReturnValue(
+            new Promise((resolve) => { resolveLoad = resolve; })
+        );
+
+        const enablePromise = overlay.updateDisplayOptions({ show3DOverlay: true });
+        await overlay.updateDisplayOptions({ show3DOverlay: false });
+        await overlay.updateDisplayOptions({ show3DOverlay: true });
+
+        resolveLoad(renderer3D);
+        await enablePromise;
+
+        // Last request was "on", so the loaded renderer stays.
+        expect(renderer3D.destroy).not.toHaveBeenCalled();
+        expect(AircraftRendererFactory.create3D).toHaveBeenCalledTimes(1);
     });
 });
