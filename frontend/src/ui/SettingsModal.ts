@@ -9,7 +9,7 @@ import { serverManager } from './ServerManager';
 import { logger, LogLevel } from '../utils/Logger';
 import { storage } from '../utils/StorageManager';
 import { themeManager, ThemePreference } from '../utils/ThemeManager';
-import { onDOMReady, setDisabled, setVisible } from '../utils/dom';
+import { isVisible, onDOMReady, setDisabled, setVisible } from '../utils/dom';
 
 /**
  * Settings Modal Component
@@ -207,33 +207,36 @@ export class SettingsModal {
     }
 
     private bindEventHandlers(): void {
-        // Settings button is now handled by Header.ts to avoid duplicate handlers
-        // SettingsModal only handles the modal content, not the button that opens it
-
-        // Connect to server
+        // The button that opens the modal is handled by Header.ts; this class
+        // only handles the modal content.
         if (this.elements.connectButton) {
             this.elements.connectButton.addEventListener('click', () => this.connectToServer());
         }
 
-        // Disconnect from server
         if (this.elements.disconnectButton) {
             this.elements.disconnectButton.addEventListener('click', () => this.disconnectFromServer());
         }
 
-        // Check server status
         if (this.elements.checkStatusButton) {
             this.elements.checkStatusButton.addEventListener('click', () => this.manualCheckServerStatus());
         }
 
-        // Cancel/close modal
         if (this.elements.cancelButton) {
             this.elements.cancelButton.addEventListener('click', () => this.close());
         }
 
-        // Handle Enter key in server IP input
+        // Enter in the host field acts as a Connect click, so it must respect
+        // the button's disabled/hidden state (server down, already connected,
+        // or integrated mode).
         if (this.elements.serverIpInput) {
             this.elements.serverIpInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
+                const connectButton = this.elements.connectButton;
+                if (
+                    e.key === 'Enter' &&
+                    connectButton &&
+                    !connectButton.disabled &&
+                    isVisible(connectButton)
+                ) {
                     this.connectToServer();
                 }
             });
@@ -254,35 +257,24 @@ export class SettingsModal {
             this.handleServerStatusUpdate(event.detail);
         });
 
-        // Subscribe to ConnectionStatusService for BlueSky connection state
+        // Keep button states in sync with the BlueSky connection state
         connectionStatus.subscribe((status) => {
-            // Update local state based on connection status
             const wasBlueSkyConnected = this.blueSkyConnected;
             this.blueSkyConnected = status.blueSkyConnected;
 
-            // Update button states when connection status changes
             if (wasBlueSkyConnected !== this.blueSkyConnected) {
-                logger.debug('SettingsModal', `BlueSky connection status changed: ${wasBlueSkyConnected} → ${this.blueSkyConnected}`);
                 this.updateConnectionButtons(this.blueSkyConnected);
                 this.updateConnectButtonState();
-
-                // Log button state after update
-                logger.debug('SettingsModal', `After connection change - Connect button visible: ${this.elements.connectButton?.style.display !== 'none'}, enabled: ${!this.elements.connectButton?.disabled}`);
             }
         });
     }
 
     /**
-     * Open the settings modal
+     * Open the settings modal. Settings are loaded by onBeforeOpen(), which
+     * the modal manager fires on every open.
      */
-    public async open(): Promise<void> {
-        try {
-            // Load current settings before opening
-            await this.loadCurrentSettings();
-            modalManager.open(this.modalId);
-        } catch (error) {
-            logger.error('SettingsModal', 'Error opening settings modal:', error);
-        }
+    public open(): void {
+        modalManager.open(this.modalId);
     }
 
     /**
@@ -293,26 +285,16 @@ export class SettingsModal {
     }
 
     /**
-     * Handle before modal open event
+     * Refresh connection state, settings and server status on every open.
      */
     private async onBeforeOpen(): Promise<void> {
-        // Get fresh connection state from ConnectionStatusService
-        const connectionState = connectionStatus.getStatus();
-        this.blueSkyConnected = connectionState.blueSkyConnected;
-
-        logger.debug('SettingsModal', `Modal opening - BlueSky connected: ${this.blueSkyConnected}`);
+        this.blueSkyConnected = connectionStatus.getStatus().blueSkyConnected;
 
         await this.loadCurrentSettings();
-
-        // Update buttons based on fresh connection state
         this.updateConnectionButtons(this.blueSkyConnected);
 
         await this.checkServerStatus();
-
-        // Update button state based on current server status
         this.updateConnectButtonState();
-
-        logger.debug('SettingsModal', `Modal opened - Connect button visible: ${this.elements.connectButton?.style.display !== 'none'}, enabled: ${!this.elements.connectButton?.disabled}`);
     }
 
     /**
@@ -329,15 +311,14 @@ export class SettingsModal {
                 if (response.ok) {
                     const config: ServerConfigResponse = await response.json();
                     serverIp = config.server_ip;
-                    // Update our current server IP to match backend's default
-                    if (serverIp) {
-                        this.currentServerIP = serverIp;
-                    }
                 }
             }
 
-            if (this.elements.serverIpInput && serverIp) {
-                this.elements.serverIpInput.value = serverIp;
+            if (serverIp) {
+                this.currentServerIP = serverIp;
+                if (this.elements.serverIpInput) {
+                    this.elements.serverIpInput.value = serverIp;
+                }
             }
 
         } catch (error) {
@@ -361,59 +342,44 @@ export class SettingsModal {
      * Load map style settings
      */
     private loadMapStyleSettings(): void {
-        logger.debug('SettingsModal', 'Loading map style settings...');
-        
         if (!this.elements.mapStyleSelect) {
             logger.warn('SettingsModal', 'Map style select element not found');
             return;
         }
 
-        // Get saved map style from storage (same key as used in MapDisplay)
+        // Saved map style from storage (same key as used in MapDisplay)
         const savedStyle = storage.get<string>('webatm-map-style');
-        
+
         if (savedStyle) {
-            logger.debug('SettingsModal', 'Found saved map style:', savedStyle);
-            
-            // Try to find and select the matching option
             const options = this.elements.mapStyleSelect.options;
             let matchFound = false;
-            
+
             for (let i = 0; i < options.length; i++) {
                 const option = options[i];
-                
-                // Direct match
-                if (option.value === savedStyle) {
+
+                // Direct match, or a MapTiler style where the saved value has
+                // ?key=ABC123 and the option value ends with a bare ?key=
+                if (
+                    option.value === savedStyle ||
+                    (option.value.endsWith('?key=') && savedStyle.startsWith(option.value))
+                ) {
                     this.elements.mapStyleSelect.selectedIndex = i;
                     matchFound = true;
-                    logger.debug('SettingsModal', 'Map style option selected (direct match):', option.text);
-                    break;
-                }
-                
-                // Handle MapTiler styles with API keys
-                // Saved style has ?key=ABC123, option value has ?key=
-                if (option.value.endsWith('?key=') && savedStyle.startsWith(option.value)) {
-                    this.elements.mapStyleSelect.selectedIndex = i;
-                    matchFound = true;
-                    logger.debug('SettingsModal', 'Map style option selected (API key match):', option.text);
                     break;
                 }
             }
-            
+
             if (!matchFound) {
-                logger.debug('SettingsModal', 'Saved style not found in predefined options, might be custom style');
-                // Set to custom option if available or leave as default
+                // Not a predefined option — treat it as a custom style URL
                 const customOption = Array.from(options).find(opt => opt.value === 'custom');
                 if (customOption) {
                     this.elements.mapStyleSelect.value = 'custom';
-                    // Also populate custom URL input if present
                     const customInput = document.getElementById('custom-style-url-modal') as HTMLInputElement;
                     if (customInput) {
                         customInput.value = savedStyle;
                     }
                 }
             }
-        } else {
-            logger.debug('SettingsModal', 'No saved map style found, using default selection');
         }
 
         // Notify the style selector's change handler so the custom-input and
@@ -429,13 +395,8 @@ export class SettingsModal {
         const serverIp = hostOverride ?? (this.elements.serverIpInput?.value.trim() || 'localhost');
 
         try {
-            // Store the server IP for status display
             this.currentServerIP = serverIp;
-
-            // Show loading state
             this.setConnectButtonState('Connecting...', true);
-
-            // Note: "Connecting..." message is automatically logged by ConnectionStatusService
 
             const response = await fetch('/api/server/config', {
                 method: 'POST',
@@ -448,16 +409,8 @@ export class SettingsModal {
             const result: ServerControlResponse = await response.json();
 
             if (result.success) {
-                // Save server IP to session storage on successful connection
                 this.saveServerIP(serverIp);
-                // Note: Connection success message is automatically logged by ConnectionStatusService
                 this.close();
-
-                // Schedule auto-switch check after a brief delay to allow node info to arrive
-                setTimeout(() => {
-                    // This would call the main app's auto-switch logic
-                    this.handleAutoNodeSwitching();
-                }, 500);
 
                 // Move focus back to command console
                 const consoleInput = document.getElementById('console-input') as HTMLInputElement;
@@ -467,15 +420,18 @@ export class SettingsModal {
                 return true;
             }
 
-            this.addConsoleMessage(`Connection failed: ${result.error}`, 'console-error');
+            consoleManager.error(`Connection failed: ${result.error}`);
             return false;
         } catch (error) {
             logger.error('SettingsModal', 'Error updating server settings:', error);
-            this.addConsoleMessage(`Connection error: ${(error as Error).message}`, 'console-error');
+            consoleManager.error(`Connection error: ${(error as Error).message}`);
             return false;
         } finally {
-            // Reset button state
+            // Restore the label, then recompute enabled/disabled from the
+            // actual server/connection state instead of unconditionally
+            // re-enabling (the server may still be down).
             this.setConnectButtonState('Connect', false);
+            this.updateConnectButtonState();
         }
     }
 
@@ -503,24 +459,19 @@ export class SettingsModal {
 
             const result: ServerControlResponse = await response.json();
             if (result.success) {
-                // Note: Disconnection message is automatically logged by ConnectionStatusService
                 this.clearSavedServerIP();
-
-                // Immediately update button visibility after disconnect
-                logger.debug('SettingsModal', 'Disconnect successful - updating buttons');
                 this.updateConnectionButtons(false);
 
-                // Reset server status display to prompt user to check status
+                // Reset server status display to prompt user to check status;
+                // the modal stays open after a disconnect.
                 serverManager.resetStatus();
                 this.blueSkyServerRunning = false;
-
-                // Settings modal remains open after disconnect
             } else {
-                this.addConsoleMessage(`Disconnect failed: ${result.error}`, 'console-error');
+                consoleManager.error(`Disconnect failed: ${result.error}`);
             }
         } catch (error) {
             logger.error('SettingsModal', 'Error disconnecting:', error);
-            this.addConsoleMessage(`Disconnect error: ${(error as Error).message}`, 'console-error');
+            consoleManager.error(`Disconnect error: ${(error as Error).message}`);
         }
     }
 
@@ -537,13 +488,8 @@ export class SettingsModal {
      * Handle server status update event
      */
     private handleServerStatusUpdate(detail: { status: string; message: string }): void {
-        const isRunning = detail.status === 'running';
-        this.blueSkyServerRunning = isRunning;
-
-        // Update connect button state based on server status
+        this.blueSkyServerRunning = detail.status === 'running';
         this.updateConnectButtonState();
-
-        logger.debug('SettingsModal', `Server status updated: ${detail.status} - Connect button ${isRunning ? 'enabled' : 'disabled'}`);
     }
 
     /**
@@ -567,8 +513,6 @@ export class SettingsModal {
      * Cancel button is always visible
      */
     private updateConnectionButtons(isConnected: boolean): void {
-        logger.debug('SettingsModal', `updateConnectionButtons called - isConnected: ${isConnected}`);
-
         // Integrated build: connecting/disconnecting is auto-managed from the
         // server lifecycle controls, so the manual buttons stay hidden and the
         // host stays locked regardless of connection state.
@@ -578,19 +522,11 @@ export class SettingsModal {
         }
 
         if (this.elements.connectButton) {
-            const newDisplay = isConnected ? 'none' : 'inline-block';
-            logger.debug('SettingsModal', `Setting Connect button display to: ${newDisplay}`);
-            this.elements.connectButton.style.display = newDisplay;
-        } else {
-            logger.warn('SettingsModal', 'Connect button element not found!');
+            this.elements.connectButton.style.display = isConnected ? 'none' : 'inline-block';
         }
 
         if (this.elements.disconnectButton) {
-            const newDisplay = isConnected ? 'inline-block' : 'none';
-            logger.debug('SettingsModal', `Setting Disconnect button display to: ${newDisplay}`);
-            this.elements.disconnectButton.style.display = newDisplay;
-        } else {
-            logger.warn('SettingsModal', 'Disconnect button element not found!');
+            this.elements.disconnectButton.style.display = isConnected ? 'inline-block' : 'none';
         }
 
         // Disable hostname input when connected, enable when disconnected.
@@ -601,7 +537,6 @@ export class SettingsModal {
             input.disabled = isConnected;
             input.style.opacity = isConnected ? '0.6' : '1';
             input.style.cursor = isConnected ? 'not-allowed' : 'text';
-            logger.debug('SettingsModal', `Hostname input ${isConnected ? 'disabled' : 'enabled'}`);
         }
 
         // Also update button state when connection status changes
@@ -749,50 +684,6 @@ export class SettingsModal {
         }
     }
 
-    /**
-     * Add message to console
-     */
-    private addConsoleMessage(message: string, type: string): void {
-        // Use the TypeScript console manager
-        switch (type) {
-            case 'console-error':
-                consoleManager.error(message);
-                break;
-            case 'console-warning':
-                consoleManager.warning(message);
-                break;
-            case 'console-success':
-                consoleManager.success(message);
-                break;
-            case 'console-info':
-            default:
-                consoleManager.info(message);
-                break;
-        }
-    }
-
-    /**
-     * Handle auto node switching
-     */
-    private handleAutoNodeSwitching(): void {
-        // Emit event for auto node switching logic
-        const event = new CustomEvent('autoNodeSwitchCheck', {
-            detail: { serverIP: this.currentServerIP }
-        });
-        document.dispatchEvent(event);
-    }
-
-    /**
-     * Public methods for external access
-     */
-    public setBlueSkyConnected(connected: boolean): void {
-        this.blueSkyConnected = connected;
-        this.updateConnectionButtons(connected);
-    }
-
-    public getCurrentServerIP(): string {
-        return this.currentServerIP;
-    }
 }
 
 // Export singleton instance
