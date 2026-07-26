@@ -35,6 +35,22 @@ const jobs = [
         dest: path.join(vendorDir, 'maplibre-gl/maplibre-gl.css'),
         kind: 'file',
     },
+    // maplibre-gl v6 is ESM-only and loads its map worker from a URL at
+    // runtime (see setWorkerUrl in MapDisplay.ts). The worker imports the
+    // shared chunk as a sibling module, so both files must live next to
+    // each other under the same vendor directory.
+    {
+        name: 'maplibre-gl worker',
+        src: path.join(frontendDir, 'node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs'),
+        dest: path.join(vendorDir, 'maplibre-gl/maplibre-gl-worker.mjs'),
+        kind: 'file',
+    },
+    {
+        name: 'maplibre-gl shared chunk',
+        src: path.join(frontendDir, 'node_modules/maplibre-gl/dist/maplibre-gl-shared.mjs'),
+        dest: path.join(vendorDir, 'maplibre-gl/maplibre-gl-shared.mjs'),
+        kind: 'file',
+    },
     {
         name: 'fontawesome css',
         src: path.join(frontendDir, 'node_modules/@fortawesome/fontawesome-free/css/all.min.css'),

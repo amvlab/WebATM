@@ -46,7 +46,7 @@
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.2.0",
     "@turf/circle": "^7.2.0",
-    "maplibre-gl": "^5.8.0",
+    "maplibre-gl": "^6.0.0",
     "pmtiles": "^4.4.1",
     "socket.io-client": "^4.8.1",
     "three": "^0.185.1"

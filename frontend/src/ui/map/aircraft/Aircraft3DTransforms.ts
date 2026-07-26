@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { MercatorCoordinate } from 'maplibre-gl';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import { altitudeScaledForOrigin, relativePositionMeters } from '../rendering/mercatorUtils';
+import { getGlobeModelMatrix } from '../rendering/globeMatrix';
 import type { Render3DArgs } from '../rendering/CustomLayer3D';
 import type { AircraftData, DisplayOptions } from '../../../data/types';
 import type { StateManager } from '../../../core/StateManager';
@@ -68,7 +69,7 @@ export class Aircraft3DTransforms {
     // matrices are made origin-relative with this so their translations stay
     // small; the origin matrix itself is folded into the camera projection in
     // applyGlobeCamera (computed on the CPU in double precision). Without this,
-    // getMatrixForModel's huge absolute translations dwarf the tiny model
+    // the globe model matrix's huge absolute translations dwarf the tiny model
     // scale and float32 rounding on the GPU quantizes vertices to ~meter
     // steps, crumpling small aircraft into stretched "stringy" triangles.
     private globeOriginMatrixInverse: THREE.Matrix4 | null = null;
@@ -290,48 +291,38 @@ export class Aircraft3DTransforms {
         try {
             const { altitudeMeters, headingRad, finalScale } = this.computeMeshTransformBasics(mesh, data);
 
-            // Check if getMatrixForModel is available (for globe projection)
-            const map = this.deps.getMap();
-            if (map?.transform?.getMatrixForModel) {
-                // Based on MapLibre globe examples, getMatrixForModel expects [lng, lat] order
-                const modelMatrix = map.transform.getMatrixForModel([data.lon, data.lat], altitudeMeters);
+            // Place the model on the globe ([lng, lat] order) and fold in the
+            // combined scale.
+            const l = getGlobeModelMatrix([data.lon, data.lat], altitudeMeters)
+                .scale(new THREE.Vector3(finalScale, finalScale, finalScale));
 
-                const l = new THREE.Matrix4().fromArray(modelMatrix)
-                    .scale(new THREE.Vector3(finalScale, finalScale, finalScale));
+            // The globe model frame is mirror-flipped (opposite handedness)
+            // vs the corrected mercator group, so negate the heading to keep
+            // the nose on the right compass bearing (0°=N, 90°=E). The
+            // geometry flip is undone just below.
+            const rotationY = new THREE.Matrix4().makeRotationY(-headingRad + Math.PI / 2);
+            l.multiply(rotationY);
 
-                // getMatrixForModel's frame is mirror-flipped (opposite
-                // handedness) vs the corrected mercator group, so negate the
-                // heading to keep the nose on the right compass bearing
-                // (0°=N, 90°=E). The geometry flip is undone just below.
-                const rotationY = new THREE.Matrix4().makeRotationY(-headingRad + Math.PI / 2);
-                l.multiply(rotationY);
+            // Reflect the model's lateral (Z) axis back so on-fuselage text
+            // and liveries don't render mirrored in globe view. Nose (+X)
+            // and up (+Y) are untouched, so heading and attitude are kept.
+            const lateralMirrorFix = new THREE.Matrix4().makeScale(1, 1, -1);
+            l.multiply(lateralMirrorFix);
 
-                // Reflect the model's lateral (Z) axis back so on-fuselage text
-                // and liveries don't render mirrored in globe view. Nose (+X)
-                // and up (+Y) are untouched, so heading and attitude are kept.
-                const lateralMirrorFix = new THREE.Matrix4().makeScale(1, 1, -1);
-                l.multiply(lateralMirrorFix);
-
-                // Rebase onto the globe origin so the mesh matrix keeps small
-                // translations (precision; see globeOriginMatrixInverse). The
-                // origin matrix is reapplied via the camera projection, so the
-                // product is mathematically unchanged. When the inverse isn't
-                // available yet (first globe frame), the absolute matrix pairs
-                // with the mainMatrix-only camera fallback in applyGlobeCamera.
-                if (this.globeOriginMatrixInverse) {
-                    l.premultiply(this.globeOriginMatrixInverse);
-                }
-
-                // Set the transform - the camera projection matrix is set per
-                // frame in applyGlobeCamera
-                mesh.matrix = l;
-                mesh.matrixAutoUpdate = false;
-            } else {
-                logger.warn('Aircraft3DTransforms', '[GLOBE] getMatrixForModel not available, falling back to mercator transform');
-                // Fallback to mercator-style transform if globe API not available
-                this.updateMeshTransformForMercator(mesh, data);
-                return;
+            // Rebase onto the globe origin so the mesh matrix keeps small
+            // translations (precision; see globeOriginMatrixInverse). The
+            // origin matrix is reapplied via the camera projection, so the
+            // product is mathematically unchanged. When the inverse isn't
+            // available yet (first globe frame), the absolute matrix pairs
+            // with the mainMatrix-only camera fallback in applyGlobeCamera.
+            if (this.globeOriginMatrixInverse) {
+                l.premultiply(this.globeOriginMatrixInverse);
             }
+
+            // Set the transform - the camera projection matrix is set per
+            // frame in applyGlobeCamera
+            mesh.matrix = l;
+            mesh.matrixAutoUpdate = false;
 
             this.disableFrustumCulling(mesh);
         } catch (error) {
@@ -343,7 +334,7 @@ export class Aircraft3DTransforms {
 
     /**
      * Update mesh for mercator projection using individual transforms
-     * Used as fallback when the globe model API is unavailable
+     * Used as fallback when the globe transform math fails
      */
     private updateMeshTransformForMercator(mesh: THREE.Object3D, data: AircraftMeshData): void {
         const { altitudeMeters, headingRad, finalScale } = this.computeMeshTransformBasics(mesh, data);
@@ -371,30 +362,27 @@ export class Aircraft3DTransforms {
 
     /**
      * Per-frame camera projection for globe mode. Each aircraft mesh gets an
-     * origin-relative getMatrixForModel transform, and the shared origin
-     * matrix is folded into the camera projection here. Both factors are
-     * combined on the CPU in double precision, so the GPU only ever sees
-     * small mesh translations — this is what keeps small aircraft from
-     * collapsing into stringy float32 artifacts.
+     * origin-relative globe model transform, and the shared origin matrix is
+     * folded into the camera projection here. Both factors are combined on
+     * the CPU in double precision, so the GPU only ever sees small mesh
+     * translations — this is what keeps small aircraft from collapsing into
+     * stringy float32 artifacts.
      */
     applyGlobeCamera(args: Render3DArgs): void {
         const mainMatrix = new THREE.Matrix4().fromArray(
             args.defaultProjectionData.mainMatrix
         );
 
-        const map = this.deps.getMap();
-        if (map?.transform?.getMatrixForModel) {
-            // Anchor at the scene origin (aircraft centroid); fall
-            // back to the map center before any aircraft exist.
-            const origin = this.sceneOrigin ?? map.getCenter();
-            const originMatrix = new THREE.Matrix4().fromArray(
-                map.transform.getMatrixForModel([origin.lng, origin.lat], 0)
-            );
+        // Anchor at the scene origin (aircraft centroid); fall back to the
+        // map center before any aircraft exist.
+        const origin = this.sceneOrigin ?? this.deps.getMap()?.getCenter();
+        if (origin) {
+            const originMatrix = getGlobeModelMatrix([origin.lng, origin.lat], 0);
             this.globeOriginMatrixInverse = originMatrix.clone().invert();
             this.deps.getCamera().projectionMatrix = mainMatrix.multiply(originMatrix);
         } else {
-            // No globe model API: meshes fall back to absolute
-            // mercator-style matrices, so use mainMatrix alone.
+            // No origin to anchor on yet (no aircraft and no map): meshes
+            // keep absolute matrices, so use mainMatrix alone.
             this.globeOriginMatrixInverse = null;
             this.deps.getCamera().projectionMatrix = mainMatrix;
         }

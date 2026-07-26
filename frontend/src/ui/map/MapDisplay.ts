@@ -1,4 +1,5 @@
-import maplibregl, { Map, MapOptions } from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+import { Map, MapOptions } from 'maplibre-gl';
 import type { FitBoundsOptions, FlyToOptions } from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
 import { storage } from '../../utils/StorageManager';
@@ -11,6 +12,12 @@ import { MapStyleManager } from './MapStyleManager';
 // reloading the MapDisplay module (HMR / test harnesses) does not re-register.
 if (!window.__webatmPmtilesRegistered__) {
     maplibregl.addProtocol('pmtiles', new Protocol().tile);
+    // maplibre-gl v6 (ESM-only) resolves its map worker from a URL at
+    // runtime; under a bundler that auto-detection fails, so point it at the
+    // copy vendored by frontend/scripts/vendor-assets.js. Must be set before
+    // the first Map is constructed. Served same-origin, which also keeps
+    // offline/air-gapped deployments working without a CDN.
+    maplibregl.setWorkerUrl('/static/vendor/maplibre-gl/maplibre-gl-worker.mjs');
     window.__webatmPmtilesRegistered__ = true;
 }
 
