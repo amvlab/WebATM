@@ -8,7 +8,6 @@
 | `WEB_PORT` | Web server port | `8082` |
 | `BLUESKY_SERVER_HOST` | BlueSky server hostname/IP address | `localhost` |
 | `FLASK_ENV` | Set to `production` for production deployment | — |
-| `HEARTBEAT_INTERVAL` | Connection heartbeat interval in seconds | `30` |
 
 !!! warning "Binding for containers"
     `WEB_HOST` defaults to `localhost` for security. Production and Docker
@@ -45,6 +44,5 @@ Additional variables for the [integrated build](integrated-build.md):
 ### Security features
 
 - Capability dropping and no-new-privileges in Docker.
-- Session management with configurable timeouts.
-- Heartbeat-based connection monitoring.
+- Session tracking with Socket.IO ping/pong connection monitoring.
 - Environment-based configuration.

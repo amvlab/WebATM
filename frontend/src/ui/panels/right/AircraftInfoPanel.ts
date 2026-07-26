@@ -30,6 +30,10 @@ export class AircraftInfoPanel extends BasePanel {
     // data updates do not overwrite the feedback message mid-animation.
     private copyFeedbackTimeouts: Map<string, number> = new Map();
 
+    // Field under the cursor: its displayed value is frozen so the user
+    // can copy exactly what they see while live data keeps ticking.
+    private hoveredField: string | null = null;
+
     // Per-aircraft 3D model override UI state
     private modelSelect: HTMLSelectElement | null = null;
     private modelRowElement: HTMLElement | null = null;
@@ -133,9 +137,7 @@ export class AircraftInfoPanel extends BasePanel {
             return;
         }
 
-        // Build the static DOM structure on first render (or after a placeholder).
-        // Subsequent updates only mutate text content, so elements and their
-        // event listeners persist across ticks.
+        // Build the static DOM structure on first render (or after a placeholder)
         if (!this.hasStructure) {
             this.buildInfoStructure();
         }
@@ -219,15 +221,14 @@ export class AircraftInfoPanel extends BasePanel {
     }
 
     /**
-     * Update a value element's text content, skipping the update if it
-     * is currently showing "Copied!" feedback. In that case, the latest
-     * value is stashed and restored when the feedback timeout expires.
+     * Update a value element's text, stashing it instead while the field
+     * is hovered or showing "Copied!" feedback (applied when that ends).
      */
     private setValueText(field: string, text: string): void {
         const el = this.valueElements.get(field);
         if (!el) return;
 
-        if (this.copyFeedbackTimeouts.has(field)) {
+        if (this.copyFeedbackTimeouts.has(field) || this.hoveredField === field) {
             el.setAttribute('data-pending-text', text);
             return;
         }
@@ -251,6 +252,7 @@ export class AircraftInfoPanel extends BasePanel {
      */
     private clearStructure(): void {
         this.valueElements.clear();
+        this.hoveredField = null;
         this.tcpaRowElement = null;
         this.modelSelect = null;
         this.modelRowElement = null;
@@ -294,6 +296,7 @@ export class AircraftInfoPanel extends BasePanel {
             value.className = 'info-value copyable-value';
             value.setAttribute('data-field', field);
             this.attachCopyHandler(value, field);
+            this.attachHoverFreeze(value, field);
             row.appendChild(value);
             grid.appendChild(row);
             this.valueElements.set(field, value);
@@ -375,12 +378,37 @@ export class AircraftInfoPanel extends BasePanel {
     }
 
     /**
+     * Freeze a field's displayed value while the cursor is over it, so a
+     * live-updating value isn't a moving target for click-to-copy. Ticks
+     * received meanwhile land in data-pending-text and are applied on
+     * mouseleave (or by the "Copied!" feedback's own restore).
+     */
+    private attachHoverFreeze(element: HTMLElement, field: string): void {
+        element.addEventListener('mouseenter', () => {
+            this.hoveredField = field;
+        });
+        element.addEventListener('mouseleave', () => {
+            if (this.hoveredField === field) this.hoveredField = null;
+            if (this.copyFeedbackTimeouts.has(field)) return;
+            const pending = element.getAttribute('data-pending-text');
+            if (pending !== null) {
+                element.textContent = pending;
+                element.removeAttribute('data-pending-text');
+            }
+        });
+    }
+
+    /**
      * Attach click-to-copy handler once per element. The element persists
      * across data updates, so this listener only needs to be bound once.
      */
     private attachCopyHandler(element: HTMLElement, field: string): void {
         element.addEventListener('click', async () => {
-            const textToCopy = element.textContent || '';
+            // While the "Copied!" feedback is showing, the real value lives
+            // in data-pending-text — never copy the feedback label itself.
+            const textToCopy = this.copyFeedbackTimeouts.has(field)
+                ? element.getAttribute('data-pending-text') ?? ''
+                : element.textContent ?? '';
 
             try {
                 await navigator.clipboard.writeText(textToCopy);
@@ -391,15 +419,18 @@ export class AircraftInfoPanel extends BasePanel {
                     window.clearTimeout(existingTimeout);
                 }
 
-                // Show feedback
+                // Stash the copied value so the timeout can restore it even
+                // when no data tick arrives during the feedback (e.g. paused
+                // simulation). setValueText keeps the stash up to date.
+                if (!element.hasAttribute('data-pending-text')) {
+                    element.setAttribute('data-pending-text', textToCopy);
+                }
                 element.textContent = 'Copied!';
                 element.style.color = '#4CAF50';
 
                 const timeoutId = window.setTimeout(() => {
                     this.copyFeedbackTimeouts.delete(field);
                     element.style.color = '';
-                    // Restore to the most recent value received during feedback,
-                    // if any. Otherwise the next update tick will refresh it.
                     const pending = element.getAttribute('data-pending-text');
                     if (pending !== null) {
                         element.textContent = pending;

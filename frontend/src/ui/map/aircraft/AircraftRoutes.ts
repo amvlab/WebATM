@@ -6,13 +6,9 @@ import { logger } from '../../../utils/Logger';
 /**
  * AircraftRoutes - Manages aircraft route visualization on the map
  *
- * This class handles the state and coordination for aircraft route display:
- * - Route data storage and management
- * - Selected aircraft tracking
- * - Display option integration (colors, units, visibility)
- * - Coordination with AircraftRouteRenderer for actual rendering
- *
- * Routes are only shown for the selected aircraft and respect user display preferences.
+ * Holds the route data and selection state and coordinates with
+ * AircraftRouteRenderer for the actual MapLibre rendering. Routes are only
+ * shown for the selected aircraft and respect user display preferences.
  */
 export class AircraftRoutes {
     private map: Map;
@@ -26,18 +22,10 @@ export class AircraftRoutes {
     private showRouteLabels: boolean = true;
     private showRoutePoints: boolean = true;
 
-    /**
-     * Constructor
-     * @param map - MapLibre GL map instance
-     * @param displayOptions - Display options containing colors, units, toggles
-     */
     constructor(map: Map, displayOptions: DisplayOptions) {
         this.map = map;
-
-        // Create renderer for MapLibre-specific operations
         this.renderer = new AircraftRouteRenderer(map, displayOptions);
 
-        // Initialize display state from display options
         this.showRoutes = displayOptions.showRoutes;
         this.showRouteLines = displayOptions.showRouteLines;
         this.showRouteLabels = displayOptions.showRouteLabels;
@@ -45,15 +33,13 @@ export class AircraftRoutes {
     }
 
     /**
-     * Set up route layers on the map
-     * Should be called after map style loads or changes
+     * Set up route layers on the map.
+     * Should be called after map style loads or changes.
      */
     public setupLayers(): void {
         if (!this.map) return;
 
         this.renderer.setupLayers();
-
-        // Set initial visibility
         this.renderer.updateRouteLinesVisibility(this.showRoutes, this.showRouteLines);
         this.renderer.updateRouteLabelsVisibility(this.showRoutes, this.showRouteLabels);
         this.renderer.updateRoutePointsVisibility(this.showRoutes, this.showRoutePoints);
@@ -66,8 +52,7 @@ export class AircraftRoutes {
      * @param data - Route data from server
      */
     public updateRouteData(data: RouteData): void {
-        logger.debug('AircraftRoutes', 'Route data received for aircraft:', data.acid, data);
-
+        logger.debug('AircraftRoutes', 'Route data received for aircraft:', data.acid);
         this.routeData = data;
         this.updateRouteDisplay();
     }
@@ -79,76 +64,35 @@ export class AircraftRoutes {
     public setSelectedAircraft(aircraftId: string | null): void {
         this.selectedAircraft = aircraftId;
         this.updateRouteDisplay();
-
-        if (!aircraftId) {
-            this.clearRouteDisplay();
-        }
     }
 
     /**
-     * Update route display on the map
+     * Update route display on the map. Clears the display unless routes are
+     * enabled and valid route data exists for the selected aircraft.
      */
     public updateRouteDisplay(): void {
-        logger.debug('AircraftRoutes', 'updateRouteDisplay called:', {
-            hasRouteData: !!this.routeData,
-            routeAcid: this.routeData?.acid,
-            selectedAircraft: this.selectedAircraft,
-            showRoutes: this.showRoutes,
-            showRouteLines: this.showRouteLines,
-            showRouteLabels: this.showRouteLabels,
-            showRoutePoints: this.showRoutePoints
-        });
-
-        if (!this.routeData || !this.routeData.acid) {
-            logger.debug('AircraftRoutes', 'No route data, clearing display');
-            this.clearRouteDisplay();
-            return;
-        }
-
-        if (!this.showRoutes) {
-            logger.debug('AircraftRoutes', 'showRoutes is FALSE, clearing display');
+        if (!this.routeData || !this.routeData.acid || !this.showRoutes) {
             this.clearRouteDisplay();
             return;
         }
 
         const data = this.routeData;
 
-        // Only show route if this aircraft is selected
         if (data.acid !== this.selectedAircraft) {
-            logger.debug('AircraftRoutes', 'Route aircraft does not match selected aircraft:', data.acid, '!==', this.selectedAircraft);
             this.clearRouteDisplay();
             return;
         }
 
-        // Validate route data
         if (!data.wplat || !data.wplon || !data.wpname ||
             data.wplat.length === 0 || data.wplat.length !== data.wplon.length) {
-            logger.debug('AircraftRoutes', 'Invalid route data:', {
-                hasWplat: !!data.wplat,
-                hasWplon: !!data.wplon,
-                hasWpname: !!data.wpname,
-                wplatLength: data.wplat?.length,
-                wplonLength: data.wplon?.length
-            });
+            logger.debug('AircraftRoutes', 'Invalid route data for', data.acid);
             this.clearRouteDisplay();
             return;
         }
 
         const activeWaypointIndex = data.iactwp || 0;
-
-        logger.debug('AircraftRoutes', 'Building route features:', {
-            waypointCount: data.wplat.length,
-            activeWaypointIndex,
-            showRouteLabels: this.showRouteLabels
-        });
-
-        // Build route features using renderer
         const features = this.renderer.buildRouteFeatures(data, activeWaypointIndex);
-
-        // Update map sources using renderer
         this.renderer.updateMapSources(features, this.showRouteLabels);
-
-        logger.debug('AircraftRoutes', 'Route display updated successfully');
     }
 
     /**
@@ -162,31 +106,19 @@ export class AircraftRoutes {
      * Update display options (called when user changes settings)
      */
     public updateDisplayOptions(options: DisplayOptions): void {
-        // Update visibility states
-        const oldShowRoutes = this.showRoutes;
         this.showRoutes = options.showRoutes;
         this.showRouteLines = options.showRouteLines;
         this.showRouteLabels = options.showRouteLabels;
         this.showRoutePoints = options.showRoutePoints;
 
-        // Update visibility
         this.renderer.updateRouteLinesVisibility(this.showRoutes, this.showRouteLines);
         this.renderer.updateRouteLabelsVisibility(this.showRoutes, this.showRouteLabels);
         this.renderer.updateRoutePointsVisibility(this.showRoutes, this.showRoutePoints);
-
-        // Update colors
         this.renderer.updateRouteColors(options);
-
-        // Update label size
         this.renderer.updateLabelSize(options.mapLabelsTextSize);
 
-        if (!this.showRoutes && oldShowRoutes) {
-            // Routes were toggled off, clear the display
-            this.clearRouteDisplay();
-        } else {
-            // Routes were toggled on or a sub-option changed, refresh
-            this.updateRouteDisplay();
-        }
+        // Re-render (clears when routes were toggled off)
+        this.updateRouteDisplay();
     }
 
     /**

@@ -180,6 +180,71 @@ class TestDelete:
         resp = client.delete("/api/bluesky/bogus/x.scn")
         assert resp.status_code == 400
 
+    def test_delete_file_in_subdirectory(self, client):
+        # The browse UI navigates into subdirectories and offers Delete there,
+        # so the route must accept a path below the type's base directory.
+        sub = client.base_path / "scenario" / "sub"
+        sub.mkdir(parents=True)
+        (sub / "inner.scn").write_text("x")
+        resp = client.delete("/api/bluesky/scenario/sub/inner.scn")
+        assert resp.status_code == 200
+        assert not (sub / "inner.scn").exists()
+
+    def test_delete_in_subdirectory_never_touches_root_namesake(self, client):
+        # Deleting sub/a.scn must not fall back to the root a.scn.
+        scenario_dir = client.base_path / "scenario"
+        sub = scenario_dir / "sub"
+        sub.mkdir(parents=True)
+        (scenario_dir / "a.scn").write_text("root")
+        (sub / "a.scn").write_text("nested")
+        resp = client.delete("/api/bluesky/scenario/sub/a.scn")
+        assert resp.status_code == 200
+        assert (scenario_dir / "a.scn").exists()
+        assert not (sub / "a.scn").exists()
+
+    def test_delete_filename_that_secure_filename_would_mangle(self, client):
+        # Files created outside the upload path (e.g. by BlueSky itself) can
+        # have names secure_filename() rewrites; they are listed with their
+        # real names and must be deletable under those names.
+        scenario_dir = client.base_path / "scenario"
+        scenario_dir.mkdir(exist_ok=True)
+        (scenario_dir / "my test (v2).scn").write_text("x")
+        resp = client.delete("/api/bluesky/scenario/my test (v2).scn")
+        assert resp.status_code == 200
+        assert not (scenario_dir / "my test (v2).scn").exists()
+
+    def test_delete_traversal_is_stripped(self, client):
+        outside = client.base_path / "outside.txt"
+        outside.write_text("keep me")
+        resp = client.delete("/api/bluesky/scenario/../outside.txt")
+        assert resp.status_code in (400, 403, 404)
+        assert outside.exists()
+
+    def test_delete_symlink_escape_is_blocked(self, client):
+        # A symlink resolving outside the type directory must be rejected and
+        # its target left untouched (same containment rule as browsing).
+        evil = client.base_path / "scenario_evil"
+        evil.mkdir()
+        secret = evil / "secret.scn"
+        secret.write_text("secret")
+        scenario_dir = client.base_path / "scenario"
+        scenario_dir.mkdir(exist_ok=True)
+        (scenario_dir / "link.scn").symlink_to(secret)
+        resp = client.delete("/api/bluesky/scenario/link.scn")
+        assert resp.status_code == 403
+        assert secret.exists()
+
+    def test_delete_directory_rejected(self, client):
+        sub = client.base_path / "scenario" / "sub"
+        sub.mkdir(parents=True)
+        resp = client.delete("/api/bluesky/scenario/sub")
+        assert resp.status_code == 404
+        assert sub.exists()
+
+    def test_delete_settings_other_name_rejected(self, client):
+        resp = client.delete("/api/bluesky/settings/other.cfg")
+        assert resp.status_code == 400
+
 
 class TestOutputContent:
     def test_read_output_file_content(self, client):

@@ -669,15 +669,15 @@ export class BlueSkyFileManager {
         await this.refreshFileList();
     }
 
+    /** Path of a listed file relative to its file type's base directory,
+     *  including the currently browsed subfolder. */
+    private relativePath(fileType: string, filename: string): string {
+        const currentPath = this.currentPaths[fileType] || '';
+        return currentPath ? `${currentPath}/${filename}` : filename;
+    }
+
     public runScenario(filename: string): void {
-        // Build the relative path from the scenario directory
-        const currentPath = this.currentPaths['scenario'] || '';
-        let scenarioPath = filename;
-        
-        if (currentPath) {
-            scenarioPath = `${currentPath}/${filename}`;
-        }
-        
+        const scenarioPath = this.relativePath('scenario', filename);
         // Remove .scn extension for the IC command
         const scenarioName = scenarioPath.replace(/\.scn$/i, '');
         
@@ -700,7 +700,13 @@ export class BlueSkyFileManager {
         }
 
         try {
-            const response = await fetch(`/api/bluesky/${fileType}/${filename}`, {
+            // Delete the file in the folder being browsed, not a root
+            // namesake; encode each segment so any listed name survives the URL.
+            const relPath = this.relativePath(fileType, filename)
+                .split('/')
+                .map(encodeURIComponent)
+                .join('/');
+            const response = await fetch(`/api/bluesky/${fileType}/${relPath}`, {
                 method: 'DELETE'
             });
 

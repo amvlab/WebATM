@@ -18,6 +18,68 @@ from .bluesky_server_status import probe_bluesky_ports
 
 logger = get_logger()
 
+# The file types managed by the /api/bluesky/ file routes. Directory types hold
+# many files under base_path/<directory>; "settings" is the single settings.cfg
+# file next to them. "output" is read-only: it is listable/browsable but not a
+# valid upload or delete target.
+FILE_TYPES = {
+    "scenario": {"extension": ".scn", "directory": "scenario"},
+    "plugins": {"extension": ".py", "directory": "plugins"},
+    "settings": {"extension": ".cfg", "filepath": "settings.cfg"},
+    "output": {"extension": "", "directory": "output"},
+}
+WRITABLE_FILE_TYPES = ("scenario", "plugins", "settings")
+
+
+def _clean_parts(subpath):
+    """Split a requested subpath into components, dropping ``.``/``..`` parts.
+
+    Args:
+        subpath (str): Requested path relative to a managed directory.
+
+    Returns:
+        list[str]: The safe path components (may be empty).
+    """
+    return [
+        part
+        for part in Path(subpath).as_posix().split("/")
+        if part and part not in (".", "..")
+    ]
+
+
+def _resolve_under(directory, subpath):
+    """Resolve ``subpath`` under ``directory``, rejecting escapes.
+
+    Resolves symlinks and verifies the result stays inside ``directory`` by
+    path components (not string prefixes, which would wrongly accept a sibling
+    like ``.../scenario_evil``). The resolved path need not exist — callers do
+    their own existence checks.
+
+    Args:
+        directory (Path): Managed base directory the path must stay inside.
+        subpath (str): Requested path relative to that directory.
+
+    Returns:
+        tuple: ``(resolved_path, error_response)``; exactly one is None. The
+            error is a Flask ``(json, status)`` pair ready to return.
+    """
+    target = directory.joinpath(*_clean_parts(subpath))
+    try:
+        resolved_target = target.resolve()
+        if not resolved_target.is_relative_to(directory.resolve()):
+            return None, (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Access denied: Path outside allowed directory",
+                    }
+                ),
+                403,
+            )
+    except (OSError, ValueError):
+        return None, (jsonify({"success": False, "error": "Invalid path"}), 400)
+    return resolved_target, None
+
 
 def get_webpack_assets():
     """Read the webpack manifest and build script tags in load order.
@@ -476,8 +538,8 @@ def register_basic_routes(app, session_manager):
         (used externally, e.g. by demo-deploy, for capacity decisions).
 
         Returns:
-            A 200 JSON payload with ``bluesky_server``, ``session_info`` and
-            ``config`` sections, or 503 with the error on failure.
+            A 200 JSON payload with ``bluesky_server`` and ``session_info``
+            sections, or 503 with the error on failure.
         """
         try:
             hostname = getattr(current_app.bluesky_proxy, "server_ip", None)
@@ -512,7 +574,6 @@ def register_basic_routes(app, session_manager):
                     "has_active_nodes": has_active_nodes,
                 },
                 "session_info": session_info,
-                "config": session_manager.get_config_info(),
                 "timestamp": time.time(),
             }
 
@@ -631,26 +692,7 @@ def register_basic_routes(app, session_manager):
 
             base_path = Path(current_app.bluesky_base_path)
 
-            # Validate file type
-            file_type_config = {
-                "scenario": {
-                    "extension": ".scn",
-                    "directory": "scenario",
-                    "allow_multiple": True,
-                },
-                "plugins": {
-                    "extension": ".py",
-                    "directory": "plugins",
-                    "allow_multiple": True,
-                },
-                "settings": {
-                    "extension": ".cfg",
-                    "filepath": "settings.cfg",
-                    "allow_multiple": False,
-                },
-            }
-
-            if file_type not in file_type_config:
+            if file_type not in WRITABLE_FILE_TYPES:
                 return jsonify(
                     {"success": False, "error": f"Invalid file type: {file_type}"}
                 ), 400
@@ -663,7 +705,7 @@ def register_basic_routes(app, session_manager):
             if file.filename == "":
                 return jsonify({"success": False, "error": "No file selected"}), 400
 
-            config = file_type_config[file_type]
+            config = FILE_TYPES[file_type]
 
             # Validate file extension
             if not file.filename.lower().endswith(config["extension"]):
@@ -696,30 +738,23 @@ def register_basic_routes(app, session_manager):
             if not filename:
                 return jsonify({"success": False, "error": "Invalid filename"}), 400
 
-            # Determine target path
             if file_type == "settings":
+                # Single fixed file; a re-upload replaces it.
                 target_path = base_path / config["filepath"]
             else:
                 target_dir = base_path / config["directory"]
                 target_dir.mkdir(exist_ok=True)
 
-                # Handle filename conflicts for multiple files
-                if config["allow_multiple"]:
-                    counter = 1
-                    original_path = target_dir / filename
-                    target_path = original_path
-
-                    while target_path.exists():
-                        name_part = Path(filename).stem
-                        ext_part = Path(filename).suffix
-                        new_filename = f"{name_part}_{counter}{ext_part}"
-                        target_path = target_dir / new_filename
-                        counter += 1
-
-                    if target_path != original_path:
-                        filename = target_path.name
-                else:
-                    target_path = target_dir / filename
+                # Auto-rename on conflicts rather than overwriting.
+                counter = 1
+                target_path = target_dir / filename
+                while target_path.exists():
+                    new_filename = (
+                        f"{Path(filename).stem}_{counter}{Path(filename).suffix}"
+                    )
+                    target_path = target_dir / new_filename
+                    counter += 1
+                filename = target_path.name
 
             # Save file (cross-platform compatible)
             file.save(str(target_path))
@@ -766,20 +801,12 @@ def register_basic_routes(app, session_manager):
 
             base_path = Path(current_app.bluesky_base_path)
 
-            # Validate file type
-            file_type_config = {
-                "scenario": {"extension": ".scn", "directory": "scenario"},
-                "plugins": {"extension": ".py", "directory": "plugins"},
-                "settings": {"extension": ".cfg", "filepath": "settings.cfg"},
-                "output": {"extension": "", "directory": "output"},
-            }
-
-            if file_type not in file_type_config:
+            if file_type not in FILE_TYPES:
                 return jsonify(
                     {"success": False, "error": f"Invalid file type: {file_type}"}
                 ), 400
 
-            config = file_type_config[file_type]
+            config = FILE_TYPES[file_type]
             files = []
 
             if file_type == "settings":
@@ -876,20 +903,12 @@ def register_basic_routes(app, session_manager):
 
             base_path = Path(current_app.bluesky_base_path)
 
-            # Validate file type
-            file_type_config = {
-                "scenario": {"extension": ".scn", "directory": "scenario"},
-                "plugins": {"extension": ".py", "directory": "plugins"},
-                "settings": {"extension": ".cfg", "filepath": "settings.cfg"},
-                "output": {"extension": "", "directory": "output"},
-            }
-
-            if file_type not in file_type_config:
+            if file_type not in FILE_TYPES:
                 return jsonify(
                     {"success": False, "error": f"Invalid file type: {file_type}"}
                 ), 400
 
-            config = file_type_config[file_type]
+            config = FILE_TYPES[file_type]
 
             # For settings, just return the single file (no directory browsing)
             if file_type == "settings":
@@ -917,63 +936,17 @@ def register_basic_routes(app, session_manager):
                     }
                 )
 
-            # Build the target directory path
+            # Sanitize the subpath and verify it stays inside the type's
+            # directory (traversal/symlink escapes rejected).
             target_base = base_path / config["directory"]
-
-            # Clean and validate the subpath to prevent directory traversal attacks
-            if subpath:
-                # Normalize the path and remove any .. components
-                normalized_subpath = Path(subpath).as_posix()
-                # Split into parts and filter out dangerous components
-                path_parts = [
-                    part
-                    for part in normalized_subpath.split("/")
-                    if part and part != "." and part != ".."
-                ]
-
-                if path_parts:
-                    target_dir = target_base
-                    for part in path_parts:
-                        target_dir = target_dir / part
-                else:
-                    target_dir = target_base
-            else:
-                target_dir = target_base
-
-            # Security check: ensure the target directory is within the allowed
-            # base. Resolve symlinks first, then compare on path components
-            # (not string prefixes, which would wrongly accept a sibling like
-            # ".../scenario_evil").
-            try:
-                resolved_target = target_dir.resolve()
-                resolved_base = target_base.resolve()
-
-                if not resolved_target.is_relative_to(resolved_base):
-                    return jsonify(
-                        {
-                            "success": False,
-                            "error": "Access denied: Path outside allowed directory",
-                        }
-                    ), 403
-
-            except (OSError, ValueError):
-                return jsonify({"success": False, "error": "Invalid path"}), 400
+            current_path_parts = _clean_parts(subpath)
+            target_dir, error = _resolve_under(target_base, subpath)
+            if error:
+                return error
 
             files = []
-            current_path_parts = []
 
             if target_dir.exists() and target_dir.is_dir():
-                # Calculate the current path relative to the base directory
-                try:
-                    relative_path = target_dir.relative_to(target_base)
-                    if relative_path != Path("."):
-                        current_path_parts = list(relative_path.parts)
-                except ValueError:
-                    # If we can't calculate relative path, something is wrong
-                    return jsonify(
-                        {"success": False, "error": "Invalid path structure"}
-                    ), 400
-
                 # Add folders first
                 for folder_path in target_dir.iterdir():
                     if folder_path.is_dir():
@@ -1067,50 +1040,19 @@ def register_basic_routes(app, session_manager):
                 400,
             )
 
-        base_path = Path(current_app.bluesky_base_path)
-        output_base = base_path / "output"
+        output_base = Path(current_app.bluesky_base_path) / "output"
 
-        # Clean and validate the path
-        normalized = Path(filepath).as_posix()
-        path_parts = [
-            part
-            for part in normalized.split("/")
-            if part and part != "." and part != ".."
-        ]
-
-        if not path_parts:
+        if not _clean_parts(filepath):
             return None, (
                 jsonify({"success": False, "error": "No file specified"}),
                 400,
             )
 
-        target = output_base
-        for part in path_parts:
-            target = target / part
+        resolved_target, error = _resolve_under(output_base, filepath)
+        if error:
+            return None, error
 
-        # Security check: resolve symlinks, then verify containment by path
-        # components rather than string prefix (which would accept a sibling
-        # like ".../output_evil").
-        try:
-            resolved_target = target.resolve()
-            resolved_base = output_base.resolve()
-            if not resolved_target.is_relative_to(resolved_base):
-                return None, (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "Access denied: Path outside allowed directory",
-                        }
-                    ),
-                    403,
-                )
-        except (OSError, ValueError):
-            return None, (
-                jsonify({"success": False, "error": "Invalid path"}),
-                400,
-            )
-
-        if not resolved_target.exists() or not resolved_target.is_file():
+        if not resolved_target.is_file():
             return None, (
                 jsonify({"success": False, "error": "File not found"}),
                 404,
@@ -1205,20 +1147,24 @@ def register_basic_routes(app, session_manager):
                 {"success": False, "error": f"Failed to read file: {str(e)}"}
             ), 500
 
-    @app.route("/api/bluesky/<file_type>/<filename>", methods=["DELETE"])
+    @app.route("/api/bluesky/<file_type>/<path:filename>", methods=["DELETE"])
     def delete_bluesky_file(file_type, filename):
-        """Delete a BlueSky file (DELETE /api/bluesky/<file_type>/<filename>).
+        """Delete a BlueSky file (DELETE /api/bluesky/<file_type>/<path:filename>).
+
+        The filename is used as listed/browsed — it may include subdirectories
+        below the type's directory (the browse UI navigates into them) and is
+        validated against traversal with the same containment rule as browsing.
 
         Args:
             file_type (str): One of ``scenario``, ``plugins``, ``settings``.
                 For ``settings`` only ``settings.cfg`` may be deleted.
-            filename (str): Name of the file to delete (sanitized).
+            filename (str): Path of the file to delete, relative to the file
+                type's directory.
 
         Returns:
-            JSON confirming the deletion, or a 400/404/500 error payload.
+            JSON confirming the deletion, or a 400/403/404/500 error payload.
         """
         try:
-            # Check if base path is configured
             if not hasattr(current_app, "bluesky_base_path"):
                 return jsonify(
                     {"success": False, "error": "BlueSky base path not configured"}
@@ -1226,43 +1172,29 @@ def register_basic_routes(app, session_manager):
 
             base_path = Path(current_app.bluesky_base_path)
 
-            # Validate file type
-            file_type_config = {
-                "scenario": {"directory": "scenario"},
-                "plugins": {"directory": "plugins"},
-                "settings": {"filepath": "settings.cfg"},
-            }
-
-            if file_type not in file_type_config:
+            if file_type not in WRITABLE_FILE_TYPES:
                 return jsonify(
                     {"success": False, "error": f"Invalid file type: {file_type}"}
                 ), 400
 
-            # Secure filename
-            secure_name = secure_filename(filename)
-            if not secure_name:
-                return jsonify({"success": False, "error": "Invalid filename"}), 400
-
-            config = file_type_config[file_type]
-
-            # Determine target path
             if file_type == "settings":
                 if filename != "settings.cfg":
                     return jsonify(
                         {"success": False, "error": "Can only delete settings.cfg"}
                     ), 400
-                target_path = base_path / config["filepath"]
+                target_path = base_path / FILE_TYPES["settings"]["filepath"]
             else:
-                target_dir = base_path / config["directory"]
-                target_path = target_dir / secure_name
+                target_dir = base_path / FILE_TYPES[file_type]["directory"]
+                target_path, error = _resolve_under(target_dir, filename)
+                if error:
+                    return error
 
-            # Check if file exists
-            if not target_path.exists():
+            # Only real files are deletable — never directories.
+            if not target_path.is_file():
                 return jsonify(
                     {"success": False, "error": f"File not found: {filename}"}
                 ), 404
 
-            # Delete file
             target_path.unlink()
 
             logger.info(f"File deleted successfully: {target_path}")
