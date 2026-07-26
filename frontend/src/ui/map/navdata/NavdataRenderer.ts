@@ -405,7 +405,12 @@ export class NavdataRenderer {
                 map.setLayoutProperty(layerId, 'visibility', on ? 'visible' : 'none');
             }
         };
-        const setColor = (layerId: string, prop: string, color: string) => {
+        const setColor = (
+            layerId: string,
+            prop: 'fill-color' | 'line-color' | 'text-color' | 'text-halo-color'
+                | 'circle-color' | 'circle-stroke-color',
+            color: string
+        ) => {
             if (map.getLayer(layerId)) {
                 map.setPaintProperty(layerId, prop, color);
             }

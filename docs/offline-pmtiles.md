@@ -22,10 +22,10 @@ reliable internet.
 
 1. **Build with internet available.** `script/build_frontend.sh` (or
    `npm run build` in `frontend/`) triggers a prebuild step that copies
-   MapLibre GL CSS and Font Awesome assets from `node_modules` into
-   `WebATM/static/vendor/`, and webpack bundles MapLibre GL JS and
-   `socket.io-client` into the app bundles. After this step the page loads
-   every library locally.
+   MapLibre GL CSS, the MapLibre GL map worker, and Font Awesome assets from
+   `node_modules` into `WebATM/static/vendor/`, and webpack bundles MapLibre
+   GL JS and `socket.io-client` into the app bundles. After this step the
+   page loads every library locally.
 
 2. **Drop in an offline basemap.** Download a PMTiles archive (e.g. the
    [Protomaps worldwide basemap](https://maps.protomaps.com/builds/)) and
