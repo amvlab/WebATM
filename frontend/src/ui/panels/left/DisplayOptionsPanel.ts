@@ -533,11 +533,6 @@ export class DisplayOptionsPanel extends BasePanel {
         this.bindCheckbox(id, (checked) => this.applyMasterToggle({ id, stateKey, subOptions }, checked));
     }
 
-    /**
-     * Apply a master toggle: persists every key, syncs the sub checkboxes and
-     * their `<sub-id>-container` visibility, and pushes one combined state
-     * update.
-     */
     private applyMasterToggle(
         toggle: { id: string; stateKey: keyof DisplayOptions; subOptions: ReadonlyArray<BooleanOptionSpec> },
         checked: boolean
