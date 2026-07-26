@@ -25,7 +25,6 @@ class TestConnectDisconnect:
         assert client.is_connected()
         events = {pkt["name"] for pkt in client.get_received()}
         assert "initial_data" in events
-        assert "heartbeat_config" in events
 
     def test_connect_increments_client_count(self, sio):
         app, socketio, client = sio
@@ -55,16 +54,6 @@ class TestCommandEvent:
         results = [p for p in received if p["name"] == "command_result"]
         assert results
         assert results[0]["args"][0]["command"] == "CRE KL204"
-
-
-class TestHeartbeat:
-    def test_heartbeat_acknowledged(self, sio):
-        app, socketio, client = sio
-        client.get_received()
-        client.emit("heartbeat")
-        received = client.get_received()
-        names = {p["name"] for p in received}
-        assert "heartbeat_ack" in names
 
 
 class TestNodeEvents:

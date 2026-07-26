@@ -82,9 +82,10 @@ class TestHealthAndStatus:
         assert "bluesky_server" in body
         assert "session_info" in body
 
-    def test_status_reports_session_config(self, client):
+    def test_status_reports_active_sessions(self, client):
+        """demo-deploy reads session_info.active_sessions for capacity checks."""
         body = client.get("/status").get_json()
-        assert body["config"]["heartbeat_interval"] == 30
+        assert body["session_info"] == {"active_sessions": 0}
 
 
 class TestServerConfigRoutes:

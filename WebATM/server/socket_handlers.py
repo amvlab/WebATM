@@ -1,11 +1,10 @@
 """Socket.IO event handlers for WebATM.
 
 Handles all WebSocket communication between the web client and the Flask
-server, including connection management, commands, node management,
-heartbeat, and BlueSky events.
+server, including connection management, commands, node management, and
+BlueSky events.
 """
 
-import time
 import uuid
 
 from flask import current_app, session
@@ -30,8 +29,8 @@ def register_socket_handlers(socketio, session_manager):
         """Handle a new web client connection (``connect`` event).
 
         Creates and tracks a session, increments the connected-client
-        counter, and sends the ``initial_data`` snapshot,
-        ``heartbeat_config``, and the active node's shapes.
+        counter, and sends the ``initial_data`` snapshot and the active
+        node's shapes.
 
         Args:
             auth: Socket.IO auth payload (unused).
@@ -54,7 +53,6 @@ def register_socket_handlers(socketio, session_manager):
 
         try:
             emit("initial_data", current_app.bluesky_proxy.get_current_data())
-            emit("heartbeat_config", {"interval": session_manager.heartbeat_interval})
             # Shapes created before this client connected. node_info is NOT
             # sent here: it would show "Connected (No Data)" before the user
             # connects; it flows naturally once data arrives.
@@ -163,20 +161,3 @@ def register_socket_handlers(socketio, session_manager):
             logger.info(f"Added {count} nodes to server {server_id}")
         except Exception as e:
             logger.info(f"Error adding nodes: {e}")
-
-    @socketio.on("heartbeat")
-    def on_heartbeat():
-        """Keep the client's session alive (``heartbeat`` event).
-
-        Updates the session's heartbeat timestamp and answers with
-        ``heartbeat_ack``, or ``session_error`` if the session is unknown.
-        """
-        try:
-            session_id = session.get("session_id")
-            if session_id and session_manager.update_heartbeat(session_id):
-                emit("heartbeat_ack", {"timestamp": time.time()})
-            else:
-                logger.info(f"Heartbeat received from unknown session: {session_id}")
-                emit("session_error", {"message": "Session not found"})
-        except Exception as e:
-            logger.info(f"Error handling heartbeat: {e}")
