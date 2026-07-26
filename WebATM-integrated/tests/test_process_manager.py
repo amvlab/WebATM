@@ -165,6 +165,46 @@ def test_restart_propagates_stop_failure_instead_of_claiming_success():
     assert manager.status()["running"] is False
 
 
+def test_start_during_stop_waits_out_the_stop_and_starts_fresh():
+    """start() racing a concurrent stop() must not report the doomed process as
+    "already running" -- it waits for the stop to finish, then starts anew."""
+    # SIGTERM is ignored so stop() sits in its graceful wait long enough for
+    # start() to race it deterministically (stop then escalates to SIGKILL).
+    # READY marks the handler as installed -- stopping before that would let
+    # the default SIGTERM disposition kill the child instantly.
+    src = (
+        "import signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "print('READY', flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    on_line, snapshot = _collector()
+    manager = BlueSkyProcessManager(on_line=on_line, cmd=[sys.executable, "-c", src])
+    try:
+        assert manager.start()["success"] is True
+        assert _wait_for(lambda: "READY" in snapshot())
+        pid1 = manager.status()["pid"]
+
+        stop_result: dict = {}
+        stopper = threading.Thread(
+            target=lambda: stop_result.update(manager.stop(escalate_after=2.0))
+        )
+        stopper.start()
+        assert _wait_for(lambda: manager.status()["status"] == "stopping")
+
+        start_result = manager.start()
+        stopper.join()
+
+        assert stop_result["success"] is True
+        assert start_result["success"] is True
+        assert start_result["message"] == "BlueSky server started"
+        assert start_result["pid"] != pid1
+        assert manager.status()["running"] is True
+        assert not _pid_running(pid1)
+    finally:
+        manager.kill()
+
+
 def test_status_and_restart():
     """status() tracks running/stopped; restart() yields a fresh pid."""
     cmd = [sys.executable, "-c", "import time; time.sleep(30)"]

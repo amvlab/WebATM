@@ -109,6 +109,94 @@ class TestServerConfigRoutes:
         assert resp.get_json()["hostname"] == "example.test"
 
 
+def _fake_proxy_class(created, start_client=None):
+    """Build a minimal BlueSkyProxy stand-in recording construction and calls."""
+
+    class FakeProxy:
+        def __init__(self):
+            self.socketio = None
+            self.connected_clients = None
+            self.server_ip = None
+            self.running = False
+            self.tracked_nodes = {}
+            self.started_with = None
+            created.append(self)
+
+        def start_client(self, hostname=None):
+            if start_client is not None:
+                start_client(self, hostname)
+                return
+            self.started_with = hostname
+            self.tracked_nodes = {"node-1": {}}
+
+        def stop_client(self, context="disconnect"):
+            self.running = False
+
+        def close(self):
+            pass
+
+    return FakeProxy
+
+
+class TestServerConfigConnect:
+    """POST /api/server/config: fresh proxy per connect, wiring carried over."""
+
+    def test_post_config_replaces_proxy_and_connects(self, app_and_client, monkeypatch):
+        import WebATM.proxy as proxy_pkg
+        from WebATM.proxy import get_bluesky_proxy
+
+        app, client = app_and_client
+        created: list = []
+        registered: list = []
+        monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", _fake_proxy_class(created))
+        monkeypatch.setattr(
+            proxy_pkg, "register_subscribers", lambda: registered.append(True)
+        )
+        old_proxy = app.bluesky_proxy
+        old_proxy.connected_clients = 3
+
+        resp = client.post("/api/server/config", json={"server_ip": "10.0.0.5"})
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["success"] is True
+        assert body["server_ip"] == "10.0.0.5"
+
+        assert len(created) == 1
+        new_proxy = created[0]
+        assert new_proxy is not old_proxy
+        assert app.bluesky_proxy is new_proxy
+        assert get_bluesky_proxy() is new_proxy  # global follows the swap
+        assert new_proxy.started_with == "10.0.0.5"
+        assert new_proxy.server_ip == "10.0.0.5"
+        assert new_proxy.socketio is old_proxy.socketio
+        assert new_proxy.connected_clients == 3
+        assert registered == [True]
+
+    def test_post_config_connect_failure_returns_500(self, app_and_client, monkeypatch):
+        import WebATM.proxy as proxy_pkg
+
+        app, client = app_and_client
+        created: list = []
+
+        def boom(proxy, hostname):
+            raise RuntimeError("connection refused")
+
+        monkeypatch.setattr(
+            proxy_pkg, "BlueSkyProxy", _fake_proxy_class(created, start_client=boom)
+        )
+        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda: None)
+
+        resp = client.post("/api/server/config", json={"server_ip": "10.0.0.5"})
+
+        assert resp.status_code == 500
+        body = resp.get_json()
+        assert body["success"] is False
+        assert "connection refused" in body["error"]
+        # Even on failure the app keeps a usable proxy attribute.
+        assert app.bluesky_proxy is created[0]
+
+
 class TestCommandRoute:
     def test_send_command_returns_result(self, client):
         # No BlueSky client connected, so send_command returns success=False.

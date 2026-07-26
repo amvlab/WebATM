@@ -10,6 +10,14 @@ import type { AircraftRoute3DRenderer } from './aircraft/AircraftRoute3DRenderer
 import { StateManager } from '../../core/StateManager';
 import { logger } from '../../utils/Logger';
 
+/** Camera snapshot taken before a Three.js layer change disturbs the viewport. */
+interface SavedView {
+    center: ReturnType<MapLibreMap['getCenter']>;
+    zoom: number;
+    pitch: number;
+    bearing: number;
+}
+
 /**
  * MapOverlay - Handles the map overlay information display
  *
@@ -29,9 +37,11 @@ export class MapOverlay {
     private aircraft3DRenderer: IEntityRenderer<AircraftData> | null = null;
     private aircraftRoutes: AircraftRoutes | null = null;
     private aircraftRoute3DRenderer: AircraftRoute3DRenderer | null = null;
-    // Track if 3D overlay is currently active
     private is3DOverlayActive: boolean = false;
     private is3DOverlayTransitioning: boolean = false;
+    // Last toggle state requested by the user; may disagree with
+    // is3DOverlayActive while an enable transition is in flight.
+    private is3DOverlayDesired: boolean = false;
     private aircraftCountElement: HTMLElement | null;
     private conflictCountElement: HTMLElement | null;
     private conflictTotalElement: HTMLElement | null;
@@ -53,11 +63,7 @@ export class MapOverlay {
         this.projectionToggleButton = document.getElementById('projection-toggle');
     }
 
-    /**
-     * Initialize the map overlay
-     * Sets up event listeners and initial state
-     * @param displayOptions - Display options for aircraft rendering
-     */
+    /** Initialize the overlay: event listeners, counters, and renderers. */
     public async initialize(displayOptions: DisplayOptions): Promise<void> {
         this.setupProjectionToggle();
         this.setupCursorTracking();
@@ -92,16 +98,13 @@ export class MapOverlay {
         logger.debug('MapOverlay', '2D aircraft renderer initialized (always active)');
 
         if (displayOptions.show3DOverlay) {
+            this.is3DOverlayDesired = true;
             await this.enable3DOverlay(displayOptions);
         }
 
         logger.debug('MapOverlay', `3D overlay: ${this.is3DOverlayActive ? 'enabled' : 'disabled'}`);
     }
 
-    /**
-     * Initialize the aircraft routes
-     * @param displayOptions - Display options for route rendering
-     */
     private initializeAircraftRoutes(displayOptions: DisplayOptions): void {
         const map = this.mapDisplay.getMap();
         if (!map) {
@@ -115,9 +118,6 @@ export class MapOverlay {
         logger.debug('MapOverlay', 'Aircraft routes initialized');
     }
 
-    /**
-     * Set up the projection toggle button
-     */
     private setupProjectionToggle(): void {
         if (!this.projectionToggleButton) {
             logger.warn('MapOverlay', 'Projection toggle button not found');
@@ -133,9 +133,6 @@ export class MapOverlay {
         logger.debug('MapOverlay', 'Projection toggle button initialized');
     }
 
-    /**
-     * Handle projection toggle button click
-     */
     private handleProjectionToggle(): void {
         if (!this.mapDisplay.isInitialized()) {
             logger.warn('MapOverlay', 'Cannot toggle projection: map not initialized');
@@ -148,9 +145,6 @@ export class MapOverlay {
         logger.info('MapOverlay', 'Projection toggled to:', this.mapDisplay.getProjection());
     }
 
-    /**
-     * Update projection toggle button based on current projection
-     */
     private updateProjectionButton(): void {
         if (!this.projectionToggleButton) return;
 
@@ -165,9 +159,6 @@ export class MapOverlay {
         }
     }
 
-    /**
-     * Set up cursor position tracking on the map
-     */
     private setupCursorTracking(): void {
         const map = this.mapDisplay.getMap();
         if (!map) {
@@ -189,21 +180,12 @@ export class MapOverlay {
         logger.debug('MapOverlay', 'Cursor tracking initialized');
     }
 
-    /**
-     * Update aircraft count display
-     * @param count - Number of aircraft
-     */
     public updateAircraftCount(count: number): void {
         if (this.aircraftCountElement) {
             this.aircraftCountElement.textContent = count.toString();
         }
     }
 
-    /**
-     * Update conflict counts display
-     * @param current - Current number of conflicts
-     * @param total - Total number of conflicts detected
-     */
     public updateConflictCounts(current: number, total: number): void {
         if (this.conflictCountElement) {
             this.conflictCountElement.textContent = current.toString();
@@ -213,11 +195,6 @@ export class MapOverlay {
         }
     }
 
-    /**
-     * Update intrusion counts display
-     * @param current - Current number of intrusions
-     * @param total - Total number of intrusions detected
-     */
     public updateIntrusionCounts(current: number, total: number): void {
         if (this.intrusionCountElement) {
             this.intrusionCountElement.textContent = current.toString();
@@ -227,11 +204,6 @@ export class MapOverlay {
         }
     }
 
-    /**
-     * Update cursor position display
-     * @param lat - Latitude (null to clear)
-     * @param lng - Longitude (null to clear)
-     */
     public updateCursorPosition(lat: number | null, lng: number | null): void {
         if (!this.cursorPositionElement) return;
 
@@ -242,10 +214,7 @@ export class MapOverlay {
         }
     }
 
-    /**
-     * Update overlay from aircraft data
-     * @param aircraftData - Aircraft data containing counts
-     */
+    /** Update counters, renderers, and selection from a new aircraft data batch. */
     public updateFromAircraftData(aircraftData: AircraftData): void {
         const aircraftCount = aircraftData.id ? aircraftData.id.length : 0;
         this.updateAircraftCount(aircraftCount);
@@ -260,31 +229,25 @@ export class MapOverlay {
             if (this.aircraftRoutes) {
                 this.aircraftRoutes.clearRouteDisplay();
             }
-            // Handle 2D renderer selected aircraft
             this.getAircraftRenderer()?.setSelectedAircraft(null);
-            // Clear 3D route renderer state for the deleted aircraft
             if (this.aircraftRoute3DRenderer) {
                 this.aircraftRoute3DRenderer.setSelectedAircraft(null);
                 this.aircraftRoute3DRenderer.updateRouteData(null);
             }
         }
 
-        // Update aircraft renderers with new data
-        // Convert AircraftData to Map for interface compatibility
         if (aircraftData.id) {
+            // The renderers take a Map; the whole batch goes in as one entry
+            // and is split into individual aircraft inside the renderer.
             const aircraftMap = new Map<string, AircraftData>();
-            // For now, pass the entire AircraftData as a single entry
-            // The renderer will handle converting it to individual aircraft
             aircraftMap.set('batch', aircraftData);
 
             const simTime = this.stateManager.getState().simInfo?.simt || 0;
 
-            // Always update 2D renderer
             if (this.aircraft2DRenderer) {
                 this.aircraft2DRenderer.updateEntities(aircraftMap, simTime);
             }
 
-            // Update 3D renderer if active
             if (this.is3DOverlayActive && this.aircraft3DRenderer) {
                 this.aircraft3DRenderer.updateEntities(aircraftMap, simTime);
             }
@@ -299,12 +262,8 @@ export class MapOverlay {
         }
     }
 
-    /**
-     * Set selected aircraft
-     * @param aircraftId - Aircraft ID to select (null to deselect)
-     */
+    /** Set (or clear, with null) the selected aircraft across all renderers. */
     public setSelectedAircraft(aircraftId: string | null): void {
-        // Handle 2D renderer which has setSelectedAircraft method
         this.getAircraftRenderer()?.setSelectedAircraft(aircraftId);
         // TODO: 3D renderer will handle selection through display options or separate method
 
@@ -318,10 +277,6 @@ export class MapOverlay {
         }
     }
 
-    /**
-     * Update route data from server
-     * @param data - Route data for an aircraft
-     */
     public updateRouteData(data: RouteData): void {
         if (this.aircraftRoutes) {
             this.aircraftRoutes.updateRouteData(data);
@@ -341,45 +296,35 @@ export class MapOverlay {
         return this.aircraftRoutes ? this.aircraftRoutes.getRouteData() : null;
     }
 
-    /**
-     * Update display options for aircraft rendering and routes
-     * @param options - Display options to update
-     */
+    /** Apply display options to all renderers, toggling the 3D overlay if asked. */
     public async updateDisplayOptions(options: Partial<DisplayOptions>): Promise<void> {
-        // Check if 3D overlay toggle changed
         if (options.show3DOverlay !== undefined) {
-            const currentlyActive = this.is3DOverlayActive;
-            const shouldBeActive = options.show3DOverlay;
+            this.is3DOverlayDesired = options.show3DOverlay;
 
-            if (shouldBeActive && !currentlyActive) {
+            if (options.show3DOverlay && !this.is3DOverlayActive) {
                 logger.info('MapOverlay', 'Enabling 3D overlay');
                 const fullOptions = { ...this.stateManager.getDisplayOptions(), ...options };
                 await this.enable3DOverlay(fullOptions);
-            } else if (!shouldBeActive && currentlyActive) {
+            } else if (!options.show3DOverlay && this.is3DOverlayActive) {
                 logger.info('MapOverlay', 'Disabling 3D overlay');
                 await this.disable3DOverlay();
             }
         }
 
-        // Get full display options by merging partial with current
         const fullOptions = { ...this.stateManager.getDisplayOptions(), ...options };
 
-        // Always update 2D renderer (it also handles aircraft shape changes)
         if (this.aircraft2DRenderer) {
             this.aircraft2DRenderer.updateDisplayOptions(fullOptions);
         }
 
-        // Update 3D renderer if active
         if (this.is3DOverlayActive && this.aircraft3DRenderer) {
             this.aircraft3DRenderer.updateDisplayOptions(fullOptions);
         }
 
-        // Update routes with new display options
         if (this.aircraftRoutes) {
             this.aircraftRoutes.updateDisplayOptions(fullOptions);
         }
 
-        // Update 3D route renderer if active
         if (this.is3DOverlayActive && this.aircraftRoute3DRenderer) {
             this.aircraftRoute3DRenderer.updateDisplayOptions(fullOptions);
         }
@@ -409,17 +354,20 @@ export class MapOverlay {
         } finally {
             this.is3DOverlayTransitioning = false;
         }
+
+        // A disable requested while the Three.js chunk was loading was dropped
+        // by the guards above (is3DOverlayActive was still false), so honor it
+        // now instead of leaving the overlay on with the toggle unchecked.
+        if (!this.is3DOverlayDesired && this.is3DOverlayActive) {
+            logger.info('MapOverlay', '3D overlay was switched off during enable - disabling');
+            await this.disable3DOverlay();
+        }
     }
 
     private async doEnable3DOverlay(displayOptions: DisplayOptions, map: MapLibreMap): Promise<void> {
         logger.info('MapOverlay', 'Enabling 3D overlay...');
 
-        // Save current view state before adding 3D layer
-        // Three.js WebGLRenderer initialization can disrupt MapLibre's viewport
-        const savedCenter = map.getCenter();
-        const savedZoom = map.getZoom();
-        const savedPitch = map.getPitch();
-        const savedBearing = map.getBearing();
+        const savedView = this.saveView(map);
 
         const renderer3D = await AircraftRendererFactory.create3D(displayOptions, this.stateManager);
         if (!renderer3D) {
@@ -447,18 +395,7 @@ export class MapOverlay {
             this.seedAircraftStateFor3DRoute();
         }
 
-        // Restore view state after map settles from adding 3D layer
-        // Three.js WebGLRenderer initialization disrupts MapLibre's viewport/projection.
-        // Using 'idle' event ensures the map has fully settled before we restore.
-        map.once('idle', () => {
-            map.jumpTo({
-                center: savedCenter,
-                zoom: savedZoom,
-                pitch: savedPitch,
-                bearing: savedBearing
-            });
-            this.mapDisplay.resize();
-        });
+        this.restoreViewOnIdle(map, savedView);
 
         // Safety net: the 3D layer's continuous render loop can make 'idle'
         // fire before Three.js sizes its GL context, leaving the canvas
@@ -516,17 +453,8 @@ export class MapOverlay {
         try {
             logger.info('MapOverlay', 'Disabling 3D overlay...');
 
-            // Removing the Three.js layer disrupts MapLibre's viewport just
-            // like adding it does — save the view and restore it once settled.
             const map = this.mapDisplay.getMap();
-            const savedView = map
-                ? {
-                      center: map.getCenter(),
-                      zoom: map.getZoom(),
-                      pitch: map.getPitch(),
-                      bearing: map.getBearing()
-                  }
-                : null;
+            const savedView = map ? this.saveView(map) : null;
 
             if (this.aircraftRoute3DRenderer) {
                 this.aircraftRoute3DRenderer.destroy();
@@ -540,12 +468,8 @@ export class MapOverlay {
 
             this.is3DOverlayActive = false;
 
-            // Restore the view after the map settles from removing the 3D layer.
             if (map && savedView) {
-                map.once('idle', () => {
-                    map.jumpTo(savedView);
-                    this.mapDisplay.resize();
-                });
+                this.restoreViewOnIdle(map, savedView);
             }
 
             logger.info('MapOverlay', '3D overlay disabled');
@@ -554,58 +478,55 @@ export class MapOverlay {
         }
     }
 
+    private saveView(map: MapLibreMap): SavedView {
+        return {
+            center: map.getCenter(),
+            zoom: map.getZoom(),
+            pitch: map.getPitch(),
+            bearing: map.getBearing()
+        };
+    }
+
     /**
-     * Handle map style change
-     * Notifies aircraft renderers and routes to recreate layers
+     * Restore a camera snapshot once the map settles ('idle') after a 3D
+     * layer was added, removed, or rebuilt — Three.js WebGLRenderer
+     * setup/teardown disrupts MapLibre's viewport.
      */
+    private restoreViewOnIdle(map: MapLibreMap, view: SavedView): void {
+        map.once('idle', () => {
+            map.jumpTo(view);
+            this.mapDisplay.resize();
+        });
+    }
+
+    /** Recreate all renderer layers after a map style change. */
     public onStyleChange(): void {
         // A style reload (e.g. the automatic offline-basemap fallback) rebuilds
-        // the Three.js layer, which snaps the map back to its default view —
-        // the same disruption the enable/disable paths guard against. Snapshot
-        // the camera and restore it once the map settles; only needed when the
-        // 3D overlay is active (2D layers don't disturb the camera).
+        // the Three.js layer, snapping the map back to its default view; only
+        // needed when the 3D overlay is active (2D layers don't move the camera).
         const map = this.mapDisplay.getMap();
-        const restore3DView = map && this.is3DOverlayActive;
-        const savedView = restore3DView
-            ? {
-                  center: map.getCenter(),
-                  zoom: map.getZoom(),
-                  pitch: map.getPitch(),
-                  bearing: map.getBearing()
-              }
-            : null;
+        const savedView = map && this.is3DOverlayActive ? this.saveView(map) : null;
 
-        // Re-create route layers FIRST so they appear below aircraft
+        // Route layers first so they end up below aircraft
         if (this.aircraftRoutes) {
             this.aircraftRoutes.setupLayers();
         }
-        // Re-create 2D aircraft layers
         if (this.aircraft2DRenderer) {
             this.aircraft2DRenderer.onStyleChange();
         }
-        // Re-create 3D aircraft layers if active
         if (this.is3DOverlayActive && this.aircraft3DRenderer) {
             this.aircraft3DRenderer.onStyleChange();
         }
-        // Re-create 3D route layer if active
         if (this.is3DOverlayActive && this.aircraftRoute3DRenderer) {
             this.aircraftRoute3DRenderer.onStyleChange();
         }
 
-        // Restore the pre-reload camera once the map settles from rebuilding
-        // the 3D layer. Mirrors the enable/disable 3D-overlay restore.
         if (map && savedView) {
-            map.once('idle', () => {
-                map.jumpTo(savedView);
-                this.mapDisplay.resize();
-            });
+            this.restoreViewOnIdle(map, savedView);
         }
     }
 
-    /**
-     * Get the 2D aircraft renderer instance
-     * Always returns the 2D renderer (which is always active)
-     */
+    /** Get the always-active 2D aircraft renderer's inner AircraftRenderer. */
     public getAircraftRenderer(): AircraftRenderer | null {
         if (this.aircraft2DRenderer instanceof Aircraft2DRenderer) {
             return this.aircraft2DRenderer.getRenderer();
@@ -620,17 +541,13 @@ export class MapOverlay {
         this.aircraftRoutes?.clearRouteDisplay();
     }
 
-    /**
-     * Reset all displays to default values
-     */
+    /** Reset all displays to defaults (simulation reset). */
     public reset(): void {
         this.updateAircraftCount(0);
         this.updateConflictCounts(0, 0);
         this.updateIntrusionCounts(0, 0);
         this.updateCursorPosition(null, null);
 
-        // Destroy and recreate the 3D renderer on reset — more reliable
-        // than clearing individual models.
         if (this.is3DOverlayActive && this.aircraft3DRenderer) {
             logger.info('MapOverlay', 'Recreating 3D renderer due to simulation reset');
             this.recreate3DRenderer().catch((error) => {
@@ -646,8 +563,8 @@ export class MapOverlay {
     }
 
     /**
-     * Destroy and recreate the 3D renderer
-     * Used during simulation reset for clean state
+     * Destroy and recreate the 3D renderer (simulation reset) — more
+     * reliable than clearing individual models.
      */
     private async recreate3DRenderer(): Promise<void> {
         if (!this.is3DOverlayActive || !this.aircraft3DRenderer) {
@@ -656,39 +573,30 @@ export class MapOverlay {
 
         logger.debug('MapOverlay', 'Destroying existing 3D renderer...');
 
-        // Destroy the current 3D route renderer too so enable3DOverlay can recreate it cleanly
+        // The 3D route renderer goes too so enable3DOverlay recreates both cleanly
         if (this.aircraftRoute3DRenderer) {
             this.aircraftRoute3DRenderer.destroy();
             this.aircraftRoute3DRenderer = null;
         }
 
-        // Destroy the current 3D renderer
         this.aircraft3DRenderer.destroy();
         this.aircraft3DRenderer = null;
-        this.is3DOverlayActive = false; // CRITICAL: Reset flag so enable3DOverlay() will work
+        this.is3DOverlayActive = false; // enable3DOverlay is a no-op while set
 
-        // Recreate the 3D renderer with current display options
-        const displayOptions = this.stateManager.getDisplayOptions();
-        await this.enable3DOverlay(displayOptions);
+        await this.enable3DOverlay(this.stateManager.getDisplayOptions());
 
         logger.debug('MapOverlay', '3D renderer recreated successfully');
     }
 
-    /**
-     * Clean up resources
-     */
     public destroy(): void {
-        // Clean up 2D renderer
         if (this.aircraft2DRenderer) {
             this.aircraft2DRenderer.destroy();
             this.aircraft2DRenderer = null;
         }
-        // Clean up 3D route renderer if active
         if (this.aircraftRoute3DRenderer) {
             this.aircraftRoute3DRenderer.destroy();
             this.aircraftRoute3DRenderer = null;
         }
-        // Clean up 3D renderer if active
         if (this.aircraft3DRenderer) {
             this.aircraft3DRenderer.destroy();
             this.aircraft3DRenderer = null;

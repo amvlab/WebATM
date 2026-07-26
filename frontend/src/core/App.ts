@@ -3,10 +3,8 @@ import { SocketManager } from './SocketManager';
 import { StateManager } from './StateManager';
 import { connectionStatus } from './ConnectionStatusService';
 import { Console } from '../ui/Console';
-import { Controls } from '../ui/Controls';
 import { Header } from '../ui/Header';
 import { settingsModal } from '../ui/SettingsModal';
-import { serverManager } from '../ui/ServerManager';
 import { modals } from '../ui/Modals';
 import { modalManager } from '../ui/ModalManager';
 import { panelResizer } from '../ui/panels/PanelResizer';
@@ -39,7 +37,6 @@ export class App {
     private socketManager: SocketManager;
     private stateManager: StateManager;
     private console: Console;
-    private controls: Controls;
     private header: Header;
     private simulationNodesPanel: SimulationNodesPanel;
     private mapControlsPanel: MapControlsPanel;
@@ -68,7 +65,6 @@ export class App {
         this.stateManager = new StateManager();
         this.socketManager = new SocketManager(this.stateManager);
         this.console = new Console();
-        this.controls = new Controls(this.stateManager);
         this.header = new Header();
         this.simulationNodesPanel = new SimulationNodesPanel();
         this.mapControlsPanel = new MapControlsPanel();
@@ -104,8 +100,6 @@ export class App {
 
             this.initializeState();
             await this.socketManager.initialize();
-            this.controls.setSocketManager(this.socketManager);
-            serverManager.setSocket(this.socketManager.getSocket());
             this.initializeUI();
             this.setupGlobalEventListeners();
 
@@ -264,8 +258,6 @@ export class App {
      * Initialize control panels
      */
     private initializeControlPanels(): void {
-        this.controls.init();
-
         this.simulationNodesPanel.init();
         this.simulationNodesPanel.setSocketManager(this.socketManager);
 
@@ -613,7 +605,6 @@ export class App {
 
         this.socketManager.disconnect();
         this.header.destroy();
-        this.controls.destroy();
 
         // Panels
         this.simulationNodesPanel.destroy();

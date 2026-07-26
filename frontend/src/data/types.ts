@@ -351,11 +351,14 @@ export interface ModalEventHandler {
 
 export type ServerStatus = 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'unknown' | 'error';
 
+/**
+ * Response shape of GET/POST /api/server/status (the BlueSky port probe).
+ */
 export interface ServerStatusResponse {
-  status: ServerStatus;
-  message?: string;
-  success: boolean;
-  timestamp?: number;
+  status: 'success' | 'error';
+  running?: boolean;
+  message: string;
+  hostname?: string;
 }
 
 export interface ServerControlResponse {
