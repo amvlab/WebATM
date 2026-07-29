@@ -33,6 +33,8 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
     private modelPath: string = `${MODEL_DIR}${DEFAULT_FALLBACK_MODEL}`;
     private pendingAircraftData: AircraftData | null = null;
     private lastProjectionMode: boolean | null = null; // Track projection mode changes for debug logging
+    // Wall-clock delta source for GLB animation playback (engines, rotors).
+    private readonly animationClock = new THREE.Clock();
 
     // Separate groups for different projection modes
     // Globe mode: uses raw getMatrixForModel transforms (no scene rotation)
@@ -228,6 +230,11 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
      * Update scene every frame with proper transform matrix
      */
     protected updateScene(args?: Render3DArgs): void {
+        // Advance any GLB animation clips (spinning engines/rotors) by the
+        // real time elapsed since the last frame. The base layer triggers a
+        // repaint after every render, so playback is continuous.
+        this.fleet.advanceAnimations(this.animationClock.getDelta());
+
         // Check if we're in globe projection mode
         const isGlobe = this.isGlobeProjection();
 
