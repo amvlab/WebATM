@@ -118,6 +118,21 @@ export abstract class BaseDrawingManager {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
+        this.suspendMapInteraction();
+        this.onDrawingDisabled();
+    }
+
+    /**
+     * Detach the drawing event handlers (map clicks, mousemove, keydown) and
+     * restore the cursor, while leaving the preview layers up. Used when a
+     * follow-up dialog takes over the interaction - so its keystrokes and
+     * clicks can't re-trigger the draw - and by disableMapDrawing().
+     * Idempotent.
+     */
+    protected suspendMapInteraction(): void {
+        const map = this.mapDisplay.getMap();
+        if (!map) return;
+
         map.getCanvas().style.cursor = '';
 
         if (this.mapClickHandler) {
@@ -137,7 +152,6 @@ export abstract class BaseDrawingManager {
             this.keyDownHandler = null;
         }
 
-        this.onDrawingDisabled();
         this.navaidSnapper.clearHighlight();
     }
 

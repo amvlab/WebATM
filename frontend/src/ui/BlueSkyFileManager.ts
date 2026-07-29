@@ -3,13 +3,6 @@ import { storage } from '../utils/StorageManager';
 import { modalManager } from './ModalManager';
 import { onDOMReady, setVisible, escapeHtml } from '../utils/dom';
 
-interface FileTypeConfig {
-    extension: string;
-    directory?: string;
-    filepath?: string;
-    allowMultiple: boolean;
-}
-
 interface BlueSkyFileStatus {
     configured: boolean;
     base_path?: string;
@@ -19,8 +12,6 @@ interface BlueSkyFileStatus {
         settings: string;
         output: string;
     };
-    path_exists?: boolean;
-    path_writable?: boolean;
 }
 
 interface UploadedFile {
@@ -51,10 +42,13 @@ interface Breadcrumb {
 export class BlueSkyFileManager {
     private static readonly BASE_PATH_KEY = 'bluesky-base-path';
 
-    private fileTypeConfigs: Record<string, FileTypeConfig> = {
-        scenario: { extension: '.scn', directory: 'scenario', allowMultiple: true },
-        plugins: { extension: '.py', directory: 'plugins', allowMultiple: true },
-        settings: { extension: '.cfg', filepath: 'settings.cfg', allowMultiple: false }
+    // Accepted upload extension per file type. The backend owns the actual
+    // directory layout and size limits; the frontend only needs the extension
+    // to drive the file picker's `accept` filter and a pre-upload check.
+    private fileExtensions: Record<string, string> = {
+        scenario: '.scn',
+        plugins: '.py',
+        settings: '.cfg'
     };
 
     private isConfigured: boolean = false;
@@ -81,7 +75,6 @@ export class BlueSkyFileManager {
         this.setupEventHandlers();
         this.loadSavedBasePath();
         this.checkCurrentStatus();
-        // Initialize button visibility based on default file type
         this.updateFileInputAccept();
     }
 
@@ -100,9 +93,13 @@ export class BlueSkyFileManager {
 
         fileInput?.addEventListener('change', () => this.handleFileSelection());
         dropZone?.addEventListener('click', () => fileInput?.click());
-        
-        // Drag and drop
+
+        // Drag and drop. dragleave/dragend clear the highlight when a drag
+        // leaves without dropping (dragover alone would otherwise leave it
+        // stuck on).
         dropZone?.addEventListener('dragover', (e) => this.handleDragOver(e));
+        dropZone?.addEventListener('dragleave', () => this.clearDropHighlight());
+        dropZone?.addEventListener('dragend', () => this.clearDropHighlight());
         dropZone?.addEventListener('drop', (e) => this.handleDrop(e));
 
         // Upload button
@@ -336,10 +333,10 @@ export class BlueSkyFileManager {
         const uploadAndRunBtn = document.getElementById('upload-and-run-scenario-btn') as HTMLButtonElement;
         
         const selectedType = fileTypeSelect.value;
-        const config = this.fileTypeConfigs[selectedType];
-        
-        if (config && fileInput) {
-            fileInput.accept = config.extension;
+        const extension = this.fileExtensions[selectedType];
+
+        if (extension && fileInput) {
+            fileInput.accept = extension;
         }
 
         // Show/hide upload and run scenario button based on file type
@@ -373,16 +370,16 @@ export class BlueSkyFileManager {
 
     private handleDragOver(e: DragEvent): void {
         e.preventDefault();
-        const dropZone = e.currentTarget as HTMLElement;
-        dropZone.style.borderColor = '#4CAF50';
-        dropZone.style.backgroundColor = '#1a2a1a';
+        (e.currentTarget as HTMLElement).classList.add('drag-over');
+    }
+
+    private clearDropHighlight(): void {
+        document.getElementById('file-drop-zone')?.classList.remove('drag-over');
     }
 
     private handleDrop(e: DragEvent): void {
         e.preventDefault();
-        const dropZone = e.currentTarget as HTMLElement;
-        dropZone.style.borderColor = '#555';
-        dropZone.style.backgroundColor = '#222';
+        (e.currentTarget as HTMLElement).classList.remove('drag-over');
 
         const files = e.dataTransfer?.files;
         if (files && files.length > 0) {
@@ -411,9 +408,9 @@ export class BlueSkyFileManager {
         }
 
         // Validate file extension
-        const config = this.fileTypeConfigs[fileType];
-        if (!file.name.toLowerCase().endsWith(config.extension)) {
-            this.showStatus(`Invalid file type. Expected ${config.extension} file.`, 'error');
+        const extension = this.fileExtensions[fileType];
+        if (!file.name.toLowerCase().endsWith(extension)) {
+            this.showStatus(`Invalid file type. Expected ${extension} file.`, 'error');
             return;
         }
 
@@ -425,19 +422,15 @@ export class BlueSkyFileManager {
         uploadAndRunBtn.textContent = 'Uploading...';
 
         try {
-            // Upload the file first
             const uploadSuccess = await this.performFileUpload(file, fileType);
-            
+
             if (uploadSuccess) {
                 this.showStatus('File uploaded successfully! Running scenario...', 'success');
-                
-                // Close the modal
                 this.closeModal();
-                
-                // Send IC command to run the scenario
+
+                // IC runs the just-uploaded scenario by name.
                 if (window.app) {
-                    const command = `IC ${scenarioName}`;
-                    window.app.sendCommand(command);
+                    window.app.sendCommand(`IC ${scenarioName}`);
                 } else {
                     this.showStatus('Could not run scenario: Application not available', 'error');
                 }
@@ -453,9 +446,9 @@ export class BlueSkyFileManager {
 
     private async performFileUpload(file: File, fileType: string): Promise<boolean> {
         // Validate file extension
-        const config = this.fileTypeConfigs[fileType];
-        if (!file.name.toLowerCase().endsWith(config.extension)) {
-            this.showStatus(`Invalid file type. Expected ${config.extension} file.`, 'error');
+        const extension = this.fileExtensions[fileType];
+        if (!file.name.toLowerCase().endsWith(extension)) {
+            this.showStatus(`Invalid file type. Expected ${extension} file.`, 'error');
             return false;
         }
 
@@ -677,14 +670,11 @@ export class BlueSkyFileManager {
     }
 
     public runScenario(filename: string): void {
-        const scenarioPath = this.relativePath('scenario', filename);
-        // Remove .scn extension for the IC command
-        const scenarioName = scenarioPath.replace(/\.scn$/i, '');
-        
-        // Close the modal
+        // IC takes the scenario name without its .scn extension.
+        const scenarioName = this.relativePath('scenario', filename).replace(/\.scn$/i, '');
+
         this.closeModal();
-        
-        // Send IC command to run the scenario
+
         if (window.app) {
             const command = `IC ${scenarioName}`;
             window.app.sendCommand(command);

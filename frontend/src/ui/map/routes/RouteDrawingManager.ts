@@ -9,28 +9,10 @@ import { RouteConstraintsModal } from './RouteConstraintsModal';
 import type { NavaidSnapper } from '../navdata/NavaidSnapper';
 
 /**
- * RouteDrawingManager - Interactive waypoint route creation.
- *
- * Flow:
- *  1. User selects an aircraft (StateManager.selectedAircraft).
- *     - The "Draw Route" button is disabled + tooltipped until an aircraft is
- *       selected; subscribing to selectedAircraft state changes keeps the
- *       button in sync.
- *  2. Click "Draw Route" → toggleDrawing() → startDrawingForSelectedAircraft().
- *     - We capture the aircraft's current position and a snapshot of its
- *       existing route (if any) so that the leader line anchors correctly.
- *  3. Click on the map to drop waypoints. A solid line connects placed
- *     waypoints; a dashed "leader line" runs from either the aircraft's
- *     current position, or the last existing waypoint of an aircraft that
- *     already has a route, to the first new waypoint. A dashed cursor preview
- *     chases the pointer.
- *  4. Right-click / Enter finishes; Esc cancels.
- *  5. On finish the constraints modal opens. Each row has optional alt/spd
- *     inputs (blank = unconstrained). Units default to the GUI's current
- *     display units and are converted to feet/knots before being sent.
- *  6. On submit we emit one ADDWPT command per waypoint (BlueSky's canonical
- *     waypoint-add command, which natively supports optional alt/spd). This
- *     sidesteps the broken ADDWAYPOINTS len%6 / reshape(n,5) logic.
+ * RouteDrawingManager - Interactive waypoint route creation for the selected
+ * aircraft. Click "Draw Route", drop waypoints on the map (right-click or
+ * Enter finishes, Esc cancels), then the constraints modal collects optional
+ * alt/spd per waypoint and sends one ADDWPT command each.
  *
  * Responsibilities are split across:
  *  - RouteDrawingManager (this file): state, map event wiring, banner + draw
@@ -340,6 +322,15 @@ export class RouteDrawingManager extends BaseDrawingManager {
         }
         if (!this.targetAircraftId) return;
 
+        // Hand interaction over to the constraints modal: detach the map and
+        // keyboard handlers so Enter/Escape/clicks in the modal can't
+        // re-trigger the draw (Enter used to re-open the modal and wipe the
+        // constraints the user had typed). The waypoint preview stays visible
+        // behind the modal until stopDrawing().
+        this.suspendMapInteraction();
+        this.preview.clearCursor();
+        this.hideDrawingBanner();
+
         this.modal.show(
             this.targetAircraftId,
             this.routePoints,
@@ -347,5 +338,4 @@ export class RouteDrawingManager extends BaseDrawingManager {
             this.capturedSpeedUnit
         );
     }
-
 }

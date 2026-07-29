@@ -3401,3 +3401,24 @@ button.disabled:hover {
     padding: 8px 10px;
     color: var(--text-muted);
 }
+
+/* File-upload drop zone. The base look lives here (not as an inline style on
+   the element) so the .drag-over highlight can override it via a class toggle;
+   removing the class restores this themed base in either theme, rather than
+   resetting to fixed dark colors as the old JS did. */
+.file-drop-zone {
+    border: 2px dashed var(--border-strong);
+    border-radius: 4px;
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    margin-top: 8px;
+    background-color: var(--bg-deep);
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.file-drop-zone.drag-over {
+    border-color: var(--accent-primary);
+    background-color: var(--accent-primary-bg);
+}

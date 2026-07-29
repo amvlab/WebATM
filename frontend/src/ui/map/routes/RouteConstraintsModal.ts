@@ -4,6 +4,8 @@ import { DataProcessor } from '../../../data/DataProcessor';
 import { AltitudeUnit, SpeedUnit } from '../../../data/types';
 import { logger } from '../../../utils/Logger';
 
+const MODAL_ID = 'route-constraints-modal';
+
 interface WaypointConstraint {
     alt: number | null; // user-entered, in capturedAltUnit
     spd: number | null; // user-entered, in capturedSpeedUnit
@@ -43,18 +45,24 @@ export class RouteConstraintsModal {
     private setupModalHandlers(): void {
         const submitBtn = document.getElementById('submit-route-constraints-btn');
         if (submitBtn) {
-            submitBtn.addEventListener('click', () => this.submit());
+            submitBtn.addEventListener('click', () => void this.submit());
         }
 
         const cancelBtn = document.getElementById('cancel-route-constraints-btn');
         if (cancelBtn) {
-            cancelBtn.addEventListener('click', () => this.cancel());
+            cancelBtn.addEventListener('click', () => modalManager.close(MODAL_ID));
         }
 
-        const closeBtn = document.getElementById('route-constraints-modal-close');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', () => this.cancel());
-        }
+        // ModalManager owns the other close paths (X button, backdrop click,
+        // Escape). Treat any close while a route is still pending as a
+        // cancel; submit() clears `active` before closing so a successful
+        // submission doesn't double-report.
+        modalManager.on(MODAL_ID, (event) => {
+            if (event === 'close' && this.active) {
+                this.active = null;
+                this.onCancel();
+            }
+        });
     }
 
     /**
@@ -172,13 +180,7 @@ export class RouteConstraintsModal {
         }
         applyBulkMode(bulkToggle ? bulkToggle.checked : true);
 
-        modalManager.open('route-constraints-modal');
-    }
-
-    private cancel(): void {
-        modalManager.close('route-constraints-modal');
-        this.active = null;
-        this.onCancel();
+        modalManager.open(MODAL_ID);
     }
 
     /**
@@ -201,18 +203,10 @@ export class RouteConstraintsModal {
     }
 
     /**
-     * Build and send the ADDWPT commands (one per waypoint) sequentially.
-     *
-     * NOTE: SocketManager.sendCommand() resolves its Promise immediately after
-     * socket.emit() - it does NOT wait for the backend to finish processing.
-     * Firing N commands back-to-back therefore hits the WebATM proxy within
-     * microseconds of each other, and the proxy forwards them to BlueSky via
-     * a shared ZMQ socket. Concurrent writes to a single ZMQ socket are not
-     * thread-safe and cause msgpack "ExtraData" crashes on the BlueSky side
-     * (bluesky/network/node.py unpackb error).
-     *
-     * We space the commands out with a small deliberate delay so the backend
-     * pipeline has time to flush each ADDWPT before the next one arrives.
+     * Build and send the ADDWPT commands (one per waypoint) sequentially,
+     * with a small delay between them: sendCommand() resolves right after
+     * socket.emit(), and back-to-back sends race on the proxy's shared ZMQ
+     * socket, crashing BlueSky with msgpack "ExtraData" errors.
      */
     private async submit(): Promise<void> {
         if (!this.active || this.active.points.length < 1) {
@@ -248,28 +242,23 @@ export class RouteConstraintsModal {
                 if (consoleInstance) {
                     consoleInstance.displaySentCommand(command);
                 }
-                // Space out commands so the proxy/ZMQ pipeline has room to
-                // serialize sends cleanly (avoids the msgpack ExtraData race
-                // BlueSky hits on rapid concurrent writes to a single socket).
                 if (i < commands.length - 1) {
                     await this.sleep(COMMAND_INTERVAL_MS);
                 }
             }
 
-            // BlueSky auto-broadcasts ROUTEDATA after every ADDWPT (this is
-            // why the manual console ADDWPT path renders without ever sending
-            // a POS). The helper used to nudge BlueSky with an extra POS
-            // refresh after the final ADDWPT, but that POS races with /
-            // overrides the auto-broadcast and ends up showing stale data
-            // until the user clicks away. Trust the auto-broadcast and let
-            // it do its job.
+            // No POS refresh needed afterwards: BlueSky auto-broadcasts
+            // ROUTEDATA after every ADDWPT, and an extra POS races with that
+            // broadcast and shows stale data.
         } catch (err) {
             logger.error('RouteConstraintsModal', 'Error sending route commands:', err);
             alert('Error sending route commands: ' + (err as Error).message);
         }
 
-        modalManager.close('route-constraints-modal');
+        // Clear `active` before closing so the close event isn't treated as
+        // a cancel of a still-pending route.
         this.active = null;
+        modalManager.close(MODAL_ID);
         this.onComplete();
     }
 
