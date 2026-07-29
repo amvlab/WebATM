@@ -11,10 +11,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 function buildDom(): void {
     // Enough of the file-manager DOM for the singleton to construct without
     // throwing (it reads file-type-select on init), plus the base-path config
-    // group enableIntegratedMode() targets.
+    // group enableIntegratedMode() targets and the drag-and-drop zone.
     document.body.innerHTML = `
         <select id="file-type-select"><option value="scenario">Scenario</option></select>
         <input id="file-input" />
+        <div id="file-drop-zone"></div>
+        <button id="upload-file-btn"></button>
         <button id="upload-and-run-scenario-btn"></button>
         <div class="settings-section">
             <div class="section-header">
@@ -82,5 +84,60 @@ describe('BlueSkyFileManager integrated mode', () => {
         blueSkyFileManager.enableIntegratedMode(); // second call is a no-op
 
         await vi.waitFor(() => expect(group.style.display).toBe('none'));
+    });
+});
+
+describe('BlueSkyFileManager drop zone highlight', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        buildDom();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({ json: async () => ({ configured: false }) }),
+        );
+    });
+
+    afterEach(() => {
+        document.body.innerHTML = '';
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    async function ready(): Promise<HTMLElement> {
+        await import('./BlueSkyFileManager');
+        return document.getElementById('file-drop-zone') as HTMLElement;
+    }
+
+    it('adds the drag-over class on dragover and removes it on dragleave', async () => {
+        const zone = await ready();
+
+        zone.dispatchEvent(new Event('dragover', { bubbles: true }));
+        expect(zone.classList.contains('drag-over')).toBe(true);
+
+        // Leaving without dropping must clear the highlight (the bug: it stuck on).
+        zone.dispatchEvent(new Event('dragleave', { bubbles: true }));
+        expect(zone.classList.contains('drag-over')).toBe(false);
+    });
+
+    it('clears the highlight on dragend', async () => {
+        const zone = await ready();
+
+        zone.dispatchEvent(new Event('dragover', { bubbles: true }));
+        zone.dispatchEvent(new Event('dragend', { bubbles: true }));
+        expect(zone.classList.contains('drag-over')).toBe(false);
+    });
+
+    it('clears the highlight after a drop and adds no inline color overrides', async () => {
+        const zone = await ready();
+
+        zone.dispatchEvent(new Event('dragover', { bubbles: true }));
+        zone.dispatchEvent(new Event('drop', { bubbles: true }));
+
+        expect(zone.classList.contains('drag-over')).toBe(false);
+        // The old code hardcoded borderColor/backgroundColor on drop, which
+        // permanently overrode the themed base style; the class-based fix leaves
+        // no inline colors behind.
+        expect(zone.style.backgroundColor).toBe('');
+        expect(zone.style.borderColor).toBe('');
     });
 });
