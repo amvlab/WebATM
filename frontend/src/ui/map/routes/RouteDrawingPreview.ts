@@ -9,6 +9,23 @@ import {
     updateSourceFeatures
 } from '../../../utils/maplibre';
 
+const SOURCES = [
+    'temp-route-draw-leader',
+    'temp-route-draw-points',
+    'temp-route-draw-line',
+    'temp-route-draw-preview'
+];
+
+// Removal order: labels first (they share the points source with the marker
+// layer), then the rest.
+const LAYERS = [
+    'temp-route-draw-labels',
+    'temp-route-draw-points',
+    'temp-route-draw-preview',
+    'temp-route-draw-line',
+    'temp-route-draw-leader'
+];
+
 /**
  * RouteDrawingPreview - Temporary map sources and layers for the route
  * drawing preview. Owns all MapLibre state associated with the in-progress
@@ -165,38 +182,23 @@ export class RouteDrawingPreview {
         );
     }
 
+    /** Remove just the dashed cursor-preview segment. */
+    public clearCursor(): void {
+        const map = this.mapDisplay.getMap();
+        if (!map) return;
+        updateSourceFeatures(map, 'temp-route-draw-preview', []);
+    }
+
     public clear(): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
-
-        const sources = [
-            'temp-route-draw-leader',
-            'temp-route-draw-points',
-            'temp-route-draw-line',
-            'temp-route-draw-preview'
-        ];
-        sources.forEach(id => updateSourceFeatures(map, id, []));
+        SOURCES.forEach(id => updateSourceFeatures(map, id, []));
     }
 
     public teardown(): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
-
-        const layers = [
-            'temp-route-draw-labels',
-            'temp-route-draw-points',
-            'temp-route-draw-preview',
-            'temp-route-draw-line',
-            'temp-route-draw-leader'
-        ];
-        layers.forEach(id => safeRemoveLayer(map, id));
-
-        const sources = [
-            'temp-route-draw-leader',
-            'temp-route-draw-points',
-            'temp-route-draw-line',
-            'temp-route-draw-preview'
-        ];
-        sources.forEach(id => safeRemoveSource(map, id));
+        LAYERS.forEach(id => safeRemoveLayer(map, id));
+        SOURCES.forEach(id => safeRemoveSource(map, id));
     }
 }

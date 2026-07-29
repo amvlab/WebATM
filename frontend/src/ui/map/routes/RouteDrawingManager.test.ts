@@ -95,3 +95,87 @@ describe('RouteDrawingManager leader anchor', () => {
         expect(bannerText()).not.toContain('last existing waypoint');
     });
 });
+
+describe('RouteDrawingManager finish hand-off to the constraints modal', () => {
+    /** Minimal fake MapLibre map: records on/off so we can assert handler
+     *  teardown; sources/layers are no-ops (getSource/getLayer stay empty). */
+    function makeFakeMap() {
+        const handlers = new Map<string, Set<unknown>>();
+        return {
+            handlers,
+            on(ev: string, fn: unknown) {
+                if (!handlers.has(ev)) handlers.set(ev, new Set());
+                handlers.get(ev)!.add(fn);
+            },
+            off(ev: string, fn: unknown) {
+                handlers.get(ev)?.delete(fn);
+            },
+            getCanvas: () => ({ style: {} as CSSStyleDeclaration }),
+            getSource: () => undefined,
+            addSource: () => undefined,
+            getLayer: () => undefined,
+            addLayer: () => undefined,
+            removeLayer: () => undefined,
+            removeSource: () => undefined,
+        };
+    }
+
+    function pressEnter(): void {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    }
+
+    beforeEach(() => {
+        document.body.innerHTML =
+            '<button id="draw-route-btn"></button>' +
+            '<div id="drawing-banner"><span id="drawing-banner-text"></span></div>' +
+            '<div id="route-constraints-modal" class="modal" style="display: none;">' +
+            '  <button id="route-constraints-modal-close"></button>' +
+            '  <input type="checkbox" id="route-constraints-bulk-toggle" checked>' +
+            '  <div id="route-constraints-bulk-inputs">' +
+            '    <input type="number" id="route-constraints-bulk-alt">' +
+            '    <input type="number" id="route-constraints-bulk-spd">' +
+            '  </div>' +
+            '  <table id="route-constraints-table"><tbody></tbody></table>' +
+            '  <button id="submit-route-constraints-btn"></button>' +
+            '  <button id="cancel-route-constraints-btn"></button>' +
+            '</div>';
+    });
+
+    function makeManager(fakeMap: ReturnType<typeof makeFakeMap>): TestableRouteDrawingManager {
+        const mapDisplay = { getMap: () => fakeMap } as unknown as MapDisplay;
+        const snapper = { clearHighlight: vi.fn(), snap: () => null, highlight: vi.fn() } as unknown as NavaidSnapper;
+        const app = { getRouteData: () => null } as unknown as App;
+        const stateManager = {
+            subscribe: vi.fn(),
+            getState: () => ({ selectedAircraft: 'AC1', displayOptions: { mapLabelsTextSize: 12 } }),
+            getAircraftById: () => ({ id: 'AC1', lat: 52, lon: 4 }),
+        } as unknown as StateManager;
+        return new TestableRouteDrawingManager(mapDisplay, app, stateManager, snapper);
+    }
+
+    it('detaches the map/keyboard handlers when the modal opens, so Enter in a modal input cannot re-open it and wipe typed constraints', () => {
+        const fakeMap = makeFakeMap();
+        const manager = makeManager(fakeMap);
+
+        manager.toggleDrawing();
+        manager.addPoint({ lat: 52.5, lng: 4.5 });
+        expect(fakeMap.handlers.get('click')?.size).toBe(1);
+
+        // Finish the draw via Enter -> constraints modal takes over.
+        pressEnter();
+        expect(fakeMap.handlers.get('click')?.size ?? 0).toBe(0);
+        expect(fakeMap.handlers.get('contextmenu')?.size ?? 0).toBe(0);
+        expect(fakeMap.handlers.get('mousemove')?.size ?? 0).toBe(0);
+
+        // Type a bulk constraint, then press Enter as if confirming the
+        // input. The draw's keydown handler must be gone: previously it
+        // re-ran modal.show(), which cleared this very input.
+        const bulkAlt = document.getElementById('route-constraints-bulk-alt') as HTMLInputElement;
+        bulkAlt.value = '20000';
+        pressEnter();
+        expect(bulkAlt.value).toBe('20000');
+
+        // Still drawing (state resets only on modal submit/cancel).
+        expect(manager.isDrawing()).toBe(true);
+    });
+});
