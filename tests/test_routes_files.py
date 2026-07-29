@@ -1,6 +1,6 @@
 """Tests for the BlueSky file-management HTTP routes (WebATM.server.routes).
 
-These configure a real temporary base directory and exercise the upload, list,
+These configure a real temporary base directory and exercise the upload,
 browse, delete, and output-reading endpoints end-to-end through Flask's test
 client.
 """
@@ -74,11 +74,11 @@ class TestUpload:
         assert (client.base_path / "plugins" / "myplugin.py").exists()
 
 
-class TestListAndBrowse:
-    def test_list_scenario_files(self, client):
+class TestBrowse:
+    def test_browse_lists_uploaded_files(self, client):
         _upload(client, "scenario", "one.scn")
         _upload(client, "scenario", "two.scn")
-        resp = client.get("/api/bluesky/list/scenario")
+        resp = client.get("/api/bluesky/browse/scenario")
         assert resp.status_code == 200
         names = {f["filename"] for f in resp.get_json()["files"]}
         assert {"one.scn", "two.scn"} <= names
@@ -142,27 +142,18 @@ class TestListAndBrowse:
 
 
 class TestCaseInsensitiveExtension:
-    """Listing/browsing match extensions case-insensitively so uppercase
-    variants (e.g. .SCN from BlueSky's bundled demo scenarios) show up too."""
-
-    def test_list_includes_uppercase_extension(self, client):
-        scenario_dir = client.base_path / "scenario"
-        scenario_dir.mkdir(exist_ok=True)
-        (scenario_dir / "DEMO.SCN").write_text("00:00:00>CRE KL204")
-        (scenario_dir / "lower.scn").write_text("x")
-        resp = client.get("/api/bluesky/list/scenario")
-        assert resp.status_code == 200
-        names = {f["filename"] for f in resp.get_json()["files"]}
-        assert {"DEMO.SCN", "lower.scn"} <= names
+    """Browsing matches extensions case-insensitively so uppercase variants
+    (e.g. .SCN from BlueSky's bundled demo scenarios) show up too."""
 
     def test_browse_includes_uppercase_extension(self, client):
         scenario_dir = client.base_path / "scenario"
         scenario_dir.mkdir(exist_ok=True)
         (scenario_dir / "UPPER.SCN").write_text("y")
+        (scenario_dir / "lower.scn").write_text("x")
         resp = client.get("/api/bluesky/browse/scenario")
         assert resp.status_code == 200
         names = {f["filename"] for f in resp.get_json()["files"]}
-        assert "UPPER.SCN" in names
+        assert {"UPPER.SCN", "lower.scn"} <= names
 
 
 class TestDelete:
@@ -263,6 +254,43 @@ class TestOutputContent:
         resp = client.get("/api/bluesky/output/content/nope.log")
         assert resp.status_code == 404
 
+    def test_incremental_read_returns_only_new_content(self, client):
+        output_dir = client.base_path / "output"
+        output_dir.mkdir(exist_ok=True)
+        log = output_dir / "run.log"
+        log.write_text("old line\n")
+
+        initial = client.get("/api/bluesky/output/content/run.log").get_json()
+        with log.open("a") as f:
+            f.write("new line\n")
+
+        resp = client.get(
+            f"/api/bluesky/output/content/run.log?offset={initial['offset']}"
+        )
+        body = resp.get_json()
+        assert body["content"] == "new line\n"
+        assert body["offset"] == log.stat().st_size
+
+    def test_truncated_file_restarts_stream(self, client):
+        # A log rewritten between polls (e.g. a re-run scenario logging to the
+        # same filename) shrinks below the poller's offset. The stream must
+        # restart with the new contents instead of pinning at end-of-file and
+        # silently skipping everything the new file holds.
+        output_dir = client.base_path / "output"
+        output_dir.mkdir(exist_ok=True)
+        log = output_dir / "run.log"
+        log.write_text("a much longer first run's worth of log output\n")
+
+        initial = client.get("/api/bluesky/output/content/run.log").get_json()
+        log.write_text("second run\n")  # truncating rewrite
+
+        resp = client.get(
+            f"/api/bluesky/output/content/run.log?offset={initial['offset']}"
+        )
+        body = resp.get_json()
+        assert "second run" in body["content"]
+        assert body["offset"] == log.stat().st_size
+
 
 class TestFileStatusConfigured:
     def test_filestatus_after_configuration(self, client):
@@ -270,3 +298,9 @@ class TestFileStatusConfigured:
         body = resp.get_json()
         assert body["configured"] is True
         assert body["path_exists"] is True
+
+    def test_configure_creates_managed_subdirs(self, client):
+        # Same set the integrated build pre-creates (bluesky_paths), so the
+        # output browser works before BlueSky's first start.
+        for sub in ("scenario", "plugins", "output"):
+            assert (client.base_path / sub).is_dir(), f"expected {sub}/ created"

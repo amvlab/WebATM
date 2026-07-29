@@ -81,6 +81,48 @@ def _resolve_under(directory, subpath):
     return resolved_target, None
 
 
+def _dir_entries(target_dir, extension):
+    """List a managed directory for the browse endpoint, folders first.
+
+    Files are matched on ``extension`` case-insensitively — BlueSky's bundled
+    demo scenarios use uppercase ``.SCN`` — or unfiltered when ``extension``
+    is empty (the ``output`` type).
+
+    Args:
+        target_dir (Path): Directory to list; missing directories yield [].
+        extension (str): Required file suffix including the dot, or "".
+
+    Returns:
+        list[dict]: Entries with ``filename``, ``size``, ``modified``, ``type``.
+    """
+    folders = []
+    files = []
+    if not target_dir.is_dir():
+        return []
+    ext = extension.lower()
+    for path in target_dir.iterdir():
+        if path.is_dir():
+            folders.append(
+                {
+                    "filename": path.name,
+                    "size": 0,
+                    "modified": path.stat().st_mtime,
+                    "type": "folder",
+                }
+            )
+        elif path.is_file() and (not ext or path.suffix.lower() == ext):
+            stat_info = path.stat()
+            files.append(
+                {
+                    "filename": path.name,
+                    "size": stat_info.st_size,
+                    "modified": stat_info.st_mtime,
+                    "type": "file",
+                }
+            )
+    return folders + files
+
+
 def get_webpack_assets():
     """Read the webpack manifest and build script tags in load order.
 
@@ -590,7 +632,9 @@ def register_basic_routes(app, session_manager):
 
         Expects a JSON body with ``base_path``. Validates that the path
         exists, is a directory and is writable, stores it on the app, and
-        creates the ``scenario/`` and ``plugins/`` subdirectories if needed.
+        creates the ``scenario/``, ``plugins/`` and ``output/``
+        subdirectories if needed (the same set the integrated build
+        pre-creates), so browsing works before BlueSky's first start.
 
         Returns:
             JSON with the accepted ``base_path`` and ``derived_paths``
@@ -606,7 +650,6 @@ def register_basic_routes(app, session_manager):
                     {"success": False, "error": "Base path is required"}
                 ), 400
 
-            # Normalize path for cross-platform compatibility
             path_obj = Path(base_path).expanduser().resolve()
 
             if not path_obj.exists():
@@ -619,22 +662,16 @@ def register_basic_routes(app, session_manager):
                     {"success": False, "error": f"Path is not a directory: {path_obj}"}
                 ), 400
 
-            # Check if writable (cross-platform)
             if not os.access(str(path_obj), os.W_OK):
                 return jsonify(
                     {"success": False, "error": f"Path is not writable: {path_obj}"}
                 ), 400
 
-            # Store in app config (in production, consider using a database or session)
             current_app.bluesky_base_path = str(path_obj)
 
-            # Create subdirectories if they don't exist
-            scenario_dir = path_obj / "scenario"
-            plugins_dir = path_obj / "plugins"
-
             try:
-                scenario_dir.mkdir(exist_ok=True)
-                plugins_dir.mkdir(exist_ok=True)
+                for subdir in ("scenario", "plugins", "output"):
+                    (path_obj / subdir).mkdir(exist_ok=True)
                 logger.info(
                     f"BlueSky base path configured: {current_app.bluesky_base_path}"
                 )
@@ -644,8 +681,8 @@ def register_basic_routes(app, session_manager):
                         "success": True,
                         "base_path": current_app.bluesky_base_path,
                         "derived_paths": {
-                            "scenario": str(scenario_dir),
-                            "plugins": str(plugins_dir),
+                            "scenario": str(path_obj / "scenario"),
+                            "plugins": str(path_obj / "plugins"),
                             "settings": str(path_obj / "settings.cfg"),
                             "output": str(path_obj / "output"),
                         },
@@ -684,7 +721,6 @@ def register_basic_routes(app, session_manager):
             400/500 error payload.
         """
         try:
-            # Check if base path is configured
             if not hasattr(current_app, "bluesky_base_path"):
                 return jsonify(
                     {"success": False, "error": "BlueSky base path not configured"}
@@ -697,7 +733,6 @@ def register_basic_routes(app, session_manager):
                     {"success": False, "error": f"Invalid file type: {file_type}"}
                 ), 400
 
-            # Check if file is present
             if "file" not in request.files:
                 return jsonify({"success": False, "error": "No file provided"}), 400
 
@@ -707,7 +742,6 @@ def register_basic_routes(app, session_manager):
 
             config = FILE_TYPES[file_type]
 
-            # Validate file extension
             if not file.filename.lower().endswith(config["extension"]):
                 return jsonify(
                     {
@@ -716,13 +750,10 @@ def register_basic_routes(app, session_manager):
                     }
                 ), 400
 
-            # File size validation (max 50MB for scenario files, 10MB for others)
-            max_size = (
-                50 * 1024 * 1024 if file_type == "scenario" else 10 * 1024 * 1024
-            )  # 50MB or 10MB
-            file.seek(0, 2)  # Seek to end of file
+            max_size = 50 * 1024 * 1024 if file_type == "scenario" else 10 * 1024 * 1024
+            file.seek(0, 2)
             file_size = file.tell()
-            file.seek(0)  # Reset file pointer
+            file.seek(0)
 
             if file_size > max_size:
                 max_size_mb = max_size // (1024 * 1024)
@@ -733,7 +764,6 @@ def register_basic_routes(app, session_manager):
                     }
                 ), 400
 
-            # Secure filename (cross-platform)
             filename = secure_filename(file.filename)
             if not filename:
                 return jsonify({"success": False, "error": "Invalid filename"}), 400
@@ -756,7 +786,6 @@ def register_basic_routes(app, session_manager):
                     counter += 1
                 filename = target_path.name
 
-            # Save file (cross-platform compatible)
             file.save(str(target_path))
 
             logger.info(f"File uploaded successfully: {target_path}")
@@ -777,112 +806,15 @@ def register_basic_routes(app, session_manager):
                 {"success": False, "error": f"Failed to upload file: {str(e)}"}
             ), 500
 
-    @app.route("/api/bluesky/list/<file_type>", methods=["GET"])
-    def list_bluesky_files(file_type):
-        """List files in a BlueSky directory (GET /api/bluesky/list/<file_type>).
-
-        Lists folders and files (extension matched case-insensitively) for
-        ``scenario``, ``plugins``, ``settings`` or ``output``.
-
-        Args:
-            file_type (str): One of ``scenario``, ``plugins``, ``settings``,
-                ``output``.
-
-        Returns:
-            JSON with ``files`` entries (filename, size, modified, type),
-            or a 400/500 error payload.
-        """
-        try:
-            # Check if base path is configured
-            if not hasattr(current_app, "bluesky_base_path"):
-                return jsonify(
-                    {"success": False, "error": "BlueSky base path not configured"}
-                ), 400
-
-            base_path = Path(current_app.bluesky_base_path)
-
-            if file_type not in FILE_TYPES:
-                return jsonify(
-                    {"success": False, "error": f"Invalid file type: {file_type}"}
-                ), 400
-
-            config = FILE_TYPES[file_type]
-            files = []
-
-            if file_type == "settings":
-                settings_path = base_path / config["filepath"]
-                if settings_path.exists():
-                    stat_info = settings_path.stat()
-                    files.append(
-                        {
-                            "filename": "settings.cfg",
-                            "size": stat_info.st_size,
-                            "modified": stat_info.st_mtime,
-                            "type": "file",
-                        }
-                    )
-            else:
-                target_dir = base_path / config["directory"]
-                if target_dir.exists():
-                    # Add folders first
-                    for folder_path in target_dir.iterdir():
-                        if folder_path.is_dir():
-                            stat_info = folder_path.stat()
-                            files.append(
-                                {
-                                    "filename": folder_path.name,
-                                    "size": 0,  # Folders don't have a meaningful size
-                                    "modified": stat_info.st_mtime,
-                                    "type": "folder",
-                                }
-                            )
-
-                    # Add files. Match the extension case-insensitively so
-                    # uppercase variants (e.g. .SCN from BlueSky's bundled demo
-                    # scenarios) are listed too -- Path.glob is case-sensitive.
-                    if config["extension"]:
-                        ext = config["extension"].lower()
-                        file_iter = (
-                            p for p in target_dir.iterdir() if p.suffix.lower() == ext
-                        )
-                    else:
-                        file_iter = target_dir.iterdir()
-                    for file_path in file_iter:
-                        if file_path.is_file():
-                            stat_info = file_path.stat()
-                            files.append(
-                                {
-                                    "filename": file_path.name,
-                                    "size": stat_info.st_size,
-                                    "modified": stat_info.st_mtime,
-                                    "type": "file",
-                                }
-                            )
-
-            return jsonify(
-                {
-                    "success": True,
-                    "file_type": file_type,
-                    "files": files,
-                    "base_path": str(base_path),
-                }
-            )
-
-        except Exception as e:
-            logger.error(f"Error listing {file_type} files: {e}")
-            return jsonify(
-                {"success": False, "error": f"Failed to list files: {str(e)}"}
-            ), 500
-
     @app.route("/api/bluesky/browse/<file_type>", methods=["GET"])
     @app.route("/api/bluesky/browse/<file_type>/<path:subpath>", methods=["GET"])
     def browse_bluesky_directory(file_type, subpath=""):
         """Browse a BlueSky directory tree (GET /api/bluesky/browse/<file_type>[/<subpath>]).
 
-        Like the list endpoint but with subdirectory navigation and
-        breadcrumbs. The subpath is sanitized (no ``..`` components) and
-        resolved paths are verified to stay inside the allowed base
-        directory to prevent traversal.
+        Lists folders and files (extension matched case-insensitively) with
+        subdirectory navigation and breadcrumbs. The subpath is sanitized
+        (no ``..`` components) and resolved paths are verified to stay
+        inside the allowed base directory to prevent traversal.
 
         Args:
             file_type (str): One of ``scenario``, ``plugins``, ``settings``,
@@ -895,7 +827,6 @@ def register_basic_routes(app, session_manager):
             400/403/500 error payload.
         """
         try:
-            # Check if base path is configured
             if not hasattr(current_app, "bluesky_base_path"):
                 return jsonify(
                     {"success": False, "error": "BlueSky base path not configured"}
@@ -944,68 +875,20 @@ def register_basic_routes(app, session_manager):
             if error:
                 return error
 
-            files = []
+            files = _dir_entries(target_dir, config["extension"])
 
-            if target_dir.exists() and target_dir.is_dir():
-                # Add folders first
-                for folder_path in target_dir.iterdir():
-                    if folder_path.is_dir():
-                        stat_info = folder_path.stat()
-                        files.append(
-                            {
-                                "filename": folder_path.name,
-                                "size": 0,  # Folders don't have a meaningful size
-                                "modified": stat_info.st_mtime,
-                                "type": "folder",
-                            }
-                        )
-
-                # Add files. Match the extension case-insensitively so uppercase
-                # variants (e.g. .SCN from BlueSky's bundled demo scenarios) are
-                # listed too -- Path.glob is case-sensitive.
-                if config["extension"]:
-                    ext = config["extension"].lower()
-                    file_iter = (
-                        p for p in target_dir.iterdir() if p.suffix.lower() == ext
-                    )
-                else:
-                    file_iter = target_dir.iterdir()
-                for file_path in file_iter:
-                    if file_path.is_file():
-                        stat_info = file_path.stat()
-                        files.append(
-                            {
-                                "filename": file_path.name,
-                                "size": stat_info.st_size,
-                                "modified": stat_info.st_mtime,
-                                "type": "file",
-                            }
-                        )
-
-            # Build breadcrumbs for navigation
-            breadcrumbs = []
-            breadcrumb_path = ""
-
-            # Add root breadcrumb
-            breadcrumbs.append({"name": config["directory"], "path": ""})
-
-            # Add intermediate breadcrumbs
+            breadcrumbs = [{"name": config["directory"], "path": ""}]
             for i, part in enumerate(current_path_parts):
-                if i == 0:
-                    breadcrumb_path = part
-                else:
-                    breadcrumb_path = f"{breadcrumb_path}/{part}"
-
-                breadcrumbs.append({"name": part, "path": breadcrumb_path})
-
-            current_path = "/".join(current_path_parts) if current_path_parts else ""
+                breadcrumbs.append(
+                    {"name": part, "path": "/".join(current_path_parts[: i + 1])}
+                )
 
             return jsonify(
                 {
                     "success": True,
                     "file_type": file_type,
                     "files": files,
-                    "current_path": current_path,
+                    "current_path": "/".join(current_path_parts),
                     "breadcrumbs": breadcrumbs,
                     "base_path": str(base_path),
                 }
@@ -1094,8 +977,10 @@ def register_basic_routes(app, session_manager):
 
         Supports log streaming: with ``offset`` > 0 the file is read
         incrementally from that byte offset to the end; with offset 0 the
-        last ``lines`` lines are tailed for the initial load. Query
-        parameters:
+        last ``lines`` lines are tailed for the initial load. If the file
+        shrank below the offset (truncated/rewritten between polls), the
+        stream restarts with a tail load instead of silently skipping the
+        new content. Query parameters:
 
         - ``offset``: byte offset to read from (0 = tail mode).
         - ``lines``: maximum lines for the initial tail load (default 200).
@@ -1117,19 +1002,23 @@ def register_basic_routes(app, session_manager):
             max_lines = request.args.get("lines", type=int, default=200)
             file_size = resolved_path.stat().st_size
 
-            if offset > 0:
-                # Incremental read from offset to end
-                with open(resolved_path, errors="replace") as f:
-                    f.seek(min(offset, file_size))
+            # A file smaller than the poller's offset was truncated or
+            # rewritten (e.g. a re-run scenario logging to the same name).
+            # The offset points into the old contents, so restart with a
+            # tail load instead of pinning the stream at end-of-file, which
+            # would silently skip everything the new file already holds.
+            if offset > file_size:
+                offset = 0
+
+            with open(resolved_path, errors="replace") as f:
+                if offset > 0:
+                    # Incremental read from offset to end.
+                    f.seek(offset)
                     content = f.read()
-                    new_offset = f.tell()
-            else:
-                # Initial load: tail the last N lines
-                with open(resolved_path, errors="replace") as f:
-                    all_lines = f.readlines()
-                    tail_lines = all_lines[-max_lines:]
-                    content = "".join(tail_lines)
-                    new_offset = f.tell()
+                else:
+                    # Initial (or post-truncation) load: tail the last N lines.
+                    content = "".join(f.readlines()[-max_lines:])
+                new_offset = f.tell()
 
             return jsonify(
                 {

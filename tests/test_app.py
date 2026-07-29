@@ -247,8 +247,8 @@ class TestBlueSkyFileStatus:
         assert resp.status_code == 400
         assert resp.get_json()["success"] is False
 
-    def test_list_without_base_path_configured(self, client):
-        resp = client.get("/api/bluesky/list/scenario")
+    def test_browse_without_base_path_configured(self, client):
+        resp = client.get("/api/bluesky/browse/scenario")
         assert resp.status_code == 400
 
     def test_invalid_file_type_after_configuring(self, client, tmp_path):
@@ -257,7 +257,7 @@ class TestBlueSkyFileStatus:
             "/api/bluesky/configure-base-path", json={"base_path": str(tmp_path)}
         )
         assert resp.status_code == 200
-        bad = client.get("/api/bluesky/list/bogustype")
+        bad = client.get("/api/bluesky/browse/bogustype")
         assert bad.status_code == 400
 
 
