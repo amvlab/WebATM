@@ -8,10 +8,11 @@ import * as THREE from 'three';
 
 // Capture the GLTFLoader onLoad callback so tests can drive a "loaded" model
 // through the loader without touching the network.
-const captured: { onLoad?: (gltf: { scene: THREE.Group }) => void } = {};
+type MockGltf = { scene: THREE.Group; animations?: THREE.AnimationClip[] };
+const captured: { onLoad?: (gltf: MockGltf) => void } = {};
 vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
     GLTFLoader: class {
-        load(_path: string, onLoad: (gltf: { scene: THREE.Group }) => void) {
+        load(_path: string, onLoad: (gltf: MockGltf) => void) {
             captured.onLoad = onLoad;
         }
     },
@@ -79,5 +80,45 @@ describe('Aircraft3DModelLoader cache disposal', () => {
         expect(loader.get('A320.glb')).toBeUndefined();
         expect(geomSpy).toHaveBeenCalledTimes(1);
         matSpies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1));
+    });
+});
+
+describe('Aircraft3DModelLoader animation clips', () => {
+    beforeEach(() => {
+        vi.restoreAllMocks();
+        captured.onLoad = undefined;
+    });
+
+    it('keeps the GLB animation clips alongside the cached scene', () => {
+        const loader = makeLoader();
+        const { model } = multiMaterialModel();
+        const clip = new THREE.AnimationClip('EngineSpin', 1, []);
+
+        loader.load('prop.glb');
+        captured.onLoad?.({ scene: model, animations: [clip] });
+
+        expect(loader.animations('prop.glb')).toEqual([clip]);
+    });
+
+    it('returns an empty clip list for static models', () => {
+        const loader = makeLoader();
+        const { model } = multiMaterialModel();
+
+        loader.load('A320.glb');
+        captured.onLoad?.({ scene: model, animations: [] });
+
+        expect(loader.animations('A320.glb')).toEqual([]);
+    });
+
+    it('drops stored clips when the cache is cleared', () => {
+        const loader = makeLoader();
+        const { model } = multiMaterialModel();
+        const clip = new THREE.AnimationClip('EngineSpin', 1, []);
+
+        loader.load('prop.glb');
+        captured.onLoad?.({ scene: model, animations: [clip] });
+        loader.clearCache();
+
+        expect(loader.animations('prop.glb')).toEqual([]);
     });
 });

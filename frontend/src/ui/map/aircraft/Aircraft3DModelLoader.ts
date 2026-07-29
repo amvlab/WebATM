@@ -9,6 +9,8 @@ import { logger } from '../../../utils/Logger';
  * Loads each model path at most once, normalizes materials/textures for
  * quality at small scales, and records the raw bounding-box extent so
  * per-aircraft scaling can convert GLB units to real-world meters.
+ * Animation clips baked into the GLB (e.g. spinning engines/rotors) are
+ * kept alongside the scene so each aircraft clone can play them.
  */
 export class Aircraft3DModelLoader {
     private readonly loader = new GLTFLoader();
@@ -17,6 +19,10 @@ export class Aircraft3DModelLoader {
     // own units). Used to compute the scale factor needed to bring a
     // model to real-world dimensions.
     private readonly rawMaxDims = new Map<string, number>();
+    // Animation clips shipped in each GLB, keyed by path. Clips are
+    // shared read-only data: every aircraft clone binds them through
+    // its own AnimationMixer.
+    private readonly animationClips = new Map<string, THREE.AnimationClip[]>();
     private readonly loadingModels = new Set<string>();
 
     constructor(private readonly opts: {
@@ -34,6 +40,11 @@ export class Aircraft3DModelLoader {
     /** Raw bounding-box max extent recorded when the model loaded. */
     public rawMaxDim(path: string): number | undefined {
         return this.rawMaxDims.get(path);
+    }
+
+    /** Animation clips baked into the GLB (empty for static models). */
+    public animations(path: string): THREE.AnimationClip[] {
+        return this.animationClips.get(path) ?? [];
     }
 
     /**
@@ -55,7 +66,12 @@ export class Aircraft3DModelLoader {
                 this.loadingModels.delete(path);
                 this.normalizeModel(gltf.scene, path);
                 this.loadedModels.set(path, gltf.scene);
-                logger.info('Aircraft3DModelLoader', `Aircraft model loaded: ${path}`);
+                if (gltf.animations && gltf.animations.length > 0) {
+                    this.animationClips.set(path, gltf.animations);
+                    logger.info('Aircraft3DModelLoader', `Aircraft model loaded: ${path} (${gltf.animations.length} animation clip(s))`);
+                } else {
+                    logger.info('Aircraft3DModelLoader', `Aircraft model loaded: ${path}`);
+                }
                 this.opts.onModelLoaded(path);
             },
             (progress) => {
@@ -78,12 +94,14 @@ export class Aircraft3DModelLoader {
     public clearCache(): void {
         this.disposeCachedModels();
         this.loadedModels.clear();
+        this.animationClips.clear();
     }
 
     /** Full teardown: dispose and drop the cache, forget in-flight loads. */
     public clearAll(): void {
         this.disposeCachedModels();
         this.loadedModels.clear();
+        this.animationClips.clear();
         this.loadingModels.clear();
     }
 

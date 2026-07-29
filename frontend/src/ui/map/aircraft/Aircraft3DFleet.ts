@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { clone as cloneModelScene } from 'three/addons/utils/SkeletonUtils.js';
 import {
     getDimensionsForAircraftType,
     getRealMaxExtent,
@@ -16,6 +17,8 @@ export interface Aircraft3DMesh {
     modelPath: string;
     lastUpdate: number;
     currentGroup: 'mercator' | 'globe';
+    /** Plays the GLB's baked animation clips; absent for static models. */
+    mixer?: THREE.AnimationMixer;
 }
 
 /**
@@ -83,11 +86,27 @@ export class Aircraft3DFleet {
             return;
         }
 
-        const mesh = model.clone();
+        // SkeletonUtils.clone instead of Object3D.clone: identical for plain
+        // meshes, but re-binds skinned meshes to their cloned bones so rigged
+        // models animate per-aircraft instead of referencing the cached
+        // master's skeleton. Geometry/materials stay shared either way.
+        const mesh = cloneModelScene(model);
         mesh.userData.realScale = this.computeRealScale(data, modelPath);
         // Stamp the aircraft id so transform methods can look up
         // per-aircraft overrides without threading the id through every call.
         mesh.userData.aircraftId = id;
+
+        // Play any animation clips baked into the GLB (spinning engines,
+        // rotors, gear, ...) on a per-aircraft mixer, looping forever.
+        const clips = this.deps.modelLoader.animations(modelPath);
+        let mixer: THREE.AnimationMixer | undefined;
+        if (clips.length > 0) {
+            mixer = new THREE.AnimationMixer(mesh);
+            for (const clip of clips) {
+                mixer.clipAction(clip).play();
+            }
+        }
+
         const isGlobe = this.deps.isGlobeProjection();
 
         if (isGlobe) {
@@ -104,6 +123,7 @@ export class Aircraft3DFleet {
             modelPath,
             lastUpdate: Date.now(),
             currentGroup: isGlobe ? 'globe' : 'mercator',
+            mixer,
         });
 
         logger.verbose('Aircraft3DFleet', `Created 3D mesh for aircraft ${id} (${data.actype || 'unknown'}) using ${modelPath}`);
@@ -154,9 +174,31 @@ export class Aircraft3DFleet {
             ? this.deps.getGlobeGroup()
             : this.deps.getMercatorGroup();
         group?.remove(aircraftMesh.mesh);
+        this.disposeMixer(aircraftMesh);
 
         this.aircraft.delete(id);
         logger.verbose('Aircraft3DFleet', `Removed 3D mesh for aircraft ${id}`);
+    }
+
+    /**
+     * Advance every playing animation mixer by `delta` seconds. Called once
+     * per rendered frame by the owning layer; a no-op for static models.
+     */
+    advanceAnimations(delta: number): void {
+        this.aircraft.forEach((aircraftMesh) => {
+            aircraftMesh.mixer?.update(delta);
+        });
+    }
+
+    /**
+     * Stop and unbind an aircraft's animation mixer so the removed clone's
+     * property bindings don't linger in the mixer's caches.
+     */
+    private disposeMixer(aircraftMesh: Aircraft3DMesh): void {
+        if (!aircraftMesh.mixer) return;
+        aircraftMesh.mixer.stopAllAction();
+        aircraftMesh.mixer.uncacheRoot(aircraftMesh.mesh);
+        aircraftMesh.mixer = undefined;
     }
 
     /**
@@ -292,6 +334,7 @@ export class Aircraft3DFleet {
                 ? this.deps.getGlobeGroup()
                 : this.deps.getMercatorGroup();
             group?.remove(aircraftMesh.mesh);
+            this.disposeMixer(aircraftMesh);
             logger.verbose('Aircraft3DFleet', `Removed 3D mesh for aircraft ${id}`);
         });
         this.aircraft.clear();

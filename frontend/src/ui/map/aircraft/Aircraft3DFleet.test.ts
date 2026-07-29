@@ -27,13 +27,14 @@ function multiMaterialModel(): {
     return { model, geometry, materials };
 }
 
-function makeFleet(model: THREE.Group) {
+function makeFleet(model: THREE.Group, animations: THREE.AnimationClip[] = []) {
     const mercatorGroup = new THREE.Group();
     const deps: Aircraft3DFleetDeps = {
         modelLoader: {
             get: () => model,
             load: vi.fn(),
             rawMaxDim: () => 10,
+            animations: () => animations,
         } as unknown as Aircraft3DFleetDeps['modelLoader'],
         transforms: {
             updateMeshTransform: vi.fn(),
@@ -113,5 +114,80 @@ describe('Aircraft3DFleet lifecycle', () => {
 
         expect(fleet.size).toBe(0);
         expect(mercatorGroup.children.length).toBe(0);
+    });
+});
+
+describe('Aircraft3DFleet GLB animation playback', () => {
+    beforeEach(() => vi.restoreAllMocks());
+
+    /** A model with a named child node and a clip that spins it around Y. */
+    function animatedModel(): { model: THREE.Group; clip: THREE.AnimationClip } {
+        const { model } = multiMaterialModel();
+        const engine = new THREE.Object3D();
+        engine.name = 'Engine';
+        model.add(engine);
+        const track = new THREE.QuaternionKeyframeTrack(
+            'Engine.quaternion',
+            [0, 1],
+            [
+                ...new THREE.Quaternion().toArray(),
+                ...new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2).toArray(),
+            ],
+        );
+        return { model, clip: new THREE.AnimationClip('EngineSpin', 1, [track]) };
+    }
+
+    it('creates no mixer for static models', () => {
+        const { model } = multiMaterialModel();
+        const { fleet } = makeFleet(model);
+
+        fleet.create('AC1', DATA, 'A320.glb');
+
+        expect(fleet.get('AC1')?.mixer).toBeUndefined();
+    });
+
+    it('plays the GLB clips on the aircraft clone when advanced', () => {
+        const { model, clip } = animatedModel();
+        const { fleet, mercatorGroup } = makeFleet(model, [clip]);
+
+        fleet.create('AC1', DATA, 'A320.glb');
+        const entry = fleet.get('AC1');
+        expect(entry?.mixer).toBeDefined();
+
+        fleet.advanceAnimations(0.5);
+
+        // The clone's Engine node rotated; the cached master stayed put.
+        const cloned = mercatorGroup.children[0].getObjectByName('Engine');
+        const master = model.getObjectByName('Engine');
+        expect(cloned?.quaternion.equals(new THREE.Quaternion())).toBe(false);
+        expect(master?.quaternion.equals(new THREE.Quaternion())).toBe(true);
+    });
+
+    it('each aircraft animates independently on its own mixer', () => {
+        const { model, clip } = animatedModel();
+        const { fleet } = makeFleet(model, [clip]);
+
+        fleet.create('AC1', DATA, 'A320.glb');
+        fleet.create('AC2', DATA, 'A320.glb');
+
+        expect(fleet.get('AC1')?.mixer).toBeDefined();
+        expect(fleet.get('AC2')?.mixer).toBeDefined();
+        expect(fleet.get('AC1')?.mixer).not.toBe(fleet.get('AC2')?.mixer);
+    });
+
+    it('stops and unbinds the mixer when the aircraft is removed', () => {
+        const { model, clip } = animatedModel();
+        const { fleet } = makeFleet(model, [clip]);
+
+        fleet.create('AC1', DATA, 'A320.glb');
+        const mixer = fleet.get('AC1')?.mixer;
+        expect(mixer).toBeDefined();
+        const stopSpy = vi.spyOn(mixer as THREE.AnimationMixer, 'stopAllAction');
+
+        fleet.remove('AC1');
+
+        expect(stopSpy).toHaveBeenCalledTimes(1);
+        // Advancing after removal must not touch the removed mixer.
+        expect(() => fleet.advanceAnimations(0.5)).not.toThrow();
     });
 });
