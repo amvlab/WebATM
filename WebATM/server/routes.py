@@ -154,25 +154,14 @@ def get_webpack_assets():
         with open(manifest_path) as f:
             manifest = json.load(f)
 
-        script_tags = []
-
-        # Check if this is a development build (single bundle) or production build (split bundles)
-        if (
-            "main.js" in manifest
-            and len([k for k in manifest.keys() if k.endswith(".js")]) == 1
-        ):
-            # Development mode: single bundle
-            bundle_file = manifest["main.js"]
-            script_tags.append(f'<script src="/static/dist/{bundle_file}"></script>')
-        else:
-            # Production mode: split bundles - load in correct order
-            chunk_order = ["runtime.js", "vendor.js", "app.js", "main.js"]
-
-            for chunk_name in chunk_order:
-                if chunk_name in manifest:
-                    script_tags.append(
-                        f'<script src="/static/dist/{manifest[chunk_name]}"></script>'
-                    )
+        # Split production bundles must load in this order; a development
+        # manifest simply only contains main.js.
+        chunk_order = ("runtime.js", "vendor.js", "app.js", "main.js")
+        script_tags = [
+            f'<script src="/static/dist/{manifest[chunk]}"></script>'
+            for chunk in chunk_order
+            if chunk in manifest
+        ]
 
         return (
             script_tags
