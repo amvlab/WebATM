@@ -91,6 +91,29 @@ class TestBrowse:
         assert body["success"] is True
         assert any(b["name"] == "scenario" for b in body["breadcrumbs"])
 
+    def test_browse_listing_sorted_folders_first(self, client):
+        # iterdir() yields raw filesystem order (creation/hash order); the
+        # endpoint must return folders first, each group sorted by name
+        # case-insensitively, so the file manager doesn't show a jumbled list.
+        scenario_dir = client.base_path / "scenario"
+        scenario_dir.mkdir(exist_ok=True)
+        for name in ("zulu.scn", "alpha.scn", "Mike.scn", "bravo.scn"):
+            (scenario_dir / name).write_text("x")
+        for folder in ("nested", "Demos"):
+            (scenario_dir / folder).mkdir()
+
+        resp = client.get("/api/bluesky/browse/scenario")
+        assert resp.status_code == 200
+        names = [f["filename"] for f in resp.get_json()["files"]]
+        assert names == [
+            "Demos",
+            "nested",
+            "alpha.scn",
+            "bravo.scn",
+            "Mike.scn",
+            "zulu.scn",
+        ]
+
     def test_browse_directory_traversal_is_blocked(self, client):
         # Attempting to escape the scenario directory should not error out
         # with file contents from outside; the handler strips .. segments.

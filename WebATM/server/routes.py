@@ -84,6 +84,8 @@ def _resolve_under(directory, subpath):
 def _dir_entries(target_dir, extension):
     """List a managed directory for the browse endpoint, folders first.
 
+    Folders and files are each sorted by name (case-insensitively) —
+    ``iterdir`` yields raw filesystem order, which is effectively random.
     Files are matched on ``extension`` case-insensitively — BlueSky's bundled
     demo scenarios use uppercase ``.SCN`` — or unfiltered when ``extension``
     is empty (the ``output`` type).
@@ -120,7 +122,11 @@ def _dir_entries(target_dir, extension):
                     "type": "file",
                 }
             )
-    return folders + files
+
+    def by_name(entry):
+        return entry["filename"].lower()
+
+    return sorted(folders, key=by_name) + sorted(files, key=by_name)
 
 
 def get_webpack_assets():
@@ -148,25 +154,14 @@ def get_webpack_assets():
         with open(manifest_path) as f:
             manifest = json.load(f)
 
-        script_tags = []
-
-        # Check if this is a development build (single bundle) or production build (split bundles)
-        if (
-            "main.js" in manifest
-            and len([k for k in manifest.keys() if k.endswith(".js")]) == 1
-        ):
-            # Development mode: single bundle
-            bundle_file = manifest["main.js"]
-            script_tags.append(f'<script src="/static/dist/{bundle_file}"></script>')
-        else:
-            # Production mode: split bundles - load in correct order
-            chunk_order = ["runtime.js", "vendor.js", "app.js", "main.js"]
-
-            for chunk_name in chunk_order:
-                if chunk_name in manifest:
-                    script_tags.append(
-                        f'<script src="/static/dist/{manifest[chunk_name]}"></script>'
-                    )
+        # Split production bundles must load in this order; a development
+        # manifest simply only contains main.js.
+        chunk_order = ("runtime.js", "vendor.js", "app.js", "main.js")
+        script_tags = [
+            f'<script src="/static/dist/{manifest[chunk]}"></script>'
+            for chunk in chunk_order
+            if chunk in manifest
+        ]
 
         return (
             script_tags
@@ -221,7 +216,7 @@ def register_basic_routes(app, session_manager):
             payload on failure.
         """
         try:
-            command = request.json.get("command", "") if request.json else ""
+            command = (request.get_json(silent=True) or {}).get("command", "")
             success = current_app.bluesky_proxy.send_command(command)
             return jsonify({"success": success, "command": command})
         except Exception:
@@ -265,7 +260,7 @@ def register_basic_routes(app, session_manager):
             nodes appear before the timeout.
         """
         try:
-            data = request.json if request.json else {}
+            data = request.get_json(silent=True) or {}
             server_ip = data.get("server_ip", "localhost").strip() or "localhost"
             logger.info(f"User requested connection to BlueSky server at {server_ip}")
 
@@ -642,7 +637,7 @@ def register_basic_routes(app, session_manager):
             payload.
         """
         try:
-            data = request.json if request.json else {}
+            data = request.get_json(silent=True) or {}
             base_path = data.get("base_path", "").strip()
 
             if not base_path:
