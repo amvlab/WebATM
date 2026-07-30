@@ -84,6 +84,8 @@ def _resolve_under(directory, subpath):
 def _dir_entries(target_dir, extension):
     """List a managed directory for the browse endpoint, folders first.
 
+    Folders and files are each sorted by name (case-insensitively) —
+    ``iterdir`` yields raw filesystem order, which is effectively random.
     Files are matched on ``extension`` case-insensitively — BlueSky's bundled
     demo scenarios use uppercase ``.SCN`` — or unfiltered when ``extension``
     is empty (the ``output`` type).
@@ -120,7 +122,11 @@ def _dir_entries(target_dir, extension):
                     "type": "file",
                 }
             )
-    return folders + files
+
+    def by_name(entry):
+        return entry["filename"].lower()
+
+    return sorted(folders, key=by_name) + sorted(files, key=by_name)
 
 
 def get_webpack_assets():
