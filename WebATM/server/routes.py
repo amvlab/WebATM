@@ -387,42 +387,61 @@ def register_basic_routes(app, session_manager):
 
             # Scan for supported model files
             supported_extensions = {".gltf", ".glb"}
+
+            # Friendly display names, keyed by the lowercased base stem
+            # (the filename stem with any "_nologo" suffix stripped). Keep
+            # this in sync with CATEGORY_TO_MODEL in aircraftCategories.ts.
+            display_name_map = {
+                "a320": "Airbus A320",
+                "a350": "Airbus A350",
+                "a380": "Airbus A380",
+                "b737": "Boeing 737",
+                "b787": "Boeing 787",
+                "evtol": "eVTOL",
+                "drone": "Drone",
+            }
+
+            # The model used when an aircraft's type is unknown and no model
+            # is forced (mirrors DEFAULT_FALLBACK_MODEL in aircraftCategories.ts).
+            default_model = "A320.glb"
+
             models = []
 
             for model_file in models_dir.iterdir():
-                if (
+                if not (
                     model_file.is_file()
                     and model_file.suffix.lower() in supported_extensions
                 ):
-                    # Create display name from filename
-                    display_name = model_file.stem
+                    continue
 
-                    # Map common aircraft model names to better display names
-                    display_name_map = {
-                        "737": "Boeing 737",
-                        "a320": "Airbus A320",
-                        "drone": "Generic Drone",
-                        "tie": "TIE Fighter",
+                # Split the stem into a base name and an optional "no logo"
+                # variant so both spell out to a consistent display name.
+                stem = model_file.stem
+                is_nologo = stem.lower().endswith("_nologo")
+                base = stem[: -len("_nologo")] if is_nologo else stem
+
+                display_name = display_name_map.get(base.lower(), base)
+                if is_nologo:
+                    display_name = f"{display_name} (no logo)"
+
+                models.append(
+                    {
+                        "filename": model_file.name,
+                        "displayName": display_name,
+                        "description": f"{display_name} 3D model",
+                        "fileSize": model_file.stat().st_size,
+                        "isDefault": model_file.name == default_model,
                     }
+                )
 
-                    if display_name.lower() in display_name_map:
-                        display_name = display_name_map[display_name.lower()]
-
-                    # Get file size
-                    file_size = model_file.stat().st_size
-
-                    models.append(
-                        {
-                            "filename": model_file.name,
-                            "displayName": display_name,
-                            "description": f"{display_name} 3D model",
-                            "fileSize": file_size,
-                            "isDefault": model_file.name == "737.gltf",
-                        }
-                    )
-
-            # Sort by display name, but put default model first
-            models.sort(key=lambda m: (not m["isDefault"], m["displayName"]))
+            # Default model first, then grouped by friendly name with the
+            # logo variant ahead of its "(no logo)" counterpart.
+            models.sort(
+                key=lambda m: (
+                    not m["isDefault"],
+                    m["displayName"].casefold(),
+                )
+            )
 
             logger.debug(
                 f"Found {len(models)} aircraft models: {[m['filename'] for m in models]}"
