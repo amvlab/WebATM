@@ -227,7 +227,7 @@ def register_basic_routes(app, session_manager):
             payload on failure.
         """
         try:
-            command = request.json.get("command", "") if request.json else ""
+            command = (request.get_json(silent=True) or {}).get("command", "")
             success = current_app.bluesky_proxy.send_command(command)
             return jsonify({"success": success, "command": command})
         except Exception:
@@ -271,7 +271,7 @@ def register_basic_routes(app, session_manager):
             nodes appear before the timeout.
         """
         try:
-            data = request.json if request.json else {}
+            data = request.get_json(silent=True) or {}
             server_ip = data.get("server_ip", "localhost").strip() or "localhost"
             logger.info(f"User requested connection to BlueSky server at {server_ip}")
 
@@ -648,7 +648,7 @@ def register_basic_routes(app, session_manager):
             payload.
         """
         try:
-            data = request.json if request.json else {}
+            data = request.get_json(silent=True) or {}
             base_path = data.get("base_path", "").strip()
 
             if not base_path:

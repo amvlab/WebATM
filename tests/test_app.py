@@ -212,6 +212,13 @@ class TestCommandRoute:
         assert resp.status_code == 200
         assert resp.get_json()["command"] == ""
 
+    def test_send_command_without_json_body(self, client):
+        # A body-less POST must be treated like an empty command, not bubble
+        # Flask's UnsupportedMediaType into a 500.
+        resp = client.post("/api/simulation/command")
+        assert resp.status_code == 200
+        assert resp.get_json()["command"] == ""
+
 
 class TestNavdataSearch:
     def test_empty_query_returns_empty_results(self, client):
