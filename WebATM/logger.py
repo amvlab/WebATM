@@ -7,6 +7,7 @@ Provides standardized logging similar to TypeScript logging with:
 - Consistent formatting across all Python modules
 """
 
+import inspect
 import logging
 import sys
 from pathlib import Path
@@ -19,7 +20,9 @@ class FileNameFormatter(logging.Formatter):
         """Format a log record, prefixing the message with its source filename.
 
         Werkzeug (Flask's HTTP server) records are prefixed with ``[Werkzeug]``;
-        all other records use the CamelCased stem of the source file name.
+        all other records use the CamelCased stem of the source file name. The
+        record is restored afterwards, so a record that passes through several
+        handlers (e.g. console and file) is prefixed exactly once per output.
 
         Args:
             record (logging.LogRecord): The log record to format.
@@ -27,24 +30,20 @@ class FileNameFormatter(logging.Formatter):
         Returns:
             str: The formatted log message.
         """
-        # Special handling for werkzeug (Flask's HTTP server) logs
         if record.name == "werkzeug":
             filename = "Werkzeug"
         else:
-            # Get the filename without extension
-            filename = Path(record.pathname).stem
-            # Capitalize first letter for consistency
-            filename = filename.replace("_", " ").title().replace(" ", "")
+            stem = Path(record.pathname).stem
+            filename = stem.replace("_", " ").title().replace(" ", "")
 
-        # Add filename prefix to message
+        original_msg = record.msg
         record.msg = f"[{filename}] {record.msg}"
+        try:
+            return super().format(record)
+        finally:
+            record.msg = original_msg
 
-        return super().format(record)
 
-
-# Global logger configuration
-_loggers = {}
-_log_level = logging.INFO
 _log_format = "%(asctime)s - %(levelname)s - %(message)s"
 _date_format = "%Y-%m-%d %H:%M:%S"
 
@@ -56,41 +55,30 @@ def configure_logging(
 ):
     """Configure global logging settings for WebATM.
 
-    Resets the ``WebATM`` root logger and any cached module loggers, then
-    attaches console and/or file handlers using the shared
-    :class:`FileNameFormatter`.
+    Resets the ``WebATM`` root logger and attaches console and/or file
+    handlers using the shared :class:`FileNameFormatter`. Module loggers from
+    :func:`get_logger` delegate their level to this root logger, so calling
+    this again (e.g. to switch to DEBUG at runtime) takes effect everywhere,
+    including loggers created before the call.
 
     Args:
         level (int): Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
         log_file (str | None): Optional file path to write logs to.
         include_console (bool): Whether to include console output.
     """
-    global _log_level, _loggers
-
-    _log_level = level
-
-    # Clear existing loggers to reconfigure them
-    _loggers.clear()
-
-    # Configure root logger
     root_logger = logging.getLogger("WebATM")
     root_logger.setLevel(level)
     root_logger.handlers.clear()
 
-    # Create formatter
     formatter = FileNameFormatter(_log_format, datefmt=_date_format)
 
-    # Add console handler if requested
     if include_console:
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(level)
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
 
-    # Add file handler if requested
     if log_file:
         file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(level)
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
 
@@ -98,9 +86,11 @@ def configure_logging(
 def get_logger(name: str | None = None) -> logging.Logger:
     """Get or create a logger for a module.
 
-    This function automatically determines the calling module's name and
-    creates a logger with filename prefixes. Loggers are cached, so repeated
-    calls with the same name return the same instance.
+    The returned logger is a child of the ``WebATM`` root logger and carries
+    no level of its own, so it always follows the level set by
+    :func:`configure_logging` — including changes made after it was created.
+    ``logging.getLogger`` caches by name, so repeated calls with the same name
+    return the same instance.
 
     Args:
         name (str | None): Optional custom name for the logger. If not
@@ -114,31 +104,13 @@ def get_logger(name: str | None = None) -> logging.Logger:
         >>> logger.info("Starting process")
         2025-11-06 10:30:45 - INFO - [Main] Starting process
     """
-    global _loggers
-
     if name is None:
-        # Get the caller's filename automatically
-        import inspect
-
         frame = inspect.currentframe()
         if frame and frame.f_back:
             caller_filename = frame.f_back.f_globals.get("__file__", "Unknown")
             name = Path(caller_filename).stem
 
-    # Return cached logger if exists
-    if name in _loggers:
-        return _loggers[name]
-
-    # Create new logger
-    logger = logging.getLogger(f"WebATM.{name}")
-    logger.setLevel(_log_level)
-
-    # If no handlers are configured yet, configure default
-    if not logger.handlers and not logging.getLogger("WebATM").handlers:
-        configure_logging()
-
-    _loggers[name] = logger
-    return logger
+    return logging.getLogger(f"WebATM.{name}")
 
 
 # Configure default logging on import

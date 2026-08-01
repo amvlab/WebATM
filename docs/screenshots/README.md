@@ -31,6 +31,20 @@ Both the dark (default) and light UI themes are shown.
 | ![A350 hero, light theme](a350-hero-light.png) | ![A350 pair over the coast](a350-pair-coast.png) |
 | A350 close-up (light theme) | A350 pair over the coast |
 
+## B737 — narrowbody
+
+| | |
+|---|---|
+| ![B737 hero](b737-hero.png) | ![Three B737s, light theme](b737-trio-light.png) |
+| B737 close-up (dark theme) | Three B737s spread across the sector (light theme) |
+
+## B787 — widebody twin
+
+| | |
+|---|---|
+| ![B787 hero, light theme](b787-hero-light.png) | ![B787 pair over the coast, light theme](b787-pair-light.png) |
+| B787 close-up (light theme) | B787 pair over the coast (light theme) |
+
 ## Mixed fleet (A320 + A350 + A380 + B747)
 
 | | |
