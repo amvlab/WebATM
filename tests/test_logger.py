@@ -32,6 +32,20 @@ class TestFileNameFormatter:
         record = self._record("/whatever.py", "GET /", name="werkzeug")
         assert fmt.format(record) == "[Werkzeug] GET /"
 
+    def test_format_is_idempotent_across_handlers(self):
+        # One record is formatted once per attached handler (console + file);
+        # the prefix must not accumulate.
+        fmt = FileNameFormatter("%(message)s")
+        record = self._record("/path/to/main.py", "starting up")
+        assert fmt.format(record) == "[Main] starting up"
+        assert fmt.format(record) == "[Main] starting up"
+
+    def test_format_leaves_record_unmodified(self):
+        fmt = FileNameFormatter("%(message)s")
+        record = self._record("/path/to/main.py", "starting up")
+        fmt.format(record)
+        assert record.msg == "starting up"
+
 
 class TestGetLogger:
     def test_returns_logger_instance(self):
@@ -66,6 +80,30 @@ class TestConfigureLogging:
         assert log_file.exists()
         assert "hello file" in log_file.read_text()
         # restore default console-only config
+        configure_logging(level=logging.INFO)
+
+    def test_file_output_has_single_prefix(self, tmp_path):
+        # With console + file handlers active, the file handler formats the
+        # record second; it must not see a message already prefixed by the
+        # console handler.
+        log_file = tmp_path / "webatm.log"
+        configure_logging(level=logging.INFO, log_file=str(log_file))
+        get_logger("prefixmod").info("only one prefix")
+        root = logging.getLogger("WebATM")
+        for handler in root.handlers:
+            handler.flush()
+        content = log_file.read_text()
+        assert content.count("[") == 1
+        configure_logging(level=logging.INFO)
+
+    def test_level_change_applies_to_existing_loggers(self):
+        # Module loggers are created at import time; a later
+        # configure_logging(DEBUG) must still enable their debug output.
+        log = get_logger("levelmod")
+        configure_logging(level=logging.INFO)
+        assert not log.isEnabledFor(logging.DEBUG)
+        configure_logging(level=logging.DEBUG)
+        assert log.isEnabledFor(logging.DEBUG)
         configure_logging(level=logging.INFO)
 
     def test_console_only_has_no_file_handler(self):
