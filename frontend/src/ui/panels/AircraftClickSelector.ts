@@ -6,11 +6,10 @@ import { logger } from '../../utils/Logger';
  * for list items that represent an aircraft (traffic list, conflicts
  * list).
  *
- * Single click toggles selection through the StateManager and, when
- * selecting, dispatches 'aircraft-single-click' so the map can pan.
- * Double click (within 300ms) selects and dispatches
- * 'aircraft-double-click' for zoom/follow. The delay timer per aircraft
- * is tracked so a pending single-click is cancelled by the second click.
+ * Single click toggles selection through the StateManager and dispatches
+ * 'aircraft-single-click' (pan) when selecting or 'aircraft-unselect'
+ * when unselecting. A second click within 300ms cancels the pending
+ * single click and dispatches 'aircraft-double-click' (zoom/follow).
  */
 export class AircraftClickSelector {
     private clickTimeouts: Map<string, number> = new Map();
@@ -24,30 +23,21 @@ export class AircraftClickSelector {
      * Attach the click behavior to a list item element.
      */
     public attach(element: HTMLElement, aircraftId: string): void {
-        let clickCount = 0;
-
         element.addEventListener('click', () => {
-            clickCount++;
-
-            const existingTimeout = this.clickTimeouts.get(aircraftId);
-            if (existingTimeout) {
-                clearTimeout(existingTimeout);
+            const pending = this.clickTimeouts.get(aircraftId);
+            if (pending !== undefined) {
+                // Second click within the window: cancel the pending single click
+                clearTimeout(pending);
                 this.clickTimeouts.delete(aircraftId);
-            }
-
-            if (clickCount === 2) {
-                clickCount = 0;
                 this.handleDoubleClick(aircraftId);
-            } else {
-                // Wait out the double-click window before treating it as a single click
-                const timeout = window.setTimeout(() => {
-                    clickCount = 0;
-                    this.clickTimeouts.delete(aircraftId);
-                    this.handleSingleClick(aircraftId);
-                }, 300);
-
-                this.clickTimeouts.set(aircraftId, timeout);
+                return;
             }
+
+            const timeout = window.setTimeout(() => {
+                this.clickTimeouts.delete(aircraftId);
+                this.handleSingleClick(aircraftId);
+            }, 300);
+            this.clickTimeouts.set(aircraftId, timeout);
         });
     }
 
@@ -61,6 +51,12 @@ export class AircraftClickSelector {
         if (stateManager.getState().selectedAircraft === aircraftId) {
             stateManager.setSelectedAircraft(null);
             logger.debug(this.component, `Unselected aircraft: ${aircraftId}`);
+
+            // Let the map mirror its own unselect path (stop following,
+            // toggle the server-side route broadcast off).
+            document.dispatchEvent(new CustomEvent('aircraft-unselect', {
+                detail: { aircraftId }
+            }));
         } else {
             stateManager.setSelectedAircraft(aircraftId);
             logger.debug(this.component, `Selected aircraft: ${aircraftId}`);

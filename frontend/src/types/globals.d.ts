@@ -52,6 +52,7 @@ declare global {
         'serverStatusUpdate': CustomEvent<ServerStatusUpdateDetail>;
         'aircraft-single-click': CustomEvent<AircraftClickEvent>;
         'aircraft-double-click': CustomEvent<AircraftClickEvent>;
+        'aircraft-unselect': CustomEvent<AircraftClickEvent>;
         'consoleMessage': CustomEvent<{ message: string; type: string }>;
         'echoMessage': CustomEvent<{ message: string; type: string }>;
     }

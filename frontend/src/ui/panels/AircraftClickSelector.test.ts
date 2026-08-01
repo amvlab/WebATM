@@ -58,13 +58,19 @@ describe('AircraftClickSelector', () => {
     it('single click on the already-selected aircraft unselects without panning', () => {
         stateManager.state.selectedAircraft = 'KL123';
         const panEvent = vi.fn();
+        const unselectEvent = vi.fn();
         document.addEventListener('aircraft-single-click', panEvent);
+        document.addEventListener('aircraft-unselect', unselectEvent);
 
         item.click();
         vi.advanceTimersByTime(300);
 
         expect(stateManager.setSelectedAircraft).toHaveBeenCalledWith(null);
         expect(panEvent).not.toHaveBeenCalled();
+        // The map listens for this to stop follow mode and toggle the route off
+        expect(unselectEvent).toHaveBeenCalledTimes(1);
+        expect((unselectEvent.mock.calls[0][0] as CustomEvent).detail)
+            .toEqual({ aircraftId: 'KL123' });
     });
 
     it('double click cancels the pending single click and dispatches zoom/follow', () => {
