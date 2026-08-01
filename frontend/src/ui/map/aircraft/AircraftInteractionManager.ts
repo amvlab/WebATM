@@ -207,6 +207,16 @@ export class AircraftInteractionManager {
             this.zoomToAircraftWithEffect(aircraftId, true);
         }) as EventListener);
 
+        // Panel unselect mirrors the map's unselect path: toggle the route
+        // broadcast off and stop following the aircraft.
+        this.documentListeners.add(document, 'aircraft-unselect', ((e: DocumentEventMap['aircraft-unselect']) => {
+            const { aircraftId } = e.detail;
+            logger.debug('AircraftInteractionManager', '📋 Panel unselect event received:', aircraftId);
+
+            this.requestRouteData(aircraftId);
+            this.stopFollowing();
+        }) as EventListener);
+
         logger.debug('AircraftInteractionManager', 'Panel event listeners set up');
     }
 

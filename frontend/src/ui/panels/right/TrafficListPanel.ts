@@ -73,7 +73,7 @@ export class TrafficListPanel extends BasePanel {
 
         const existing = new Map<string, HTMLElement>();
         for (const child of Array.from(this.trafficListElement.children) as HTMLElement[]) {
-            const id = child.textContent ?? '';
+            const id = child.dataset.aircraftId ?? '';
             if (wanted.has(id)) {
                 existing.set(id, child);
             } else {
@@ -86,6 +86,7 @@ export class TrafficListPanel extends BasePanel {
             if (!item) {
                 item = document.createElement('div');
                 item.className = 'traffic-item';
+                item.dataset.aircraftId = aircraftId;
                 item.textContent = aircraftId;
                 this.clickSelector.attach(item, aircraftId);
                 this.trafficListElement.appendChild(item);
@@ -102,7 +103,8 @@ export class TrafficListPanel extends BasePanel {
         if (!this.trafficListElement) return;
 
         this.trafficListElement.querySelectorAll('.traffic-item').forEach(item => {
-            item.classList.toggle('selected', this.selectedAircraft === item.textContent);
+            const htmlItem = item as HTMLElement;
+            htmlItem.classList.toggle('selected', this.selectedAircraft === htmlItem.dataset.aircraftId);
         });
     }
 
