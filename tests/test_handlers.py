@@ -505,6 +505,14 @@ class TestSmokeHandlers:
 
 
 class TestRoutedataHandler:
+    def _activate(self, proxy, fake_client, active_bytes=b"\x01\x02"):
+        """Wire the proxy so _get_safe_active_node() resolves to active_bytes."""
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        fake_client.act_id = active_bytes
+        proxy.tracked_nodes[active_bytes.hex()] = {"status": "init", "time": "0"}
+
     def test_no_active_node_short_circuits(self, proxy, fake_socketio):
         # No active node configured -> nothing emitted.
         on_routedata_received({"acid": "AC1"})
@@ -513,6 +521,64 @@ class TestRoutedataHandler:
     def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
         proxy.allow_reconnection = False
         on_routedata_received({"acid": "AC1"})
+        assert fake_socketio.count("routedata") == 0
+
+    def test_route_for_active_traffic_is_emitted(
+        self, proxy, fake_client, fake_socketio
+    ):
+        self._activate(proxy, fake_client)
+        proxy.traffic_data = {"id": ["AC1", "AC2"]}
+
+        on_routedata_received(
+            {"acid": "AC1", "wplat": [52.0, 53.0], "wplon": [4.0, 5.0]}
+        )
+
+        assert fake_socketio.count("routedata") == 1
+
+    def test_route_for_unknown_aircraft_is_dropped(
+        self, proxy, fake_client, fake_socketio
+    ):
+        # A waypoint-carrying frame for an aircraft outside the active node's
+        # traffic must not be forwarded (node-switch flicker guard).
+        self._activate(proxy, fake_client)
+        proxy.traffic_data = {"id": ["AC2"]}
+
+        on_routedata_received(
+            {"acid": "AC1", "wplat": [52.0, 53.0], "wplon": [4.0, 5.0]}
+        )
+
+        assert fake_socketio.count("routedata") == 0
+
+    def test_clear_frame_for_deleted_aircraft_is_emitted(
+        self, proxy, fake_client, fake_socketio
+    ):
+        # Regression: BlueSky broadcasts waypoint-less ROUTEDATA frames to
+        # clear a route (e.g. after the aircraft is deleted). These must pass
+        # the traffic filter even though the aircraft is gone, so clients can
+        # invalidate their cached route.
+        self._activate(proxy, fake_client)
+        proxy.traffic_data = {"id": ["AC2"]}  # AC1 already deleted
+
+        on_routedata_received({"acid": "AC1"})
+
+        assert fake_socketio.count("routedata") == 1
+
+    def test_empty_waypoint_list_counts_as_clear_frame(
+        self, proxy, fake_client, fake_socketio
+    ):
+        self._activate(proxy, fake_client)
+        proxy.traffic_data = {"id": ["AC2"]}
+
+        on_routedata_received({"acid": "AC1", "wplat": [], "wplon": []})
+
+        assert fake_socketio.count("routedata") == 1
+
+    def test_payload_without_acid_is_ignored(self, proxy, fake_client, fake_socketio):
+        self._activate(proxy, fake_client)
+
+        on_routedata_received({"wplat": [52.0]})
+        on_routedata_received("not-a-dict")
+
         assert fake_socketio.count("routedata") == 0
 
 
