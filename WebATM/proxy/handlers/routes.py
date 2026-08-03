@@ -12,53 +12,44 @@ logger = get_logger()
 def on_routedata_received(data):
     """Handle ROUTEDATA events carrying an aircraft's route.
 
-    Filters to the active node's traffic (ignoring routes for unknown
-    aircraft to prevent flicker when switching nodes), serializes the route,
-    and emits a ``routedata`` event to connected web clients.
+    Serializes the route and emits a ``routedata`` event to connected web
+    clients. Frames that carry waypoints are only forwarded when the aircraft
+    is part of the active node's traffic, preventing flicker when switching
+    between nodes. Waypoint-less frames are BlueSky's route-clear broadcasts
+    (route display toggled off, or the aircraft was deleted) and are always
+    forwarded — the aircraft they refer to may already be gone from the
+    traffic, and clients need them to drop their cached route.
 
     Args:
-        data (Any): ROUTEDATA payload with the aircraft ID (``acid``) and route
-            waypoints; supports both attribute- and dict-style access.
+        data (dict): ROUTEDATA payload with the aircraft ID (``acid``) and,
+            for route updates, waypoint arrays (``wplat``, ``wplon``, ...).
     """
     proxy = get_bluesky_proxy()
-    if not proxy:
+    if not proxy or not proxy.allow_reconnection:
         return
 
-    # Ignore data if reconnection is not allowed (we're disconnected)
-    if not proxy.allow_reconnection:
-        return
-
-    # Only emit route data for aircraft from the active node
-    # This prevents flickering when switching between nodes
-    active_node_id = proxy._get_safe_active_node()
-    if not active_node_id:
+    if not proxy._get_safe_active_node():
         logger.debug("Route data ignored - no active node available")
         return
 
-    # Filter on the aircraft ID, supporting both attribute- and dict-style data.
-    route_aircraft_id = getattr(data, "acid", None)
-    if route_aircraft_id is None and hasattr(data, "get"):
-        route_aircraft_id = data.get("acid")
+    route_aircraft_id = data.get("acid") if isinstance(data, dict) else None
     if not route_aircraft_id:
         logger.debug("Route data ignored - no aircraft ID found")
         return
 
-    # Check if we have current aircraft data and if this aircraft is in the active node's data
-    if hasattr(proxy, "traffic_data") and proxy.traffic_data:
-        aircraft_ids = proxy.traffic_data.get("id", [])
-        if route_aircraft_id not in aircraft_ids:
+    wplat = data.get("wplat")
+    has_waypoints = wplat is not None and len(wplat) > 0
+    if has_waypoints and proxy.traffic_data:
+        if route_aircraft_id not in proxy.traffic_data.get("id", []):
             return
 
-    # Mark successful data reception
     proxy.last_successful_update = time.time()
 
-    # Convert to JSON-serializable format
     route_data = make_json_serializable(data)
 
-    # Emit to connected clients
     if proxy.socketio and proxy.connected_clients > 0:
         try:
             proxy.socketio.emit("routedata", route_data)
         except Exception:
-            # Handle emission errors gracefully (e.g., disconnected clients)
+            # Emission errors (e.g. disconnected clients) are non-fatal
             pass

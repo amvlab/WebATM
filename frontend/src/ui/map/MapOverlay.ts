@@ -223,11 +223,14 @@ export class MapOverlay {
 
         const selectedAircraft = this.stateManager.getState().selectedAircraft;
         if (selectedAircraft && aircraftData.id && !aircraftData.id.includes(selectedAircraft)) {
-            // Selected aircraft was deleted - deselect it and clear routes
+            // Selected aircraft was deleted - deselect it and drop its route.
+            // Clearing the cached route data (not just the display) matters:
+            // a later aircraft with the same callsign would otherwise repaint
+            // the deleted aircraft's route from the stale cache.
             logger.info('MapOverlay', `Aircraft ${selectedAircraft} was deleted - clearing selection and routes`);
             this.stateManager.setSelectedAircraft(null);
             if (this.aircraftRoutes) {
-                this.aircraftRoutes.clearRouteDisplay();
+                this.aircraftRoutes.clearRouteData();
             }
             this.getAircraftRenderer()?.setSelectedAircraft(null);
             if (this.aircraftRoute3DRenderer) {
@@ -555,10 +558,11 @@ export class MapOverlay {
             });
         }
 
-        // Clear selected aircraft and routes
+        // Clear selected aircraft and routes (cache included - the sim the
+        // cached route came from no longer exists after a reset)
         this.setSelectedAircraft(null);
         if (this.aircraftRoutes) {
-            this.aircraftRoutes.clearRouteDisplay();
+            this.aircraftRoutes.clearRouteData();
         }
     }
 

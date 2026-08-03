@@ -86,6 +86,44 @@ describe('RouteConstraintsModal', () => {
         expect(onCancel).not.toHaveBeenCalled();
     });
 
+    it('a second submit click while commands are still sending is ignored', async () => {
+        const resolvers: Array<(ok: boolean) => void> = [];
+        sendCommand = vi.fn<(cmd: string) => Promise<boolean>>(
+            () => new Promise<boolean>(resolve => { resolvers.push(resolve); })
+        );
+        const modal = makeModal();
+        modal.show('KL204', [{ lat: 52, lng: 4 }], 'ft', 'knots');
+
+        const submitBtn = document.getElementById('submit-route-constraints-btn') as HTMLButtonElement;
+        submitBtn.click();
+        submitBtn.click(); // double-click: must not start a second send loop
+        expect(sendCommand).toHaveBeenCalledTimes(1);
+        expect(submitBtn.disabled).toBe(true);
+
+        resolvers[0](true);
+        await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+        expect(sendCommand).toHaveBeenCalledTimes(1);
+        expect(submitBtn.disabled).toBe(false);
+        expect(onCancel).not.toHaveBeenCalled();
+    });
+
+    it('closing the modal mid-send is not reported as a cancel', async () => {
+        const resolvers: Array<(ok: boolean) => void> = [];
+        sendCommand = vi.fn<(cmd: string) => Promise<boolean>>(
+            () => new Promise<boolean>(resolve => { resolvers.push(resolve); })
+        );
+        const modal = makeModal();
+        modal.show('KL204', [{ lat: 52, lng: 4 }], 'ft', 'knots');
+
+        (document.getElementById('submit-route-constraints-btn') as HTMLButtonElement).click();
+        modalManager.close(MODAL_ID);
+        expect(onCancel).not.toHaveBeenCalled();
+
+        resolvers[0](true);
+        await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+        expect(onCancel).not.toHaveBeenCalled();
+    });
+
     it('bulk constraints apply to every waypoint on submit', async () => {
         const modal = makeModal();
         modal.show(

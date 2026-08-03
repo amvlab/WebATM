@@ -97,6 +97,22 @@ export function setText(id: string, text: string): void {
 }
 
 /**
+ * True if the event originated in a text-entry element (input, textarea,
+ * select, or contenteditable). Document-level key handlers use this to leave
+ * keystrokes meant for a focused field alone - e.g. Enter/Escape typed in the
+ * console must not finish or cancel an in-progress map draw.
+ */
+export function isTextEntryTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    return (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target.isContentEditable
+    );
+}
+
+/**
  * Look up an element by id and attach an event listener if it exists.
  * Returns true if the listener was bound (the element was found).
  */
