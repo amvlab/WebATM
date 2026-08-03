@@ -105,6 +105,14 @@ const latContext: GeoContext = {
     command: 'CRE'
 };
 
+const polyContext: GeoContext = {
+    kind: 'lat',
+    currentArgIndex: 1,
+    params: ['name', 'lat', 'lon'],
+    parts: ['POLY', 'AREA1', ''],
+    command: 'POLY'
+};
+
 describe('ConsoleMapPicker navaid snapping', () => {
     let map: ReturnType<typeof createFakeMap>;
     let snapper: { snap: ReturnType<typeof vi.fn>; highlight: ReturnType<typeof vi.fn>; clearHighlight: ReturnType<typeof vi.fn> };
@@ -188,5 +196,36 @@ describe('ConsoleMapPicker navaid snapping', () => {
             2,
             2
         );
+    });
+
+    it('disable() leaves a drawing banner it did not show untouched', () => {
+        // Banner put up by a route/shape drawing manager, not the picker.
+        document.body.insertAdjacentHTML(
+            'beforeend',
+            '<div id="drawing-banner" style="display: flex;">' +
+                '<span id="drawing-banner-text">Drawing route</span></div>'
+        );
+
+        picker.enable(latContext); // non-POLY pick uses the inline hint
+        picker.disable();
+
+        const banner = document.getElementById('drawing-banner') as HTMLElement;
+        expect(banner.style.display).toBe('flex');
+        expect(banner.querySelector('span')?.textContent).toBe('Drawing route');
+    });
+
+    it('disable() still hides the banner the picker itself showed', () => {
+        document.body.insertAdjacentHTML(
+            'beforeend',
+            '<div id="drawing-banner" style="display: none;">' +
+                '<span id="drawing-banner-text"></span></div>'
+        );
+
+        picker.enable(polyContext); // POLY-family pick owns the banner
+        const banner = document.getElementById('drawing-banner') as HTMLElement;
+        expect(banner.style.display).toBe('flex');
+
+        picker.disable();
+        expect(banner.style.display).toBe('none');
     });
 });

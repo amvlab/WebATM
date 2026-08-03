@@ -45,6 +45,12 @@ export class ConsoleMapPicker {
     private active: 'lat' | 'lon' | 'hdg' | null = null;
     private currentContext: GeoContext | null = null;
 
+    // Whether the shared #drawing-banner is currently showing OUR text. The
+    // element is shared with the route/shape drawing managers, so the picker
+    // must only hide a banner it actually put up - otherwise any console
+    // keystroke mid-draw wipes the active drawing banner.
+    private bannerShown = false;
+
     private clickHandler: ((e: MapMouseEvent) => void) | null = null;
     private mouseMoveHandler: ((e: MapMouseEvent) => void) | null = null;
     // Highlights the navaid a coordinate pick would snap to (lat/lon kinds).
@@ -737,7 +743,7 @@ export class ConsoleMapPicker {
 
         const ctx = this.currentContext;
         if (!ctx || !this.POLY_FAMILY.has(ctx.command)) {
-            banner.style.display = 'none';
+            this.hideDrawingBanner();
             return;
         }
 
@@ -749,11 +755,14 @@ export class ConsoleMapPicker {
             `Drawing ${ctx.command}${namePart} - ${verts.length} point(s) ` +
             `(Right-click to finish, Esc to cancel)`;
         banner.style.display = 'flex';
+        this.bannerShown = true;
     }
 
     private hideDrawingBanner(): void {
+        if (!this.bannerShown) return;
         const banner = document.getElementById('drawing-banner');
         if (banner) banner.style.display = 'none';
+        this.bannerShown = false;
     }
 
     private hideInlineHint(): void {
