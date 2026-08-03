@@ -143,6 +143,25 @@ describe('BaseDrawingManager', () => {
         expect(enterManager.finished).toHaveBeenCalledTimes(1);
     });
 
+    it('ignores Enter/Escape typed into a text field (e.g. the console input)', () => {
+        const enterManager = createManager(true);
+        enterManager.start();
+
+        const input = document.createElement('input');
+        document.body.appendChild(input);
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        expect(enterManager.finished).not.toHaveBeenCalled();
+        expect(enterManager.cancelled).not.toHaveBeenCalled();
+
+        // Keys pressed outside a text field still work.
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        expect(enterManager.finished).toHaveBeenCalledTimes(1);
+
+        input.remove();
+        enterManager.stop();
+    });
+
     it('ignores events while not in drawing mode', () => {
         manager.start();
         manager.stop();

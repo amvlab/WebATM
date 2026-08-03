@@ -2,6 +2,7 @@ import type { MapDisplay } from './MapDisplay';
 import type { MapMouseEvent } from 'maplibre-gl';
 import type { NavaidSnapper } from './navdata/NavaidSnapper';
 import { DRAWING_CURSOR } from '../../utils/maplibre';
+import { isTextEntryTarget } from '../../utils/dom';
 
 /**
  * BaseDrawingManager - shared interactive point-drawing lifecycle for the
@@ -182,7 +183,9 @@ export abstract class BaseDrawingManager {
     }
 
     private onKeyDown(e: KeyboardEvent): void {
-        if (!this.drawingMode) return;
+        // Leave keystrokes aimed at a focused text field (e.g. the console)
+        // alone: Enter there sends the command, not "finish the draw".
+        if (!this.drawingMode || isTextEntryTarget(e.target)) return;
 
         if (e.key === 'Escape') {
             e.preventDefault();

@@ -3,6 +3,7 @@ import { MapDisplay } from '../MapDisplay';
 import type { NavaidSnapper } from '../navdata/NavaidSnapper';
 import { logger } from '../../../utils/Logger';
 import { DRAWING_CURSOR } from '../../../utils/maplibre';
+import { isTextEntryTarget } from '../../../utils/dom';
 import {
     AircraftCreationForm,
     AircraftCreationData,
@@ -261,7 +262,7 @@ export class AircraftCreationManager {
 
         // Add escape key handler to exit drawing mode
         this.aircraftEscapeHandler = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
+            if (e.key === 'Escape' && !isTextEntryTarget(e.target)) {
                 logger.debug('AircraftCreationManager', 'Escape pressed, exiting aircraft drawing mode');
                 this.stopAircraftDrawing();
             }
