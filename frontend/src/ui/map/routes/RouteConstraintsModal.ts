@@ -34,6 +34,10 @@ export class RouteConstraintsModal {
 
     private active: ActiveRoute | null = null;
     private constraintRows: WaypointConstraint[] = [];
+    // True while submit() is sending its command sequence. Blocks re-entrant
+    // submits (a double-click would send every ADDWPT twice) and stops a
+    // mid-send modal close from reporting the route as cancelled.
+    private sending = false;
 
     constructor(app: App, onComplete: () => void, onCancel: () => void) {
         this.app = app;
@@ -56,9 +60,10 @@ export class RouteConstraintsModal {
         // ModalManager owns the other close paths (X button, backdrop click,
         // Escape). Treat any close while a route is still pending as a
         // cancel; submit() clears `active` before closing so a successful
-        // submission doesn't double-report.
+        // submission doesn't double-report, and a close while the commands
+        // are already being sent is not a cancel either.
         modalManager.on(MODAL_ID, (event) => {
-            if (event === 'close' && this.active) {
+            if (event === 'close' && this.active && !this.sending) {
                 this.active = null;
                 this.onCancel();
             }
@@ -209,6 +214,7 @@ export class RouteConstraintsModal {
      * socket, crashing BlueSky with msgpack "ExtraData" errors.
      */
     private async submit(): Promise<void> {
+        if (this.sending) return;
         if (!this.active || this.active.points.length < 1) {
             logger.warn('RouteConstraintsModal', 'submit called without a valid route');
             return;
@@ -229,6 +235,10 @@ export class RouteConstraintsModal {
             'RouteConstraintsModal',
             `Sending ${commands.length} ADDWPT command(s) for ${acid} (${COMMAND_INTERVAL_MS}ms spacing)`
         );
+
+        this.sending = true;
+        const submitBtn = document.getElementById('submit-route-constraints-btn') as HTMLButtonElement | null;
+        if (submitBtn) submitBtn.disabled = true;
 
         try {
             for (let i = 0; i < commands.length; i++) {
@@ -253,6 +263,9 @@ export class RouteConstraintsModal {
         } catch (err) {
             logger.error('RouteConstraintsModal', 'Error sending route commands:', err);
             alert('Error sending route commands: ' + (err as Error).message);
+        } finally {
+            this.sending = false;
+            if (submitBtn) submitBtn.disabled = false;
         }
 
         // Clear `active` before closing so the close event isn't treated as
