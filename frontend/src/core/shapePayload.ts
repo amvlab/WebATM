@@ -24,6 +24,13 @@ export interface ShapePayloadResult<T extends ShapeLike> {
     skipped: string[];
     /** True when the payload was an empty/invalid dictionary envelope. */
     isEmpty: boolean;
+    /**
+     * All names present in a dictionary envelope (even empty or invalid
+     * entries), or null for the legacy single/array formats. The dictionary
+     * envelope carries the node's complete shape set, so a stored shape
+     * missing from this list was deleted server-side.
+     */
+    dictNames: string[] | null;
 }
 
 /**
@@ -41,11 +48,17 @@ export function hasValidLatLon(shape: unknown): shape is ShapeLike {
  */
 export function parseShapePayload<T extends ShapeLike>(data: unknown): ShapePayloadResult<T> {
     let entries: Array<[string, unknown]>;
+    let isDict = false;
 
     if (data && typeof data === 'object' && 'polys' in data) {
+        isDict = true;
         const dict = (data as { polys: unknown }).polys;
-        if (!dict || typeof dict !== 'object' || Object.keys(dict).length === 0) {
-            return { validShapes: [], skipped: [], isEmpty: true };
+        if (!dict || typeof dict !== 'object' || Array.isArray(dict)) {
+            return { validShapes: [], skipped: [], isEmpty: true, dictNames: null };
+        }
+        if (Object.keys(dict).length === 0) {
+            // Authoritative empty set: every stored shape of this kind is gone.
+            return { validShapes: [], skipped: [], isEmpty: true, dictNames: [] };
         }
         entries = Object.entries(dict);
     } else {
@@ -63,5 +76,6 @@ export function parseShapePayload<T extends ShapeLike>(data: unknown): ShapePayl
             skipped.push(label);
         }
     }
-    return { validShapes, skipped, isEmpty: false };
+    const dictNames = isDict ? entries.map(([label]) => label) : null;
+    return { validShapes, skipped, isEmpty: false, dictNames };
 }

@@ -43,9 +43,32 @@ describe('parseShapePayload - dictionary format', () => {
         expect(parseShapePayload({ polys: null }).isEmpty).toBe(true);
         expect(parseShapePayload({ polys: 'nope' }).isEmpty).toBe(true);
     });
+
+    it('reports every dictionary name so absent shapes can be reconciled away', () => {
+        // Invalid entries still count as present - they exist server-side.
+        const result = parseShapePayload<TestShape>({
+            polys: { a: shape('a'), partial: { lat: [], lon: [] } },
+        });
+        expect(result.dictNames).toEqual(['a', 'partial']);
+    });
+
+    it('distinguishes an authoritative empty set from an invalid envelope', () => {
+        // {} means "no shapes remain" (e.g. the last one was deleted) ...
+        expect(parseShapePayload({ polys: {} }).dictNames).toEqual([]);
+        // ... while a malformed envelope carries no authority at all.
+        expect(parseShapePayload({ polys: null }).dictNames).toBeNull();
+        expect(parseShapePayload({ polys: 'nope' }).dictNames).toBeNull();
+        expect(parseShapePayload({ polys: ['not-a-dict'] }).dictNames).toBeNull();
+    });
 });
 
 describe('parseShapePayload - legacy formats', () => {
+    it('reports no dictionary names for legacy payloads (no reconciliation)', () => {
+        expect(parseShapePayload(shape('solo')).dictNames).toBeNull();
+        expect(parseShapePayload([shape('a')]).dictNames).toBeNull();
+        expect(parseShapePayload(null).dictNames).toBeNull();
+    });
+
     it('handles a single shape', () => {
         const result = parseShapePayload(shape('solo'));
         expect(result.validShapes).toEqual([shape('solo')]);
