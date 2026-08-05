@@ -1,8 +1,17 @@
-import type { GeoJSONSource, MapMouseEvent } from 'maplibre-gl';
+import type { MapMouseEvent } from 'maplibre-gl';
 import { MapDisplay } from '../MapDisplay';
 import type { NavaidSnapper } from '../navdata/NavaidSnapper';
 import { logger } from '../../../utils/Logger';
-import { DRAWING_CURSOR } from '../../../utils/maplibre';
+import {
+    DRAWING_CURSOR,
+    ensureGeoJSONSource,
+    ensureLayer,
+    updateSourceFeatures,
+    safeRemoveLayer,
+    safeRemoveSource
+} from '../../../utils/maplibre';
+import { pointFeature, lineStringFeature } from '../../../utils/geojson';
+import { roundedBearing } from '../../../utils/geo';
 import { isTextEntryTarget } from '../../../utils/dom';
 import {
     AircraftCreationForm,
@@ -10,6 +19,11 @@ import {
     convertAltitudeToFeet,
     convertSpeedToKnots
 } from './AircraftCreationForm';
+
+const POSITION_SOURCE = 'temp-aircraft-position';
+const POSITION_LAYER = 'temp-aircraft-position-layer';
+const GUIDE_SOURCE = 'temp-aircraft-guideline';
+const GUIDE_LAYER = 'temp-aircraft-guideline-layer';
 
 /**
  * AircraftCreationManager - Manages map-based aircraft creation
@@ -53,6 +67,14 @@ export class AircraftCreationManager {
      * Invoked by AircraftCreationForm after the modal closes.
      */
     private startAircraftDrawing(data: AircraftCreationData): void {
+        // Restart cleanly if a previous draw is still active - otherwise the
+        // old map handlers stay attached (their references get overwritten
+        // below, so they could never be removed again) and a single click
+        // would fire twice, completing the draw instantly with heading 0.
+        if (this.aircraftDrawingMode) {
+            this.stopAircraftDrawing();
+        }
+
         this.currentAircraftData = data;
         this.aircraftDrawingMode = true;
         this.aircraftDrawingPoints = [];
@@ -62,14 +84,12 @@ export class AircraftCreationManager {
         logger.debug('AircraftCreationManager', 'Started aircraft drawing mode');
     }
 
-
     /**
      * Cancel any in-progress draw and release map/document handlers.
      * Called from App.cleanup() at page teardown.
      */
     public destroy(): void {
         if (this.aircraftDrawingMode) {
-            this.clearTemporaryAircraftDrawing();
             this.stopAircraftDrawing();
         }
     }
@@ -82,10 +102,7 @@ export class AircraftCreationManager {
         this.aircraftDrawingPoints = [];
         this.currentAircraftData = null;
 
-        // Disable map drawing
         this.disableAircraftMapDrawing();
-
-        // Hide drawing banner
         this.hideDrawingBanner();
 
         logger.debug('AircraftCreationManager', 'Stopped aircraft drawing mode');
@@ -105,11 +122,9 @@ export class AircraftCreationManager {
         // shape/route drawing modes so every drawing mode looks the same.
         map.getCanvas().style.cursor = DRAWING_CURSOR;
 
-        // Add click handler for aircraft positioning
         this.aircraftMapClickHandler = (e: MapMouseEvent) => {
             this.handleAircraftMapClick(e);
         };
-
         map.on('click', this.aircraftMapClickHandler);
 
         // Highlight the navaid the cursor would snap to. This runs for both
@@ -122,13 +137,17 @@ export class AircraftCreationManager {
         };
         map.on('mousemove', this.aircraftSnapHoverHandler);
 
-        // Show drawing banner
-        logger.debug('AircraftCreationManager', 'About to show drawing mode and banner');
+        // Escape cancels the draw at any phase, matching the other drawing
+        // modes.
+        this.aircraftEscapeHandler = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && !isTextEntryTarget(e.target)) {
+                this.stopAircraftDrawing();
+            }
+        };
+        document.addEventListener('keydown', this.aircraftEscapeHandler);
+
         this.showDrawingBanner();
         this.updateDrawingBanner('Click on map to set aircraft position');
-        logger.debug('AircraftCreationManager', 'Drawing mode and banner should now be visible');
-
-        logger.debug('AircraftCreationManager', 'Enabled aircraft map drawing');
     }
 
     /**
@@ -157,29 +176,20 @@ export class AircraftCreationManager {
         }
         this.navaidSnapper.clearHighlight();
 
-        // Remove escape key handler
         if (this.aircraftEscapeHandler) {
             document.removeEventListener('keydown', this.aircraftEscapeHandler);
             this.aircraftEscapeHandler = null;
         }
 
-        // Clear stored position
         this.aircraftPosition = null;
-
-        // Clear temporary aircraft visualization
         this.clearTemporaryAircraftDrawing();
-
-        logger.debug('AircraftCreationManager', 'Disabled aircraft map drawing');
     }
 
     /**
      * Handle aircraft map click
      */
     private handleAircraftMapClick(e: MapMouseEvent): void {
-        if (!this.aircraftDrawingMode) {
-            logger.debug('AircraftCreationManager', 'Aircraft drawing mode not active, ignoring click');
-            return;
-        }
+        if (!this.aircraftDrawingMode) return;
 
         // Snap both clicks to a nearby navaid when enabled: the first click sets
         // the spawn position, the second sets the heading/direction (aim at a
@@ -189,16 +199,12 @@ export class AircraftCreationManager {
         if (snapped) point = [snapped.lng, snapped.lat];
         this.aircraftDrawingPoints.push(point);
 
-        logger.debug('AircraftCreationManager', `Aircraft click ${this.aircraftDrawingPoints.length} at [${point[1].toFixed(4)}, ${point[0].toFixed(4)}]`);
-
         if (this.aircraftDrawingPoints.length === 1) {
             // First click - set position. Keep the snap highlight active so the
             // heading click can also snap to a navaid.
             this.updateDrawingBanner('Move mouse to see heading guide, then click to confirm direction');
             this.visualizeAircraftPosition(point);
         } else if (this.aircraftDrawingPoints.length === 2) {
-            // Second click - set heading and create aircraft
-            logger.debug('AircraftCreationManager', 'Second click detected, completing aircraft drawing');
             this.completeAircraftDrawing();
         }
     }
@@ -210,65 +216,31 @@ export class AircraftCreationManager {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        // Add simple circle visualization (like line drawing)
-        const aircraftSource = {
-            'type': 'geojson' as const,
-            'data': {
-                'type': 'FeatureCollection' as const,
-                'features': [{
-                    'type': 'Feature' as const,
-                    'geometry': {
-                        'type': 'Point' as const,
-                        'coordinates': position
-                    },
-                    'properties': {}
-                }]
-            }
-        };
-
-        // Clean up existing visualization
-        if (map.getSource('temp-aircraft-position')) {
-            map.removeLayer('temp-aircraft-position-layer');
-            map.removeSource('temp-aircraft-position');
-        }
-
-        // Add simple circle layer (like line drawing)
-        map.addSource('temp-aircraft-position', aircraftSource);
-        map.addLayer({
-            'id': 'temp-aircraft-position-layer',
-            'type': 'circle',
-            'source': 'temp-aircraft-position',
-            'paint': {
+        ensureGeoJSONSource(map, POSITION_SOURCE);
+        ensureLayer(map, {
+            id: POSITION_LAYER,
+            type: 'circle',
+            source: POSITION_SOURCE,
+            paint: {
                 'circle-radius': 8,
                 'circle-color': '#ff6600',
                 'circle-stroke-width': 2,
                 'circle-stroke-color': '#ffffff'
             }
         });
+        updateSourceFeatures(map, POSITION_SOURCE, [pointFeature(position)]);
 
-        // Store position for guide line
+        // Store position for the heading guide line.
         this.aircraftPosition = position;
 
-        // Add mouse move handler for guide line. Snap the guide endpoint to a
-        // nearby navaid so the previewed heading matches what the second click
-        // will commit.
+        // Follow the cursor with a guide line. Snap the endpoint to a nearby
+        // navaid so the previewed heading matches what the second click will
+        // commit.
         this.aircraftMouseMoveHandler = (e: MapMouseEvent) => {
             const snapped = this.navaidSnapper.snap(e);
-            const guidePos = snapped ? { lng: snapped.lng, lat: snapped.lat } : e.lngLat;
-            this.updateHeadingGuideLine(guidePos);
+            this.updateHeadingGuideLine(snapped ?? e.lngLat);
         };
-
         map.on('mousemove', this.aircraftMouseMoveHandler);
-
-        // Add escape key handler to exit drawing mode
-        this.aircraftEscapeHandler = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && !isTextEntryTarget(e.target)) {
-                logger.debug('AircraftCreationManager', 'Escape pressed, exiting aircraft drawing mode');
-                this.stopAircraftDrawing();
-            }
-        };
-
-        document.addEventListener('keydown', this.aircraftEscapeHandler);
     }
 
     /**
@@ -278,57 +250,32 @@ export class AircraftCreationManager {
         const map = this.mapDisplay.getMap();
         if (!map || !this.aircraftPosition) return;
 
-        // Create guide line from aircraft position to mouse cursor
-        const guideLineSource = {
-            'type': 'geojson' as const,
-            'data': {
-                'type': 'FeatureCollection' as const,
-                'features': [{
-                    'type': 'Feature' as const,
-                    'geometry': {
-                        'type': 'LineString' as const,
-                        'coordinates': [this.aircraftPosition, [mousePosition.lng, mousePosition.lat]]
-                    },
-                    'properties': {}
-                }]
+        ensureGeoJSONSource(map, GUIDE_SOURCE);
+        ensureLayer(map, {
+            id: GUIDE_LAYER,
+            type: 'line',
+            source: GUIDE_SOURCE,
+            layout: {
+                'line-join': 'round',
+                'line-cap': 'round'
+            },
+            paint: {
+                'line-color': '#ff6600',
+                'line-width': 2,
+                'line-dasharray': [3, 3],
+                'line-opacity': 0.8
             }
-        };
+        });
+        updateSourceFeatures(map, GUIDE_SOURCE, [
+            lineStringFeature([this.aircraftPosition, [mousePosition.lng, mousePosition.lat]])
+        ]);
 
-        // Update or create guide line
-        const existingSource = map.getSource<GeoJSONSource>('temp-aircraft-guideline');
-        if (existingSource) {
-            existingSource.setData(guideLineSource.data);
-        } else {
-            map.addSource('temp-aircraft-guideline', guideLineSource);
-            map.addLayer({
-                'id': 'temp-aircraft-guideline-layer',
-                'type': 'line',
-                'source': 'temp-aircraft-guideline',
-                'layout': {
-                    'line-join': 'round',
-                    'line-cap': 'round'
-                },
-                'paint': {
-                    'line-color': '#ff6600',
-                    'line-width': 2,
-                    'line-dasharray': [3, 3],
-                    'line-opacity': 0.8
-                }
-            });
-        }
-
-        // Calculate aviation heading for display (0° = North, 90° = East)
-        const lat1 = this.aircraftPosition[1] * Math.PI / 180;
-        const lat2 = mousePosition.lat * Math.PI / 180;
-        const deltaLng = (mousePosition.lng - this.aircraftPosition[0]) * Math.PI / 180;
-
-        const y = Math.sin(deltaLng) * Math.cos(lat2);
-        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng);
-
-        const mathAngle = Math.atan2(y, x) * 180 / Math.PI;
-        const heading = Math.round((mathAngle + 360) % 360); // Round to nearest degree
-
-        // Update drawing banner with current heading
+        const heading = roundedBearing(
+            this.aircraftPosition[1],
+            this.aircraftPosition[0],
+            mousePosition.lat,
+            mousePosition.lng
+        );
         this.updateDrawingBanner(`Heading: ${heading}° - Click to confirm direction`);
     }
 
@@ -341,63 +288,28 @@ export class AircraftCreationManager {
             return;
         }
 
-        const position = this.aircraftDrawingPoints[0];
-        const headingPoint = this.aircraftDrawingPoints[1];
-
-        // Calculate aviation heading (0° = North, 90° = East, 180° = South, 270° = West)
-        const lat1 = position[1] * Math.PI / 180;
-        const lat2 = headingPoint[1] * Math.PI / 180;
-        const deltaLng = (headingPoint[0] - position[0]) * Math.PI / 180;
-
-        const y = Math.sin(deltaLng) * Math.cos(lat2);
-        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng);
-
-        // Math.atan2 gives mathematical angle: 0° = East, 90° = North, -90° = South, 180°/-180° = West
-        // Convert to aviation heading: 0° = North, 90° = East, 180° = South, 270° = West
-        const mathAngle = Math.atan2(y, x) * 180 / Math.PI;
-
-        // Geographic calculation already gives correct aviation angles:
-        // North=0°, East=90°, South=180°, West=-90°
-        // Just need to normalize negative West angle (-90° → 270°)
-        let heading = (mathAngle + 360) % 360;
-        heading = Math.round(heading);
-
-        logger.debug('AircraftCreationManager', `Position: [${position[1].toFixed(4)}, ${position[0].toFixed(4)}] → [${headingPoint[1].toFixed(4)}, ${headingPoint[0].toFixed(4)}]`);
-        logger.debug('AircraftCreationManager', `Heading calculation: mathAngle=${mathAngle.toFixed(1)}°, aviation=${heading}°`);
+        const [position, headingPoint] = this.aircraftDrawingPoints;
+        const heading = roundedBearing(
+            position[1],
+            position[0],
+            headingPoint[1],
+            headingPoint[0]
+        );
 
         // Convert units to BlueSky format (always feet and knots)
         const altFeet = convertAltitudeToFeet(this.currentAircraftData.altDisplay, this.currentAircraftData.altUnit);
         const speedKnots = convertSpeedToKnots(this.currentAircraftData.spdDisplay, this.currentAircraftData.spdUnit);
 
-        logger.debug('AircraftCreationManager', `Unit conversion: ${this.currentAircraftData.altDisplay}${this.currentAircraftData.altUnit} → ${altFeet}ft, ${this.currentAircraftData.spdDisplay}${this.currentAircraftData.spdUnit} → ${speedKnots}kts`);
-
-        // Build and send CRE command
         const command = `CRE ${this.currentAircraftData.id},${this.currentAircraftData.actype},${position[1]},${position[0]},${heading},${altFeet},${speedKnots}`;
-
         logger.info('AircraftCreationManager', `Creating aircraft with command: ${command}`);
-        logger.debug('AircraftCreationManager', `Position: [${position[1]}, ${position[0]}], Heading: ${heading}°`);
 
-        // Send command to BlueSky
         if (window.app) {
             window.app.sendCommand(command);
-            logger.debug('AircraftCreationManager', 'Command sent to BlueSky');
-
-            // Display the command in the console
-            logger.debug('AircraftCreationManager', '(map mode) Getting console instance from app');
-            const consoleInstance = window.app.getConsole();
-            logger.debug('AircraftCreationManager', '(map mode) Console instance:', consoleInstance);
-
-            if (consoleInstance) {
-                logger.debug('AircraftCreationManager', '(map mode) Calling displaySentCommand with:', command);
-                consoleInstance.displaySentCommand(command);
-            } else {
-                logger.warn('AircraftCreationManager', '(map mode) Console instance is null');
-            }
+            window.app.getConsole()?.displaySentCommand(command);
         } else {
-            logger.error('AircraftCreationManager', '✈️ Cannot send command: app not available');
+            logger.error('AircraftCreationManager', 'Cannot send command: app not available');
         }
 
-        // Clean up drawing state
         this.stopAircraftDrawing();
     }
 
@@ -408,23 +320,10 @@ export class AircraftCreationManager {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        // Remove temporary layers and sources
-        const layersToRemove = ['temp-aircraft-position-layer', 'temp-aircraft-guideline-layer'];
-        const sourcesToRemove = ['temp-aircraft-position', 'temp-aircraft-guideline'];
-
-        layersToRemove.forEach(layerId => {
-            if (map.getLayer(layerId)) {
-                map.removeLayer(layerId);
-            }
-        });
-
-        sourcesToRemove.forEach(sourceId => {
-            if (map.getSource(sourceId)) {
-                map.removeSource(sourceId);
-            }
-        });
-
-        logger.debug('AircraftCreationManager', 'Cleared temporary aircraft drawing visualization');
+        safeRemoveLayer(map, POSITION_LAYER);
+        safeRemoveLayer(map, GUIDE_LAYER);
+        safeRemoveSource(map, POSITION_SOURCE);
+        safeRemoveSource(map, GUIDE_SOURCE);
     }
 
     /**
@@ -432,10 +331,7 @@ export class AircraftCreationManager {
      */
     private showDrawingBanner(): void {
         const banner = document.getElementById('drawing-banner');
-
         if (banner) banner.style.display = 'flex';
-
-        logger.debug('AircraftCreationManager', 'Showing drawing mode banner');
     }
 
     /**
@@ -443,10 +339,7 @@ export class AircraftCreationManager {
      */
     private hideDrawingBanner(): void {
         const banner = document.getElementById('drawing-banner');
-
         if (banner) banner.style.display = 'none';
-
-        logger.debug('AircraftCreationManager', 'Hiding drawing mode banner');
     }
 
     /**
@@ -454,7 +347,6 @@ export class AircraftCreationManager {
      */
     private updateDrawingBanner(message: string): void {
         const bannerText = document.getElementById('drawing-banner-text');
-
         if (bannerText) {
             bannerText.textContent = message;
         }
