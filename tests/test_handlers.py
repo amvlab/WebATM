@@ -774,3 +774,97 @@ class TestPolyReceivedHandler:
         proxy.allow_reconnection = False
         on_poly_received({"polys": {}})
         assert proxy.poly_data_by_node == {}
+
+
+class TestPolySharedStateActions:
+    """POLY messages carry a shared-state action on the client context (the
+    [action, payload] wrapper is stripped before dispatch): Delete removes the
+    named shapes, Replace overwrites the stored set, and partial Updates patch
+    the stored shape instead of replacing it (regression: DEL left deleted
+    areas on the map forever, and COLOR wiped a shape's geometry)."""
+
+    AREA = {"shape": "POLY", "coordinates": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}
+    LINE = {"shape": "LINE", "coordinates": [1.0, 2.0, 3.0, 4.0]}
+
+    def _activate(self, proxy, fake_client, sender=b"NODE1"):
+        """Wire the proxy so the sender is also the active node (emits fire)."""
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        fake_client.act_id = sender
+        fake_client.context.sender_id = sender
+        proxy.tracked_nodes[sender.hex()] = {"status": "init", "time": "0"}
+        return sender.hex()
+
+    def test_delete_action_removes_stored_shape(
+        self, proxy, fake_client, fake_socketio
+    ):
+        sender_hex = self._activate(proxy, fake_client)
+        on_poly_received({"polys": {"area1": dict(self.AREA)}})
+        assert "area1" in proxy.poly_data_by_node[sender_hex]["polys"]
+
+        fake_client.context.action = b"D"
+        on_poly_received({"polys": ["area1"]})
+
+        assert "area1" not in proxy.poly_data_by_node[sender_hex]["polys"]
+        assert fake_socketio.last("poly") == {"polys": {}}
+
+    def test_delete_action_removes_stored_polyline(
+        self, proxy, fake_client, fake_socketio
+    ):
+        sender_hex = self._activate(proxy, fake_client)
+        on_poly_received({"polys": {"line1": dict(self.LINE)}})
+        assert "line1" in proxy.polyline_data_by_node[sender_hex]["polys"]
+
+        fake_client.context.action = b"D"
+        on_poly_received({"polys": ["line1"]})
+
+        assert "line1" not in proxy.polyline_data_by_node[sender_hex]["polys"]
+        assert fake_socketio.last("polyline") == {"polys": {}}
+
+    def test_partial_update_preserves_geometry(self, proxy, fake_client):
+        sender_hex = self._activate(proxy, fake_client)
+        on_poly_received({"polys": {"area1": dict(self.AREA)}})
+
+        fake_client.context.action = b"U"
+        on_poly_received({"polys": {"area1": {"color": [255, 0, 0]}}})
+
+        stored = proxy.poly_data_by_node[sender_hex]["polys"]["area1"]
+        assert stored["color"] == [255, 0, 0]
+        assert stored["lat"] == [1.0, 3.0, 5.0]  # geometry survives the patch
+
+    def test_partial_update_routes_to_polyline_store(self, proxy, fake_client):
+        # A partial update has no 'shape' field and would default to the
+        # polygon bucket; it must reach the store that already holds the shape.
+        sender_hex = self._activate(proxy, fake_client)
+        on_poly_received({"polys": {"line1": dict(self.LINE)}})
+
+        fake_client.context.action = b"U"
+        on_poly_received({"polys": {"line1": {"color": [0, 255, 0]}}})
+
+        assert proxy.polyline_data_by_node[sender_hex]["polys"]["line1"]["color"] == [
+            0,
+            255,
+            0,
+        ]
+        assert "line1" not in proxy.poly_data_by_node[sender_hex]["polys"]
+
+    def test_replace_action_overwrites_stored_shapes(self, proxy, fake_client):
+        sender_hex = self._activate(proxy, fake_client)
+        on_poly_received({"polys": {"stale": dict(self.AREA)}})
+
+        fake_client.context.action = b"R"
+        on_poly_received({"polys": {"fresh": dict(self.AREA)}})
+
+        polys = proxy.poly_data_by_node[sender_hex]["polys"]
+        assert "stale" not in polys
+        assert "fresh" in polys
+
+    def test_update_action_merges_new_shapes(self, proxy, fake_client):
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+        on_poly_received({"polys": {"area1": dict(self.AREA)}})
+        on_poly_received({"polys": {"area2": dict(self.AREA)}})
+
+        polys = proxy.poly_data_by_node[sender_hex]["polys"]
+        assert set(polys) == {"area1", "area2"}

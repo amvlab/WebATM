@@ -1,9 +1,12 @@
 """Handle BlueSky POLY shape events and split them into polygons and polylines.
 
-BlueSky publishes all drawn shapes on a single POLY topic. This module stores
-them per sending node on the proxy, separates polygons from polylines by their
-``shape`` field, and forwards the active node's shapes to browsers as the
-``poly`` and ``polyline`` Socket.IO events.
+BlueSky publishes all drawn shapes on a single POLY topic as shared-state
+updates: the network client strips the ``[action, payload]`` wrapper and
+records the action (Update/Delete/Replace/...) on its context before
+dispatching here. This module applies each action to the per-node shape stores
+on the proxy, separates polygons from polylines by their ``shape`` field, and
+forwards the active node's shapes to browsers as the ``poly`` and ``polyline``
+Socket.IO events.
 """
 
 import math
@@ -26,6 +29,16 @@ _NM_PER_DEGREE = 60.0
 # vanilla BlueSky omits them. Any bound at or beyond this magnitude is treated
 # as unbounded (no vertical extent -> flat 2D, the vanilla behaviour).
 _ALT_UNBOUNDED = 9e8
+
+# Shared-state action markers (bluesky.network.common.ActionType values,
+# decoded to str). Replace/Reset/ActChange overwrite a node's stored shapes;
+# Delete removes the named shapes; anything else merges. The RESET/ACTCHANGE
+# spellings cover the client's translated context constants.
+_REPLACE_ACTIONS = {"R", "X", "C", "RESET", "ACTCHANGE"}
+_DELETE_ACTION = "D"
+
+# Cap on stored shapes per node and kind (demo limit): oldest are dropped.
+_MAX_SHAPES_PER_KIND = 5
 
 
 def _normalize_altitudes(shape_dict):
@@ -125,21 +138,162 @@ def _circle_ring(coordinates, segments=_CIRCLE_SEGMENTS):
     return lats, lons
 
 
+def _coords_to_latlon(shape_dict, name, min_values):
+    """Split a flat ``coordinates`` array into ``lat``/``lon`` lists, in place.
+
+    BlueSky sends shape outlines as one flat ``[lat1, lon1, lat2, lon2, ...]``
+    array; the web client wants separate ``lat`` and ``lon`` lists. Shapes that
+    already carry ``lat``/``lon``, or whose coordinate array is missing or too
+    short, are left untouched.
+
+    Args:
+        shape_dict (dict): Per-shape payload, modified in place.
+        name (str): Shape name, stamped onto the payload for the frontend.
+        min_values (int): Minimum coordinate-array length (2 values per point).
+    """
+    if "lat" in shape_dict and "lon" in shape_dict:
+        return
+    coords = shape_dict.get("coordinates")
+    if isinstance(coords, list) and len(coords) >= min_values:
+        shape_dict["lat"] = coords[0::2]
+        shape_dict["lon"] = coords[1::2]
+        shape_dict["name"] = name
+
+
+def _context_info(proxy):
+    """Return the (sender, action) the network client recorded for this message.
+
+    The client sets ``context.sender_id`` and ``context.action`` just before
+    dispatching each POLY shared-state message (the ``[action, payload]``
+    wrapper itself is stripped before the handler is called).
+
+    Args:
+        proxy (BlueSkyProxy): The active proxy.
+
+    Returns:
+        tuple[str | None, str | None]: Hex sender ID and action marker, either
+        of which may be None when no context is available.
+    """
+    ctx = getattr(proxy.bluesky_client, "context", None)
+    if ctx is None:
+        return None, None
+    action = ctx.action
+    if isinstance(action, bytes):
+        action = action.decode("charmap", errors="replace")
+    return id2str(ctx.sender_id), action
+
+
+def _shapes_of(separated):
+    """Return the ``polys`` mapping from one side of the separated data.
+
+    Args:
+        separated (Any): The ``polygons`` or ``polylines`` value produced by
+            ``_separate_poly_and_polyline_data`` (which falls back to the raw
+            payload on unexpected formats).
+
+    Returns:
+        dict: The shape mapping, or an empty dict when absent or malformed.
+    """
+    if isinstance(separated, dict):
+        polys = separated.get("polys", {})
+        if isinstance(polys, dict):
+            return polys
+    return {}
+
+
+def _deleted_names(poly_data):
+    """Extract the shape names listed in a Delete-action payload.
+
+    BlueSky's ``send_delete(polys=[name, ...])`` arrives as
+    ``{"polys": [name, ...]}``.
+
+    Args:
+        poly_data (Any): The JSON-serializable Delete payload.
+
+    Returns:
+        list: The shape names to remove (empty for malformed payloads).
+    """
+    if isinstance(poly_data, dict):
+        names = poly_data.get("polys")
+        if isinstance(names, (list, tuple)):
+            return [n for n in names if isinstance(n, str)]
+        if isinstance(names, dict):
+            return list(names)
+    return []
+
+
+def _merge_shape(target, name, info):
+    """Merge one shape payload into a store, patching partial updates in place.
+
+    An Update action may carry only the changed fields (e.g. a COLOR change
+    sends ``{"color": ...}`` without coordinates); replacing the stored entry
+    would wipe the shape's geometry, so dict payloads are merged into the
+    existing dict instead.
+
+    Args:
+        target (dict): Shape store (name -> shape info) to merge into.
+        name (str): Shape name.
+        info (Any): New shape payload.
+    """
+    existing = target.get(name)
+    if isinstance(existing, dict) and isinstance(info, dict):
+        existing.update(info)
+    else:
+        target[name] = info
+
+
+def _merge_shapes(store_polys, store_lines, new_polys, new_lines):
+    """Merge separated new shapes into a node's polygon and polyline stores.
+
+    Args:
+        store_polys (dict): Stored polygon mapping for the node.
+        store_lines (dict): Stored polyline mapping for the node.
+        new_polys (dict): Newly received polygon shapes.
+        new_lines (dict): Newly received polyline shapes.
+    """
+    for name, info in new_polys.items():
+        # A partial update carries no 'shape' field and lands in the polygon
+        # bucket by default; route it to the store that already holds the shape
+        # so a polyline's update doesn't create a phantom polygon.
+        if name in store_lines and name not in store_polys:
+            _merge_shape(store_lines, name, info)
+        else:
+            _merge_shape(store_polys, name, info)
+    for name, info in new_lines.items():
+        _merge_shape(store_lines, name, info)
+
+
+def _trim_shape_store(polys, kind):
+    """Drop the oldest shapes beyond the per-kind cap, in place.
+
+    Args:
+        polys (dict): Shape mapping (insertion-ordered) to trim.
+        kind (str): "polygons" or "polylines", for logging.
+    """
+    if len(polys) > _MAX_SHAPES_PER_KIND:
+        for name in list(polys.keys())[:-_MAX_SHAPES_PER_KIND]:
+            del polys[name]
+        logger.debug(
+            f"Demo limit: keeping the {_MAX_SHAPES_PER_KIND} most recent {kind}"
+        )
+
+
 def on_poly_received(data, *args, **kwargs):
     """Process a BlueSky POLY event and emit ``poly``/``polyline`` to web clients.
 
-    Resolves the sending node from the BlueSky network context, splits the
-    incoming shapes into polygons and polylines, and stores them per node on
-    the proxy. Reset/replace/change action types ("R", "X", "C") overwrite the
-    node's stored shapes; other messages merge into them. At most the five most
-    recent polygons and five most recent polylines are kept per node. The
-    complete stored shape sets are emitted only when the sender is the
-    currently active node.
+    Resolves the sending node and shared-state action from the BlueSky network
+    context and applies the message to that node's stored shapes: Delete
+    removes the named shapes, Replace/Reset/ActChange overwrite the stored
+    sets, and updates merge into them (patching partial per-shape updates such
+    as a colour change). At most the five most recent polygons and polylines
+    are kept per node. The complete stored shape sets are emitted only when
+    the sender is the currently active node.
 
     Args:
-        data (dict | list): POLY payload from the BlueSky server, typically a
-            dict with a ``polys`` mapping; list payloads may carry a leading
-            action-type marker.
+        data (dict): POLY payload from the BlueSky server (the shared-state
+            action wrapper is already stripped by the network client): a
+            ``polys`` mapping of shape name to shape info, or a list of shape
+            names for a Delete action.
         *args (Any): Extra positional arguments from the network dispatch (unused).
         **kwargs (Any): Extra keyword arguments from the network dispatch (unused).
     """
@@ -148,110 +302,47 @@ def on_poly_received(data, *args, **kwargs):
         return
 
     try:
-        # Get sender_id from BlueSky context
-        sender_id = None
-        if proxy.bluesky_client and hasattr(proxy.bluesky_client, "context"):
-            sender_id = id2str(proxy.bluesky_client.context.sender_id)
-
-        # Convert to JSON serializable format
+        sender_id, action = _context_info(proxy)
         poly_data = make_json_serializable(data)
 
-        # Separate polygons and polylines based on shape
-        separated_data = _separate_poly_and_polyline_data(poly_data)
-
-        # Store both POLY and POLYLINE data by node ID
         if sender_id:
-            # Initialize storage if it doesn't exist
-            if sender_id not in proxy.poly_data_by_node:
-                proxy.poly_data_by_node[sender_id] = {"polys": {}}
-            if sender_id not in proxy.polyline_data_by_node:
-                proxy.polyline_data_by_node[sender_id] = {"polys": {}}
+            poly_store = proxy.poly_data_by_node.setdefault(sender_id, {"polys": {}})
+            line_store = proxy.polyline_data_by_node.setdefault(
+                sender_id, {"polys": {}}
+            )
 
-            # Check if we need to handle RESET/REPLACE action types differently
-            action_type = None
-            if isinstance(data, list) and len(data) >= 2:
-                action_type = data[0] if isinstance(data[0], (str, bytes)) else None
-                if isinstance(action_type, bytes):
-                    action_type = (
-                        action_type.decode("utf-8")
-                        if len(action_type) == 1
-                        else action_type.hex()
-                    )
+            if action == _DELETE_ACTION:
+                for name in _deleted_names(poly_data):
+                    poly_store["polys"].pop(name, None)
+                    line_store["polys"].pop(name, None)
+            else:
+                separated = _separate_poly_and_polyline_data(poly_data)
+                new_polys = _shapes_of(separated["polygons"])
+                new_lines = _shapes_of(separated["polylines"])
 
-            # Handle different action types
-            if action_type in [
-                "R",
-                "X",
-                "C",
-            ]:  # Reset/Replace/Change - clear existing data
-                if separated_data["polygons"] and separated_data["polygons"].get(
-                    "polys"
-                ):
-                    proxy.poly_data_by_node[sender_id] = separated_data["polygons"]
+                if action in _REPLACE_ACTIONS:
+                    poly_store["polys"] = new_polys
+                    line_store["polys"] = new_lines
                 else:
-                    proxy.poly_data_by_node[sender_id] = {"polys": {}}
-
-                if separated_data["polylines"] and separated_data["polylines"].get(
-                    "polys"
-                ):
-                    proxy.polyline_data_by_node[sender_id] = separated_data["polylines"]
-                else:
-                    proxy.polyline_data_by_node[sender_id] = {"polys": {}}
-            else:  # Update/Append - merge with existing data
-                # Merge polygons if any exist in the new data
-                if separated_data["polygons"] and separated_data["polygons"].get(
-                    "polys"
-                ):
-                    proxy.poly_data_by_node[sender_id]["polys"].update(
-                        separated_data["polygons"]["polys"]
+                    _merge_shapes(
+                        poly_store["polys"], line_store["polys"], new_polys, new_lines
                     )
 
-                # Merge polylines if any exist in the new data
-                if separated_data["polylines"] and separated_data["polylines"].get(
-                    "polys"
-                ):
-                    proxy.polyline_data_by_node[sender_id]["polys"].update(
-                        separated_data["polylines"]["polys"]
-                    )
+                _trim_shape_store(poly_store["polys"], "polygons")
+                _trim_shape_store(line_store["polys"], "polylines")
 
-            # Apply 5-shape limit for polygons
-            if len(proxy.poly_data_by_node[sender_id]["polys"]) > 5:
-                # Get shape names sorted by creation order (keep most recent 5)
-                poly_names = list(proxy.poly_data_by_node[sender_id]["polys"].keys())
-                shapes_to_remove = poly_names[:-5]  # Remove all but last 5
-                for shape_name in shapes_to_remove:
-                    del proxy.poly_data_by_node[sender_id]["polys"][shape_name]
-                logger.debug(
-                    f"Demo limit: Removed {len(shapes_to_remove)} polygons, keeping 5 most recent"
-                )
-
-            # Apply 5-shape limit for polylines
-            if len(proxy.polyline_data_by_node[sender_id]["polys"]) > 5:
-                # Get shape names sorted by creation order (keep most recent 5)
-                polyline_names = list(
-                    proxy.polyline_data_by_node[sender_id]["polys"].keys()
-                )
-                shapes_to_remove = polyline_names[:-5]  # Remove all but last 5
-                for shape_name in shapes_to_remove:
-                    del proxy.polyline_data_by_node[sender_id]["polys"][shape_name]
-                logger.debug(
-                    f"Demo limit: Removed {len(shapes_to_remove)} polylines, keeping 5 most recent"
-                )
-
-        # Only emit data if it's from the currently active node
+        # Only the active node's shapes are displayed; emit the complete stored
+        # sets (not just this message's shapes).
         active_node_id = proxy._get_safe_active_node()
         if sender_id and active_node_id and sender_id == active_node_id:
             if proxy.socketio:
-                # Emit the complete stored data (not just the separated data from this message)
-                complete_poly_data = proxy.poly_data_by_node.get(
-                    sender_id, {"polys": {}}
+                proxy.socketio.emit(
+                    "poly", proxy.poly_data_by_node.get(sender_id, {"polys": {}})
                 )
-                complete_polyline_data = proxy.polyline_data_by_node.get(
-                    sender_id, {"polys": {}}
+                proxy.socketio.emit(
+                    "polyline",
+                    proxy.polyline_data_by_node.get(sender_id, {"polys": {}}),
                 )
-
-                proxy.socketio.emit("poly", complete_poly_data)
-                proxy.socketio.emit("polyline", complete_polyline_data)
 
     except Exception as e:
         logger.error(f"Error processing POLY data: {e}")
@@ -287,127 +378,66 @@ def _separate_poly_and_polyline_data(poly_data):
     polylines_data = {}
 
     try:
-        # Handle the BlueSky POLY data format
         if isinstance(poly_data, dict) and "polys" in poly_data:
-            polys = poly_data["polys"]
-
-            # Separate by shape field
             polygons_polys = {}
             polylines_polys = {}
 
-            for name, poly_info in polys.items():
-                if isinstance(poly_info, dict):
-                    shape = poly_info.get(
-                        "shape", "POLY"
-                    )  # Default to POLY if no shape specified
-                    if shape == "LINE":
-                        # BlueSky sends polylines with a flat 'coordinates' array: [lat1, lon1, lat2, lon2, ...]
-                        # Convert to separate lat/lon arrays for web client compatibility
-                        poly_info_converted = poly_info.copy()
-
-                        if "coordinates" in poly_info and not (
-                            "lat" in poly_info and "lon" in poly_info
-                        ):
-                            coords = poly_info["coordinates"]
-                            if (
-                                isinstance(coords, list) and len(coords) >= 4
-                            ):  # At least 2 points (lat1,lon1,lat2,lon2)
-                                # Split flat array into separate lat/lon arrays
-                                lats = [coords[i] for i in range(0, len(coords), 2)]
-                                lons = [coords[i] for i in range(1, len(coords), 2)]
-
-                                poly_info_converted["lat"] = lats
-                                poly_info_converted["lon"] = lons
-                                poly_info_converted["name"] = name
-
-                        polylines_polys[name] = poly_info_converted
-                    elif shape == "POLYALT":
-                        # Convert POLYALT to POLY for web display
-                        poly_info_copy = poly_info.copy()
-                        poly_info_copy["shape"] = "POLY"
-
-                        # Handle coordinates conversion for POLYALT too
-                        if "coordinates" in poly_info_copy and not (
-                            "lat" in poly_info_copy and "lon" in poly_info_copy
-                        ):
-                            coords = poly_info_copy["coordinates"]
-                            if (
-                                isinstance(coords, list) and len(coords) >= 6
-                            ):  # At least 3 points for polygon
-                                lats = [coords[i] for i in range(0, len(coords), 2)]
-                                lons = [coords[i] for i in range(1, len(coords), 2)]
-                                poly_info_copy["lat"] = lats
-                                poly_info_copy["lon"] = lons
-                                poly_info_copy["name"] = name
-
-                        polygons_polys[name] = poly_info_copy
-                    elif shape == "BOX":
-                        # BlueSky sends a BOX as two opposite corners; expand it
-                        # into a 4-corner POLY so the existing polygon renderer
-                        # can draw it (the flat-pair path below can't - a box
-                        # has only 4 coordinate values, i.e. 2 points).
-                        poly_info_copy = poly_info.copy()
-                        poly_info_copy["shape"] = "POLY"
-                        if not ("lat" in poly_info and "lon" in poly_info):
-                            corners = _box_corners(poly_info.get("coordinates"))
-                            if corners:
-                                poly_info_copy["lat"], poly_info_copy["lon"] = corners
-                                poly_info_copy["name"] = name
-                        polygons_polys[name] = poly_info_copy
-                    elif shape == "CIRCLE":
-                        # BlueSky sends a CIRCLE as centre + radius (nm);
-                        # tessellate it into a POLY ring so the existing polygon
-                        # renderer can draw it.
-                        poly_info_copy = poly_info.copy()
-                        poly_info_copy["shape"] = "POLY"
-                        if not ("lat" in poly_info and "lon" in poly_info):
-                            ring = _circle_ring(poly_info.get("coordinates"))
-                            if ring:
-                                poly_info_copy["lat"], poly_info_copy["lon"] = ring
-                                poly_info_copy["name"] = name
-                        polygons_polys[name] = poly_info_copy
-                    else:  # 'POLY' or any other shape
-                        poly_info_copy = poly_info.copy()
-
-                        # Handle coordinates conversion for POLY too
-                        if "coordinates" in poly_info_copy and not (
-                            "lat" in poly_info_copy and "lon" in poly_info_copy
-                        ):
-                            coords = poly_info_copy["coordinates"]
-                            if (
-                                isinstance(coords, list) and len(coords) >= 6
-                            ):  # At least 3 points for polygon
-                                lats = [coords[i] for i in range(0, len(coords), 2)]
-                                lons = [coords[i] for i in range(1, len(coords), 2)]
-                                poly_info_copy["lat"] = lats
-                                poly_info_copy["lon"] = lons
-                                poly_info_copy["name"] = name
-
-                        polygons_polys[name] = poly_info_copy
-                else:
-                    # Fallback: assume it's a polygon if no shape info
+            for name, poly_info in poly_data["polys"].items():
+                if not isinstance(poly_info, dict):
+                    # Fallback: assume it's a polygon if no shape info.
                     polygons_polys[name] = poly_info
+                    continue
+
+                info = poly_info.copy()
+                shape = info.get("shape", "POLY")
+
+                if shape == "LINE":
+                    _coords_to_latlon(info, name, min_values=4)  # >= 2 points
+                    polylines_polys[name] = info
+                    continue
+
+                if shape == "BOX":
+                    # Two opposite corners; expand into a 4-corner POLY ring
+                    # (the flat-pair path below can't - a box has only 2 points).
+                    info["shape"] = "POLY"
+                    if not ("lat" in info and "lon" in info):
+                        corners = _box_corners(info.get("coordinates"))
+                        if corners:
+                            info["lat"], info["lon"] = corners
+                            info["name"] = name
+                elif shape == "CIRCLE":
+                    # Centre + radius (nm); tessellate into a POLY ring.
+                    info["shape"] = "POLY"
+                    if not ("lat" in info and "lon" in info):
+                        ring = _circle_ring(info.get("coordinates"))
+                        if ring:
+                            info["lat"], info["lon"] = ring
+                            info["name"] = name
+                else:  # POLY, POLYALT, or anything else
+                    if shape == "POLYALT":
+                        info["shape"] = "POLY"
+                    _coords_to_latlon(info, name, min_values=6)  # >= 3 points
+
+                polygons_polys[name] = info
 
             # Keep any finite vertical bounds (amvlab BlueSky) and drop the
-            # unbounded sentinels / vanilla-BlueSky's absent altitudes, so 3D
-            # extrusion only kicks in for shapes that actually have an extent.
+            # unbounded sentinels, so 3D extrusion only kicks in for shapes
+            # that actually have an extent.
             for entry in polygons_polys.values():
                 if isinstance(entry, dict):
                     _normalize_altitudes(entry)
 
-            # Create separated data structures
             if polygons_polys:
                 polygons_data = {"polys": polygons_polys}
             if polylines_polys:
                 polylines_data = {"polys": polylines_polys}
 
         else:
-            # If not in expected format, treat as polygons
+            # Not in the expected format - treat the whole payload as polygons.
             polygons_data = poly_data
 
     except Exception as e:
         logger.error(f"Error separating POLY data: {e}")
-        # Fallback: treat all as polygons
         polygons_data = poly_data
         polylines_data = {}
 

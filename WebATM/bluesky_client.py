@@ -758,25 +758,20 @@ class BlueSkyClient:
                     else:
                         self.subscriber.emit(topic, data, sender_id=sender_id)
                 elif topic == "POLY":
-                    # POLY expects BlueSky shared state format: [action_type, data_dict]
-                    if isinstance(data, (list, tuple)) and len(data) == 2:
-                        action_type, actual_data = data
-
-                        # Set context action for BlueSky compatibility
-                        self.context.action = action_type
-                        self.context.sender_id = sender_id
-
-                        # Handle different action types
-                        if action_type in ("RESET", "ACTCHANGE"):
-                            self.context.action = (
-                                self.context.Reset
-                                if action_type == "RESET"
-                                else self.context.ActChange
-                            )
-
-                        self.subscriber.emit(
-                            topic, actual_data
-                        )  # Pass the actual data dict
+                    # POLY uses the BlueSky shared-state format [action, data,
+                    # ...]. Its publisher collects actions between send ticks,
+                    # so one message can carry several (action, data) pairs -
+                    # e.g. an update and a delete issued on the same scenario
+                    # line. Dispatch each pair with its own context action.
+                    if (
+                        isinstance(data, (list, tuple))
+                        and len(data) >= 2
+                        and len(data) % 2 == 0
+                    ):
+                        for i in range(0, len(data), 2):
+                            self.context.action = data[i]
+                            self.context.sender_id = sender_id
+                            self.subscriber.emit(topic, data[i + 1])
                     else:
                         self.subscriber.emit(topic, data)
                 elif topic == "RESET":

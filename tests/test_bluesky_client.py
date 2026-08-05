@@ -339,3 +339,33 @@ class TestDataMessageDispatch:
         client._process_data_message(self._frame("DEFWPT", {"name": "WPT1"}))
 
         assert received == [{"name": "WPT1"}]
+
+    def test_poly_single_action_sets_context_and_unwraps(self):
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe(
+            "POLY", lambda data: received.append((client.context.action, data))
+        )
+
+        payload = {"polys": {"A1": {"shape": "POLY"}}}
+        client._process_data_message(self._frame("POLY", [b"U", payload]))
+
+        assert received == [(b"U", payload)]
+        assert client.context.sender_id == b"NODE\x81"
+
+    def test_poly_collected_multi_action_dispatches_each_pair(self):
+        # The POLY publisher collects actions between send ticks, so one
+        # message can carry several (action, payload) pairs — e.g. an update
+        # and a delete from the same scenario line. Each pair must be
+        # dispatched with its own context action.
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe(
+            "POLY", lambda data: received.append((client.context.action, data))
+        )
+
+        update = {"polys": {"A1": {"shape": "POLY"}}}
+        delete = {"polys": ["A2"]}
+        client._process_data_message(self._frame("POLY", [b"U", update, b"D", delete]))
+
+        assert received == [(b"U", update), (b"D", delete)]

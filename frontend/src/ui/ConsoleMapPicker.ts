@@ -3,6 +3,7 @@ import type { MapDisplay } from './map/MapDisplay';
 import type { Console } from './Console';
 import type { NavaidSnapper } from './map/navdata/NavaidSnapper';
 import { lineStringFeature, pointFeature } from '../utils/geojson';
+import { computeBearing } from '../utils/geo';
 import { logger } from '../utils/Logger';
 import {
     DRAWING_CURSOR,
@@ -379,7 +380,7 @@ export class ConsoleMapPicker {
                 );
                 return;
             }
-            const brng = this.computeBearing(
+            const brng = computeBearing(
                 origin.lat,
                 origin.lon,
                 clickLat,
@@ -438,36 +439,8 @@ export class ConsoleMapPicker {
         ]);
 
         // Live heading readout in the hint while moving.
-        const brng = this.computeBearing(
-            originLat,
-            originLon,
-            endLat,
-            endLon
-        );
+        const brng = computeBearing(originLat, originLon, endLat, endLon);
         this.updateHintText(`Heading: ${Math.round(brng)}°  (click to set)`);
-    }
-
-    /**
-     * Aviation bearing from (lat1, lon1) to (lat2, lon2). 0° = North,
-     * clockwise. Returns a value in [0, 360).
-     */
-    private computeBearing(
-        lat1: number,
-        lon1: number,
-        lat2: number,
-        lon2: number
-    ): number {
-        const toRad = (d: number) => (d * Math.PI) / 180;
-        const phi1 = toRad(lat1);
-        const phi2 = toRad(lat2);
-        const dLon = toRad(lon2 - lon1);
-
-        const y = Math.sin(dLon) * Math.cos(phi2);
-        const x =
-            Math.cos(phi1) * Math.sin(phi2) -
-            Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
-
-        return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
     }
 
     /**

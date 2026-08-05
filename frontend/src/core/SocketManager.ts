@@ -280,10 +280,10 @@ export class SocketManager {
         data: unknown,
         addToState: (shape: T, activeNode: string | undefined) => void
     ): void {
-        const { validShapes, skipped, isEmpty } = parseShapePayload<T>(data);
+        const { validShapes, skipped, isEmpty, dictNames } = parseShapePayload<T>(data);
 
-        if (isEmpty) {
-            logger.verbose('SocketManager', `Ignoring empty ${kind} data`);
+        if (isEmpty && dictNames === null) {
+            logger.verbose('SocketManager', `Ignoring invalid ${kind} data`);
             return;
         }
 
@@ -294,6 +294,19 @@ export class SocketManager {
         const activeNode = this.stateManager.getState().activeNode || undefined;
         for (const shape of validShapes) {
             addToState(shape, activeNode);
+        }
+
+        // A dictionary envelope carries the node's complete shape set: any
+        // stored shape of this kind missing from it was deleted server-side
+        // (DEL <name>) and must leave the map.
+        if (dictNames !== null) {
+            const present = new Set(dictNames);
+            const type = kind === 'poly' ? 'polygon' : 'polyline';
+            for (const shape of this.stateManager.getShapesByType(type)) {
+                if (!present.has(shape.name)) {
+                    this.stateManager.deleteShape(shape.name);
+                }
+            }
         }
 
         // Receiving valid shape data means BlueSky is connected.
