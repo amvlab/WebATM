@@ -1,10 +1,8 @@
 """Route data handler for aircraft route visualization."""
 
-import time
-
 from ...logger import get_logger
 from ...utils import make_json_serializable
-from ._base import get_bluesky_proxy
+from ._base import active_proxy
 
 logger = get_logger()
 
@@ -24,8 +22,8 @@ def on_routedata_received(data):
         data (dict): ROUTEDATA payload with the aircraft ID (``acid``) and,
             for route updates, waypoint arrays (``wplat``, ``wplon``, ...).
     """
-    proxy = get_bluesky_proxy()
-    if not proxy or not proxy.allow_reconnection:
+    proxy = active_proxy()
+    if not proxy:
         return
 
     if not proxy._get_safe_active_node():
@@ -42,8 +40,6 @@ def on_routedata_received(data):
     if has_waypoints and proxy.traffic_data:
         if route_aircraft_id not in proxy.traffic_data.get("id", []):
             return
-
-    proxy.last_successful_update = time.time()
 
     route_data = make_json_serializable(data)
 

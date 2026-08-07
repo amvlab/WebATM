@@ -47,7 +47,6 @@ class TestProxyInitialization:
         proxy = BlueSkyProxy()
         assert proxy.siminfo_interval > 0
         assert proxy.acdata_interval > 0
-        assert proxy.echo_interval > 0
 
 
 class TestSafeDecodeHelper:

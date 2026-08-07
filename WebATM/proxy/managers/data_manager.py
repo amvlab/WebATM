@@ -143,21 +143,16 @@ class DataManager:
         self.proxy.traffic_data = {}
         self.proxy.sim_data = {}
         self.proxy.echo_data = {}
-        self.proxy.last_update = 0
         self.proxy.poly_data_by_node.clear()
         self.proxy.polyline_data_by_node.clear()
 
         # Reset emission timestamps
         self.proxy.last_siminfo_emit = 0
         self.proxy.last_acdata_emit = 0
-        self.proxy.last_echo_emit = 0
         self.proxy.last_node_info_emit = 0
 
         # Clear current map bounds
         self.proxy.current_bbox = None
-
-        # Reset aircraft counter
-        self.proxy.aircraft_counter = 0
 
         # Clear command dictionary
         self.proxy.cmddict.clear()

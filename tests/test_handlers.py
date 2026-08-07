@@ -360,17 +360,35 @@ class TestStackcmdsHandler:
         on_stackcmds_received("UPDATE", "some string")
         on_stackcmds_received("UPDATE", b"bytes")
 
+    def test_dict_without_cmddict_key_does_not_raise(self, proxy, fake_socketio):
+        on_stackcmds_received("UPDATE", {"other": 1})
+        assert fake_socketio.count("cmddict") == 0
+
+    def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
+        proxy.allow_reconnection = False
+        proxy.last_successful_update = 42.0
+        on_stackcmds_received("UPDATE", {"cmddict": {"CRE": "acid,type"}})
+        assert "CRE" not in proxy.cmddict
+        assert fake_socketio.count("cmddict") == 0
+        assert proxy.last_successful_update == 42.0  # liveness untouched
+
 
 class TestStackReceivedHandler:
     def test_local_help_command_executed(self, proxy, fake_socketio):
         on_stack_received("HELP")
-        # HELP is in the seed cmddict -> executed locally -> echo emitted.
+        # Bare HELP is answered locally -> info echo emitted.
         assert fake_socketio.count("echo") == 1
-        assert "executed" in proxy.echo_data["text"].lower()
+        assert proxy.echo_data["flags"] == 0
+        assert "bluesky web client" in proxy.echo_data["text"].lower()
 
-    def test_unknown_command_reports_not_implemented(self, proxy):
-        on_stack_received("NOSUCHCMD")
-        assert "not implemented" in proxy.echo_data["text"].lower()
+    def test_gui_only_command_reports_warning_not_error(self, proxy):
+        # A scenario-file GUI command (e.g. PAN) forwarded by the server is a
+        # benign no-op for the web client: warning (flags=2), never an error.
+        on_stack_received("PAN EHAM")
+        assert (
+            proxy.echo_data["text"] == "PAN: not supported by the web client (ignored)"
+        )
+        assert proxy.echo_data["flags"] == 2
 
     def test_list_of_commands(self, proxy, fake_socketio):
         on_stack_received(["HELP", "?"])
@@ -379,6 +397,13 @@ class TestStackReceivedHandler:
     def test_empty_command_skipped(self, proxy, fake_socketio):
         on_stack_received(["", "   "])
         assert fake_socketio.count("echo") == 0
+
+    def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
+        proxy.allow_reconnection = False
+        proxy.last_successful_update = 42.0
+        on_stack_received("PAN EHAM")
+        assert fake_socketio.count("echo") == 0
+        assert proxy.last_successful_update == 42.0  # liveness untouched
 
 
 class TestResetHandler:
