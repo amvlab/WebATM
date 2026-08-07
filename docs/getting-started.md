@@ -1,15 +1,80 @@
 # Getting Started
 
-## Prerequisites
+The fastest way to run WebATM is with Docker — no Python or Node toolchain
+needed. If you plan to modify the code, run it from source instead and see
+the [Development Workflow](development.md).
+
+## Option 1: Docker (recommended)
+
+Requires Docker 20.10+ with Docker Compose 2.0+. The repository's
+`docker-compose.yml` defines both build variants: the standalone `webatm`
+service (enabled by default) and a commented-out `webatm-integrated` service
+that bundles the BlueSky simulator in the same container. Both pull prebuilt
+images from GHCR, so no local build is needed.
+
+### Standalone (`webatm`)
+
+Connects to a BlueSky server you run yourself (by default on the Docker
+host, via `BLUESKY_SERVER_HOST=host.docker.internal`).
+
+1. **Start with Docker Compose** (pulls `ghcr.io/amvlab/webatm:latest`)
+
+    ```bash
+    docker compose up -d webatm
+    ```
+
+2. **Open the web interface** at <http://localhost:8082>
+
+3. **View logs**
+
+    ```bash
+    docker compose logs -f webatm
+    ```
+
+### Integrated (`webatm-integrated`)
+
+A single container that ships the simulator itself, with
+Start/Stop/Restart controls and a live server log in the UI — see the
+[Integrated Build](integrated-build.md) for details.
+
+1. **Enable the service**: uncomment the `webatm-integrated` service in
+   `docker-compose.yml`. Both services default to host port 8082, so also
+   comment out the standalone `webatm` service (or map one of them to a
+   different host port to run both side by side).
+
+2. **Start with Docker Compose** (pulls
+   `ghcr.io/amvlab/webatm-integrated:latest`)
+
+    ```bash
+    docker compose up -d webatm-integrated
+    ```
+
+3. **Open the web interface** at <http://localhost:8082> — the server
+   lifecycle controls are in **Settings**, and the server log has its own
+   console tab.
+
+4. **View logs**
+
+    ```bash
+    docker compose logs -f webatm-integrated
+    ```
+
+!!! tip "Building images locally"
+    To run from source instead of the published GHCR images, build the
+    image first and point the service's `image:` at it:
+
+    ```bash
+    docker build -t webatm:latest .                                        # standalone
+    docker build -f Dockerfile.integrated -t webatm-integrated:latest .    # integrated
+    ```
+
+## Option 2: Running from source
 
 | Requirement | Version | Notes |
 |---|---|---|
 | Python | 3.13+ | managed with [uv](https://docs.astral.sh/uv/) |
-| Node.js | 22+ | with npm, for the TypeScript frontend |
-| Docker | 20.10+ | with Docker Compose 2.0+, for containerized deployment |
+| Node.js | 22+ | with npm, for building the TypeScript frontend |
 | BlueSky | 1.1.0+ | automatically managed by WebATM |
-
-## Option 1: Local development
 
 1. **Clone the repository**
 
@@ -43,62 +108,6 @@
 
 5. **Open the web interface** at <http://localhost:8082>
 
-## Option 2: Docker deployment
-
-1. **Build the Docker image**
-
-    ```bash
-    docker build -t webatm:latest .
-    ```
-
-2. **Start with Docker Compose**
-
-    ```bash
-    docker-compose up -d
-    ```
-
-3. **Open the web interface** at <http://localhost:8082>
-
-4. **View logs**
-
-    ```bash
-    docker-compose logs -f webatm
-    ```
-
-!!! tip "Bundled BlueSky"
-    The default build connects to an external BlueSky server (and can
-    auto-start one on the same host). If you want a single container that
-    ships the simulator itself — with Start/Stop/Restart controls and a live
-    server log in the UI — see the [Integrated Build](integrated-build.md).
-
-## Frontend development
-
-The TypeScript sources live in `frontend/` and are bundled by webpack into
-`WebATM/static/dist/`:
-
-```bash
-cd frontend/
-npm install       # install dependencies
-npm run build     # production build
-npm run watch     # rebuild on change during development
-```
-
-## Running the tests
-
-Python tests run with pytest through uv from a single entry point that covers
-both the core `webatm` package (`tests/`) and the optional `webatm_integrated`
-package (`WebATM-integrated/tests/`):
-
-```bash
-uv run pytest                # everything (core + integrated)
-uv run pytest -m core        # core package only
-uv run pytest -m integrated  # integrated package only
-uv run pytest -m core --cov=WebATM --cov-report=term-missing  # with coverage
-```
-
-Frontend unit tests use Vitest and live next to the code they cover:
-
-```bash
-cd frontend/
-npm test
-```
+Everything beyond running the app — linting, type checking, the test
+suites, rebuilding the frontend on change, and building this documentation
+site — is covered in the [Development Workflow](development.md).

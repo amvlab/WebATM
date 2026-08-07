@@ -29,9 +29,12 @@ uv run pytest              # test suite
 
 ```bash
 cd frontend/
+npm install                # install dependencies
 npm run type-check         # type checking only
 npm run lint               # ESLint (flat config in eslint.config.mjs)
 npm test                   # unit tests (Vitest)
+npm run build              # production bundle → WebATM/static/dist/
+npm run watch              # rebuild on change during development
 ```
 
 ## Testing
