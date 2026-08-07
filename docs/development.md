@@ -66,26 +66,25 @@ the source:
   (`@param`, `@returns`, `@remarks`) plus the types themselves. Rendered by
   [TypeDoc](https://typedoc.org/) via
   [`typedoc-plugin-markdown`](https://typedoc-plugin-markdown.org/) into
-  `docs/frontend/api/`, with the sidebar inferred from that directory tree by
-  [`mkdocs-literate-nav`](https://oprypin.github.io/mkdocs-literate-nav/).
+  `docs/frontend/api/`, with the sidebar inferred from that directory tree
+  by `script/generate_docs_config.py` at build time.
 
 ## Building this documentation
 
-The docs are built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/);
-the tooling lives in the `docs` dependency group (opt-in, not installed by a
-bare `uv sync`). Use the helper, which regenerates the git-ignored frontend
-API reference with TypeDoc before running MkDocs:
+The docs are built with [Zensical](https://zensical.org/) (the successor to
+Material for MkDocs, reading the same `mkdocs.yml`); the tooling lives in the
+`docs` dependency group (opt-in, not installed by a bare `uv sync`). Use the
+helper, which regenerates the git-ignored frontend API reference with TypeDoc
+and expands the nav into `mkdocs.generated.yml` before running Zensical:
 
 ```bash
-script/build_docs.sh            # TypeDoc + mkdocs build --strict → site/
+script/build_docs.sh            # TypeDoc + zensical build --strict → site/
 script/build_docs.sh --serve    # live-reload preview at http://127.0.0.1:8000
 ```
 
-For Python/Markdown-only changes you can skip TypeDoc and run MkDocs directly:
-
-```bash
-uv run --group docs mkdocs serve            # or: mkdocs build --strict
-```
+Zensical builds from the generated config, so run the helper rather than
+`zensical build` directly — a bare run against `mkdocs.yml` would miss the
+expanded frontend API sidebar.
 
 ## Extension guidelines
 
