@@ -258,6 +258,94 @@ describe('ProcessControlManager', () => {
         expect(fetchMock).toHaveBeenCalledWith('/api/integrated/server/start', { method: 'POST' });
     });
 
+    describe('overlapping lifecycle actions', () => {
+        it('a Stop clicked during Start auto-connect owns the status; the stale start goes quiet', async () => {
+            // Hold the start's connect attempt open so the Stop lands mid-flight.
+            let resolveConnect!: (connected: boolean) => void;
+            autoConnect.mockImplementation(
+                () => new Promise<boolean>((resolve) => {
+                    resolveConnect = resolve;
+                }),
+            );
+
+            const fetchMock = vi.fn((url: string) => {
+                if (url.endsWith('/status')) {
+                    return Promise.resolve({ ok: true, json: async () => ({ running: false }) });
+                }
+                if (url.endsWith('/start')) {
+                    return Promise.resolve({
+                        ok: true,
+                        json: async () => ({ success: true, status: 'running', message: 'BlueSky server started' }),
+                    });
+                }
+                return Promise.resolve({
+                    ok: true,
+                    json: async () => ({ success: true, status: 'stopped', message: 'BlueSky server stopped' }),
+                });
+            });
+            vi.stubGlobal('fetch', fetchMock);
+
+            makeManager();
+            await vi.waitFor(() => expect(statusText()).toBe('stopped'));
+
+            click('start');
+            await vi.waitFor(() => expect(statusText()).toBe('connecting…'));
+
+            // The user changes their mind while the connect attempt is pending.
+            click('stop');
+            await vi.waitFor(() => expect(autoDisconnect).toHaveBeenCalledTimes(1));
+            expect(statusText()).toBe('BlueSky server stopped');
+
+            // The stale connect attempt now resolves — even "successfully" — but
+            // must neither claim "running — connected" nor retry.
+            resolveConnect(true);
+            await new Promise((r) => setTimeout(r, 20));
+            expect(statusText()).toBe('BlueSky server stopped');
+            expect(autoConnect).toHaveBeenCalledTimes(1);
+        });
+
+        it('a failing stale auto-connect does not overwrite the newer action with "auto-connect failed"', async () => {
+            let resolveConnect!: (connected: boolean) => void;
+            autoConnect.mockImplementation(
+                () => new Promise<boolean>((resolve) => {
+                    resolveConnect = resolve;
+                }),
+            );
+
+            const fetchMock = vi.fn((url: string) => {
+                if (url.endsWith('/status')) {
+                    return Promise.resolve({ ok: true, json: async () => ({ running: false }) });
+                }
+                if (url.endsWith('/start')) {
+                    return Promise.resolve({
+                        ok: true,
+                        json: async () => ({ success: true, status: 'running', message: 'BlueSky server started' }),
+                    });
+                }
+                return Promise.resolve({
+                    ok: true,
+                    json: async () => ({ success: true, status: 'stopped', message: 'BlueSky server stopped' }),
+                });
+            });
+            vi.stubGlobal('fetch', fetchMock);
+
+            makeManager();
+            await vi.waitFor(() => expect(statusText()).toBe('stopped'));
+
+            click('start');
+            await vi.waitFor(() => expect(statusText()).toBe('connecting…'));
+            click('stop');
+            await vi.waitFor(() => expect(statusText()).toBe('BlueSky server stopped'));
+
+            // All remaining attempts of the stale loop must be abandoned, not
+            // burn retries and end in "started — auto-connect failed".
+            resolveConnect(false);
+            await new Promise((r) => setTimeout(r, 20));
+            expect(statusText()).toBe('BlueSky server stopped');
+            expect(autoConnect).toHaveBeenCalledTimes(1);
+        });
+    });
+
     describe('connection-status reconciliation', () => {
         it('re-probes and re-renders when the live BlueSky connection flips', async () => {
             const conn = makeConnState(true);
