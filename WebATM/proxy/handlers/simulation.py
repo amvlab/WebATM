@@ -12,7 +12,7 @@ import time
 from ...logger import get_logger
 from ...utils import empty_traffic_data, id2str, make_json_serializable, tim2txt
 from ..perf import data_path_perf
-from ._base import get_bluesky_proxy
+from ._base import active_proxy, get_bluesky_proxy
 
 logger = get_logger()
 
@@ -52,21 +52,12 @@ def on_siminfo_received(
         sender_id (bytes | str | None): Identifier of the sending node; bytes
             are converted to a hex string.
     """
-    proxy = get_bluesky_proxy()
+    proxy = active_proxy()
     if not proxy:
-        logger.debug("on_siminfo_received called but no proxy available")
-        return
-
-    # Ignore data if reconnection is not allowed (we're disconnected)
-    if not proxy.allow_reconnection:
-        logger.debug("on_siminfo_received ignored - reconnection not allowed")
         return
 
     sender_id_str = id2str(sender_id)
-
-    # Mark successful data reception
     current_time = time.time()
-    proxy.last_successful_update = current_time
 
     sim_data = {
         "speed": float(speed) if speed is not None else 0.0,
@@ -233,8 +224,8 @@ def on_statechange_received(data, sender_id=None):
         sender_id (bytes | str | None): Identifier of the sending node; bytes
             are converted to a hex string.
     """
-    proxy = get_bluesky_proxy()
-    if not proxy or not proxy.allow_reconnection:
+    proxy = active_proxy()
+    if not proxy:
         return
 
     simstate = data.get("simstate") if isinstance(data, dict) else None
@@ -242,10 +233,6 @@ def on_statechange_received(data, sender_id=None):
         return
 
     sender_id_str = id2str(sender_id)
-
-    # Any node's state change proves the link is alive; update liveness
-    # before the active-node filter (mirrors ACDATA).
-    proxy.last_successful_update = time.time()
 
     if not _is_active_node(proxy, sender_id_str):
         logger.debug(

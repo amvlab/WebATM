@@ -37,9 +37,9 @@ dev = [
     "ipython>=8.0.0",
 ]
 docs = [
-    "mkdocs-literate-nav>=0.6.3",
-    "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.4",
+    "pyyaml>=6.0",
+    "zensical>=0.0.53",
 ]
 
 [tool.setuptools.packages.find]

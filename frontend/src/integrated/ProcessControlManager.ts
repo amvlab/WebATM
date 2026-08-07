@@ -15,9 +15,8 @@ type Action = (typeof ACTIONS)[number];
 
 /**
  * Minimal view of ConnectionStatusService this manager needs: whether BlueSky
- * is currently connected (the same data-flow truth the header uses) plus a way
- * to be notified when it changes. Kept structural so it stays trivially
- * mockable.
+ * is connected (the same data-flow truth the header uses) plus change
+ * notifications. Kept structural so it stays trivially mockable.
  */
 export interface ConnectionStateSource {
     isBlueSkyConnected(): boolean;
@@ -35,17 +34,22 @@ export class ProcessControlManager {
     private serverRunning = false;
     /** True while a lifecycle action owns the status text (suppresses reconcile). */
     private busy = false;
+    /**
+     * Monotonic id of the newest lifecycle action. Each action captures it on
+     * click and stops touching the shared status once a newer action supersedes
+     * it — e.g. Stop clicked while a Start is still auto-connecting must not be
+     * overwritten by the stale start's "auto-connect failed".
+     */
+    private actionSeq = 0;
 
     /**
      * @param logTab          live server-log tab to surface after a (re)start
-     * @param autoConnect     connects the WebATM proxy to the freshly-started
-     *   BlueSky server (resolves true once confirmed), so the user never has to
-     *   open Settings and click Connect
+     * @param autoConnect     connects the WebATM proxy after a start/restart
+     *   (resolves true once confirmed)
      * @param autoDisconnect  drops the proxy connection after a stop/kill
-     * @param connectionState live BlueSky connection status (the same source
-     *   the header reads), folded into the rendered status so the two
-     *   indicators never contradict — e.g. after QUIT disconnects the proxy
-     *   while the bundled server keeps running
+     * @param connectionState live BlueSky connection status (same source the
+     *   header reads), folded into the rendered status so the two indicators
+     *   never contradict
      */
     constructor(
         private logTab: ServerLogStreamManager,
@@ -69,6 +73,7 @@ export class ProcessControlManager {
     }
 
     private async control(action: Action): Promise<void> {
+        const seq = ++this.actionSeq;
         // Mark busy so connection-status flips during the action don't clobber
         // the transient lifecycle status text mid-flight.
         this.busy = true;
@@ -76,6 +81,7 @@ export class ProcessControlManager {
         try {
             const res = await fetch(`/api/integrated/server/${action}`, { method: 'POST' });
             const data: ServerControlResponse = await res.json();
+            if (this.superseded(seq)) return;
             this.setStatus(data.message || data.status || 'done');
             // The proxy connection follows the server lifecycle automatically.
             if (action === 'start' || action === 'restart') {
@@ -83,30 +89,41 @@ export class ProcessControlManager {
                 // visible.
                 this.logTab.activate();
                 if (data.success) {
-                    await this.runAutoConnect();
+                    await this.runAutoConnect(seq);
                 }
             } else if ((action === 'stop' || action === 'kill') && data.success) {
                 await this.runAutoDisconnect();
             }
         } catch (err) {
             logger.error('ProcessControlManager', `${action} failed`, err);
-            this.setStatus(`${action} failed`);
+            if (!this.superseded(seq)) this.setStatus(`${action} failed`);
         } finally {
-            this.busy = false;
+            // Only the newest action may release the flag: a superseded action
+            // finishing late must not re-enable reconciliation under the one
+            // that took over.
+            if (!this.superseded(seq)) this.busy = false;
         }
     }
 
+    /** True once a newer lifecycle action has taken over the status display. */
+    private superseded(seq: number): boolean {
+        return seq !== this.actionSeq;
+    }
+
     /** Best-effort auto-connect to the just-started BlueSky server. */
-    private async runAutoConnect(): Promise<void> {
+    private async runAutoConnect(seq: number): Promise<void> {
         for (let attempt = 1; attempt <= ProcessControlManager.AUTO_CONNECT_ATTEMPTS; attempt++) {
             this.setStatus(attempt === 1 ? 'connecting…' : `connecting… (retry ${attempt - 1})`);
             try {
-                if (await this.autoConnect()) {
+                const connected = await this.autoConnect();
+                if (this.superseded(seq)) return;
+                if (connected) {
                     this.setStatus('running — connected');
                     return;
                 }
             } catch (err) {
                 logger.error('ProcessControlManager', 'auto-connect attempt failed', err);
+                if (this.superseded(seq)) return;
             }
         }
         this.setStatus('started — auto-connect failed (open Settings → Connect)');

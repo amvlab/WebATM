@@ -68,7 +68,6 @@ class TestClearState:
         proxy.traffic_data = {"id": ["AC1"]}
         proxy.sim_data = {"scenname": "x"}
         proxy.was_connected = True
-        proxy.aircraft_counter = 5
         proxy.poly_data_by_node["n1"] = {"polys": {}}
 
         proxy.data_mgr._clear_state()
@@ -78,7 +77,6 @@ class TestClearState:
         assert proxy.traffic_data == {}
         assert proxy.sim_data == {}
         assert proxy.was_connected is False
-        assert proxy.aircraft_counter == 0
         assert proxy.poly_data_by_node == {}
         assert proxy.cmddict == {}
 

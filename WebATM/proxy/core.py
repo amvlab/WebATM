@@ -43,7 +43,6 @@ class BlueSkyProxy:
         # Don't initialize BlueSky client in __init__ - create when needed
         # Following ZMQ pattern: create context and sockets only when connecting
         self.bluesky_client = None
-        self.zmq_context = None
 
         self.running = False
         self.network_timer = None
@@ -55,7 +54,6 @@ class BlueSkyProxy:
         # Connection monitoring
         self.last_successful_update = time.time()
         self.connection_timeout = 10.0  # 10 seconds without updates = disconnected
-        self.health_check_interval = 2.0  # Check connection every 2 seconds
         self.was_connected = False
         self.connection_failures = 0
         self.max_connection_failures = 3  # Max failures before marking disconnected
@@ -64,7 +62,6 @@ class BlueSkyProxy:
         self.traffic_data = {}
         self.sim_data = {}
         self.echo_data = {}
-        self.last_update = 0
 
         # Store POLY data by node ID
         self.poly_data_by_node = {}
@@ -72,17 +69,13 @@ class BlueSkyProxy:
         # Store POLYLINE data by node ID
         self.polyline_data_by_node = {}
 
-        # Throttling for data emission
+        # Throttling for data emission (echo messages are never throttled)
         self.last_siminfo_emit = 0
         self.last_acdata_emit = 0
-        self.last_echo_emit = 0
         self.last_node_info_emit = 0
-        self.siminfo_interval = 0.1  # 10 Hz for sim info (faster updates)
-        self.acdata_interval = 0.1  # 10 Hz for aircraft data (much faster updates!)
+        self.siminfo_interval = 0.1  # 10 Hz for sim info
+        self.acdata_interval = 0.1  # 10 Hz for aircraft data
         self.node_info_interval = 1.0  # 1 Hz periodic refresh of the Nodes panel
-        self.echo_interval = (
-            0.01  # 100 Hz for echo messages (near real-time for command responses)
-        )
 
         # Backup timer for data updates
         self.backup_timer = None
@@ -97,9 +90,6 @@ class BlueSkyProxy:
         # Store current map bounds
         self.current_bbox = None
 
-        # Counter for unique aircraft callsigns
-        self.aircraft_counter = 0
-
         # Store server IP address (default to localhost, will be set by main.py if configured)
         self.server_ip = "localhost"
 
@@ -111,7 +101,6 @@ class BlueSkyProxy:
             "HELP": "[command]",
             "?": "[command]",
         }  # Local command dictionary (like Command.cmddict)
-        self.echo_signal = None  # Signal for echo responses
 
         # Initialize managers
         self.connection_mgr = ConnectionManager(self)
