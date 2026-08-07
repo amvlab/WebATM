@@ -31,6 +31,27 @@ host, via `BLUESKY_SERVER_HOST=host.docker.internal`).
     docker compose logs -f webatm
     ```
 
+4. **(Optional) Mount your BlueSky working directory**
+
+    Mounting your local BlueSky directory into the container enables the
+    in-app file manager for `scenario/`, `plugins/`, `settings.cfg`, and
+    `output/`. Uncomment the `volumes:` block of the `webatm` service in
+    `docker-compose.yml` and point the host side at your BlueSky directory:
+
+    ```yaml
+    services:
+      webatm:
+        # ...
+        volumes:
+          - /path/to/your/bluesky:/bluesky
+    ```
+
+    The part before the colon is the path on your machine; the part after
+    is where it appears inside the container. Enter that container-side
+    path (`/bluesky`) in the web UI under **Settings → BlueSky base path**,
+    and apply the mount with `docker compose up -d` (the container is
+    recreated automatically).
+
 ### Integrated (`webatm-integrated`)
 
 A single container that ships the simulator itself, with
@@ -58,6 +79,26 @@ Start/Stop/Restart controls and a live server log in the UI — see the
     ```bash
     docker compose logs -f webatm-integrated
     ```
+
+5. **(Optional) Persist BlueSky's config directory**
+
+    BlueSky lives inside the container at `/home/webatm/bluesky`
+    (`settings.cfg`, `scenario/`, `plugins/`, `output/`), so by default its
+    state is lost when the container is recreated. To keep it across
+    restarts, uncomment the `volumes:` block of the `webatm-integrated`
+    service and point the host side at a directory of your choice:
+
+    ```yaml
+    services:
+      webatm-integrated:
+        # ...
+        volumes:
+          - /path/to/your/bluesky-config:/home/webatm/bluesky
+    ```
+
+    Unlike the standalone variant, no UI configuration is needed — the file
+    manager is pre-wired to that path. Apply the mount with
+    `docker compose up -d`.
 
 !!! tip "Building images locally"
     To run from source instead of the published GHCR images, build the
