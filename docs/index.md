@@ -11,15 +11,53 @@ visualization to control air traffic management simulations from the web.
 
 ## Features
 
-- **Interactive map visualization** — standard Web Mercator and globe view
-  with live aircraft tracking using MapLibre GL, including a 3D aircraft
-  overlay.
-- **Customizable map sources** — bring your own tile sources, use the bundled
-  OpenFreeMap styles, or run fully offline with a single
-  [PMTiles](offline-pmtiles.md) archive.
+### Map & visualization
+
+- **Flexible map projection** — switch between standard Web Mercator and a
+  3D globe view, powered by
+  [MapLibre GL](https://maplibre.org/maplibre-gl-js/docs/).
+- **Customizable map sources** — bring your own tile sources, or use the
+  bundled OpenFreeMap styles.
+- **Offline operation** — fully air-gapped deployments with a local
+  [PMTiles](offline-pmtiles.md) basemap and an airport/runway/waypoint
+  navdata overlay.
+
+### Aircraft display
+
+- **Intuitive interaction** — single-click to fly to any aircraft,
+  double-click to activate follow mode.
+- **Customizable display** — toggle visibility of labels, icons, trails,
+  routes, and shapes.
+- **Aircraft type in labels & info panel** — view aircraft type directly on
+  map labels and in the aircraft information panel.
+- **Flexible styling** — choose from chevron, drone, triangle, or aircraft
+  icon styles and customise colors.
+- **3D visualization** — render aircraft as 3D models (A320, A350, A380,
+  B737, B787, EVTOL, and drone), bundled from amvlab's open-source
+  [aircraft-models](https://github.com/amvlab/aircraft-models) collection.
+
+### Console & commands
+
+- **Smart command input** — tab completion for BlueSky commands with
+  autosuggestion.
+- **Command palette** — quickly browse and search available BlueSky stack
+  commands from the console.
+- **Console map picker** — select coordinates directly from the map when
+  entering commands.
+
+### Scenarios & simulation
+
+- **Scenario file management** — upload, organize, and run BlueSky scenario
+  (`.scn`) files and folders straight from the web interface.
+- **Multi-node simulation** — spawn and manage multiple parallel simulation
+  nodes from one interface.
 - **BlueSky integration** — seamless connection to BlueSky ATM simulator
   servers over the native BlueSky ZMQ protocol.
-- **TypeScript architecture** — modern, type-safe client-side application.
+
+### Architecture & deployment
+
+- **TypeScript architecture** — modern, fully type-safe client-side
+  application.
 - **Docker-ready** — containerized deployment with Docker Compose, plus an
   optional [integrated build](integrated-build.md) that bundles the BlueSky
   simulator itself.
@@ -48,18 +86,9 @@ See the [Architecture](architecture.md) page for the full picture, and the
 - [Screenshot Gallery](gallery.md) — the full gallery of live-traffic
   screenshots used throughout these docs.
 
-## WebATM Pro
-
-Looking for advanced features? **WebATM Pro** includes capabilities beyond
-this open-source version: a server development environment, advanced 3D
-visualization, enhanced server lifecycle management, multi-server support,
-and flexible managed or on-premises deployment.
-
-**[Visit amvlab.eu for the Pro version](https://amvlab.eu)**
-
 ## License & acknowledgments
 
-Copyright © 2025 amvlab. Licensed under the GNU Affero General Public License
+Copyright © 2025–2026 amvlab. Licensed under the GNU Affero General Public License
 v3.0 (AGPL-3.0).
 
 This software incorporates **BlueSky — The Open Air Traffic Simulator**

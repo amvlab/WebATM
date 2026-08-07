@@ -65,6 +65,30 @@ script/run_webatm.sh --integrated
 For local frontend work on the variant: `npm run build:integrated` /
 `npm run watch:integrated`.
 
+### Build with your own BlueSky fork
+
+The integrated image pulls BlueSky from
+[`amvlab/bluesky`](https://github.com/amvlab/bluesky) on its `main` branch
+by default. To build against your own fork, branch, or tag, edit the
+`bluesky-simulator` dependency line in `WebATM-integrated/pyproject.toml`:
+
+```toml
+dependencies = [
+    "bluesky-simulator[headless] @ git+https://github.com/<your-org>/bluesky.git@<branch-or-tag>",
+]
+```
+
+Then build and run the image locally:
+
+```bash
+docker build -f Dockerfile.integrated -t webatm-integrated:dev .
+docker run --rm -p 8082:8082 webatm-integrated:dev
+```
+
+Your fork must keep BlueSky's pip distribution name (`bluesky-simulator`)
+and the `bluesky = bluesky.__main__:main` console script entry point — the
+container spawns the server as `bluesky --headless`.
+
 ## How the exclusion works
 
 - **Backend**: `webatm_integrated` is never imported by the core `webatm`
