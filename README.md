@@ -9,7 +9,7 @@ A modern web client for the [BlueSky Air Traffic Management (ATM) simulator](htt
 ## Features
 
 - **Interactive map** — Web Mercator or 3D globe view powered by [MapLibre GL](https://maplibre.org/maplibre-gl-js/docs/), with custom tile sources and fully offline (air-gapped) operation from a local [PMTiles](https://docs.protomaps.com/pmtiles/) basemap and navdata overlay
-- **Rich aircraft display** — click-to-fly and follow modes, configurable labels/trails/routes/shapes, multiple 2D icon styles, and 3D aircraft models (A320, A350, A380, drones, and more)
+- **Rich aircraft display** — click-to-fly and follow modes, configurable labels/trails/routes/shapes, multiple 2D icon styles, and bundled 3D aircraft models (A320, A350, A380, B737, B787, EVTOL, and drone) from amvlab's open-source [aircraft-models](https://github.com/amvlab/aircraft-models) collection
 - **Powerful command console** — tab completion and autosuggestion for BlueSky commands, a searchable command palette, and picking coordinates straight from the map
 - **Scenario management** — upload, organize, and run BlueSky scenario (`.scn`) files and folders from the browser
 - **Simulation control** — multi-node simulations and seamless connection to BlueSky servers, all from a fully type-safe TypeScript client

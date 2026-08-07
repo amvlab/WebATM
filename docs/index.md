@@ -33,7 +33,8 @@ visualization to control air traffic management simulations from the web.
 - **Flexible styling** — choose from chevron, drone, triangle, or aircraft
   icon styles and customise colors.
 - **3D visualization** — render aircraft as 3D models (A320, A350, A380,
-  drones, and more).
+  B737, B787, EVTOL, and drone), bundled from amvlab's open-source
+  [aircraft-models](https://github.com/amvlab/aircraft-models) collection.
 
 ### Console & commands
 
