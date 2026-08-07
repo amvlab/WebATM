@@ -2,9 +2,9 @@ site_name: WebATM
 site_description: >-
   A modern standalone web client for the BlueSky Air Traffic Management
   simulator, with MapLibre GL aircraft visualization.
-site_url: https://amvlab.github.io/WebATM_core/
-repo_url: https://github.com/amvlab/WebATM_core
-repo_name: amvlab/WebATM_core
+site_url: https://amvlab.github.io/WebATM/
+repo_url: https://github.com/amvlab/WebATM
+repo_name: amvlab/WebATM
 copyright: Copyright &copy; 2025 amvlab &mdash; AGPL-3.0
 
 theme:
