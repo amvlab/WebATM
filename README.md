@@ -52,7 +52,7 @@ Full documentation lives at **[docs.amvlab.eu](https://docs.amvlab.eu/)**:
 
 ## License
 
-Copyright (c) 2025 [amvlab](https://amvlab.eu)
+Copyright (c) 2025–2026 amvlab
 
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE) file for details.
 
@@ -60,8 +60,8 @@ This project is licensed under the GNU Affero General Public License v3.0 (AGPL-
 
 This software incorporates **[BlueSky - The Open Air Traffic Simulator](https://github.com/TUDelft-CNS-ATM/bluesky)** technology developed by TU Delft (Delft University of Technology). We acknowledge and thank TU Delft for their contribution to the open aviation simulation community.
 
-The offline basemap is built from [Protomaps](https://protomaps.com/) planet builds distributed as [PMTiles](https://docs.protomaps.com/pmtiles/), derived from OpenStreetMap data (© OpenStreetMap contributors, [ODbL](https://www.openstreetmap.org/copyright)). The airport, runway, taxiway, and waypoint overlay is built from X-Plane navigation data (`apt.dat` and `earth_fix.dat`) released by [Laminar Research](https://www.x-plane.com/) under the GNU GPL, with airport importance ranking and IATA codes sourced from [OurAirports](https://ourairports.com/data/) (public domain).
+The offline basemap is built from [Protomaps](https://protomaps.com/) planet builds distributed as [PMTiles](https://docs.protomaps.com/pmtiles/), derived from OpenStreetMap data (© OpenStreetMap contributors, [ODbL](https://www.openstreetmap.org/copyright)). The airport, runway, and navaid overlay is built from [OurAirports](https://ourairports.com/data/) open data, released into the public domain; its taxiways and aprons are derived from OpenStreetMap data (© OpenStreetMap contributors, ODbL).
 
 ## Support
 
-For inquiries and support, please contact [amvlab](https://amvlab.eu).
+For inquiries and support, please contact amvlab.
