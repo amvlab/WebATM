@@ -75,8 +75,5 @@ def on_request_received(data, *args, **kwargs):
     if not active_proxy():
         return
 
-    try:
-        logger.debug(f"REQUEST data received: {data}")
-        # TODO: Implement specific request handling logic
-    except Exception as e:
-        logger.error(f"Error processing REQUEST data: {e}")
+    # TODO: Implement specific request handling logic
+    logger.debug(f"REQUEST data received: {data}")
