@@ -10,7 +10,7 @@ import { logger } from '../../../utils/Logger';
  *
  * Unlike ShapeRenderer (which pushes simulation GeoJSON into geojson sources),
  * this reads a pre-built vector-tile archive produced offline from the
- * public-domain OurAirports data (see scripts/navdata/). The archive is served
+ * public-domain OurAirports data (see script/navdata/). The archive is served
  * as a single static PMTiles file and exposes the source-layers "airports",
  * "heliports", "waypoints" (radio navaids) and "runways" - plus "pavement"
  * (aprons), "taxiways" and "buildings" (terminals/hangars) when the archive
@@ -40,7 +40,7 @@ export class NavdataRenderer {
     private readonly SOURCE_URL = 'pmtiles:///static/tiles/navdata.pmtiles';
 
     // Source-layer names must match the tippecanoe --layer names in
-    // scripts/navdata/build_navdata_tiles.sh.
+    // script/navdata/build_navdata_tiles.sh.
     private readonly AIRPORTS_SRC_LAYER = 'airports';
     private readonly HELIPORTS_SRC_LAYER = 'heliports';
     private readonly WAYPOINTS_SRC_LAYER = 'waypoints';

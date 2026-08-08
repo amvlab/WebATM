@@ -85,10 +85,10 @@ separate archive that works at full detail regardless of the basemap's zoom
 range. It is built from the public-domain
 [OurAirports](https://ourairports.com/data/) open data
 (`airports.csv`, `runways.csv`, `navaids.csv`, downloaded automatically) by
-the offline build pipeline in `scripts/navdata/`:
+the offline build pipeline in `script/navdata/`:
 
 ```bash
-cd scripts/navdata
+cd script/navdata
 ./build_navdata_tiles.sh
 ```
 
@@ -104,7 +104,7 @@ and `tile-join`) plus `python3` and `curl`, and produces two outputs:
     Both outputs are gitignored (large/binary) and are already included in
     the prebuilt release assets bundle — you only need to run the pipeline
     when building your own data. See
-    [scripts/navdata/README.md](https://github.com/amvlab/WebATM_core/blob/main/scripts/navdata/README.md)
+    [script/navdata/README.md](https://github.com/amvlab/WebATM_core/blob/main/script/navdata/README.md)
     for what each dataset provides and the zoom/declutter tuning flags.
 
 ### Taxiways & aprons (OpenStreetMap)
@@ -123,7 +123,7 @@ them — they come from OpenStreetMap:
   extract instead:
 
   ```bash
-  cd scripts/navdata
+  cd script/navdata
   ./build_navdata_tiles.sh --osm-pbf /path/to/region-latest.osm.pbf
   ```
 

@@ -511,7 +511,7 @@ export interface DisplayOptions {
   showShapeLines: boolean;
   showShapeLabels: boolean;
   // Navigation data overlay (airports + navaids from OurAirports open data,
-  // served as vector tiles - see scripts/navdata/)
+  // served as vector tiles - see script/navdata/)
   showAirports: boolean;
   showAirportIcons: boolean;
   showAirportLabels: boolean;
