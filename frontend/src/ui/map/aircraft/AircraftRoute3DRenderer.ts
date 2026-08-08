@@ -1,9 +1,8 @@
 import * as THREE from 'three';
-import { MercatorCoordinate } from 'maplibre-gl';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import { CustomLayer3D } from '../rendering/CustomLayer3D';
 import type { Render3DArgs } from '../rendering/CustomLayer3D';
-import { altitudeScaledForOrigin, relativePositionMeters } from '../rendering/mercatorUtils';
+import { altitudeScaledForOrigin, mercatorCameraMatrix, relativePositionMeters } from '../rendering/mercatorUtils';
 import type { RouteData, DisplayOptions } from '../../../data/types';
 import { logger } from '../../../utils/Logger';
 import { safeRemoveLayer } from '../../../utils/maplibre';
@@ -19,7 +18,8 @@ import { safeRemoveLayer } from '../../../utils/maplibre';
  *   - If `wpalt[i] > 0`: use that constraint altitude (meters)
  *   - Otherwise: use the aircraft's current altitude
  *
- * NOTE: v1 uses scene-relative mercator positioning only. Globe-projection
+ * NOTE: v1 uses scene-relative mercator positioning only. In globe
+ * projection the geometry is hidden rather than misprojected; real globe
  * support is a known follow-up (would need per-vertex getMatrixForModel).
  */
 export class AircraftRoute3DRenderer {
@@ -149,7 +149,6 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
     private sphereMeshes: THREE.Mesh[] = [];
     private lineObjects: THREE.Line[] = [];
     private sceneOrigin: { lng: number; lat: number } | null = null;
-    private sceneOriginElevation: number = 0;
 
     // Scene-relative mercator group. Matches Aircraft3DCustomLayer's mercator group
     // conventions (x=east, y=up, z=north) so geometry aligns with aircraft meshes.
@@ -163,7 +162,6 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
     protected onSceneReady(): void {
         this.mercatorGroup = new THREE.Group();
         this.mercatorGroup.rotateX(Math.PI / 2);
-        this.mercatorGroup.scale.multiply(new THREE.Vector3(1, 1, -1));
         this.scene.add(this.mercatorGroup);
 
         this.rebuildScene();
@@ -368,15 +366,10 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
     }
 
     /**
-     * Convert lat/lon/alt to scene-relative meter coordinates for the mercator group.
-     * Scene axes after group rotation: x=east, y=up, z=north. Altitude in meters.
-     *
-     * Altitude is pre-scaled by the per-point / scene-origin mercator-per-meter
-     * ratio so that, after the camera projection multiplies y by the scene
-     * origin's mercator-per-meter, world Z equals altitude × per-point
-     * mercator scale. This is what the 3D aircraft renderer also does, so
-     * both layers agree on visual height regardless of where each puts its
-     * scene origin.
+     * Convert lat/lon/alt to scene-relative meter coordinates (x=east, y=up,
+     * z=north). Altitude is pre-scaled per point (see altitudeScaledForOrigin)
+     * so this layer and the 3D aircraft layer agree on visual height even
+     * though they use different scene origins.
      */
     private toScenePos(lat: number, lon: number, altitudeMeters: number): THREE.Vector3 {
         const rel = this.calculateRelativePosition(lat, lon);
@@ -412,22 +405,19 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
     }
 
     protected updateScene(args?: Render3DArgs): void {
-        if (!this.sceneOrigin || !args || !this.mercatorGroup) return;
+        if (!this.mercatorGroup) return;
 
-        const sceneOriginMercator = MercatorCoordinate.fromLngLat(
-            [this.sceneOrigin.lng, this.sceneOrigin.lat],
-            this.sceneOriginElevation
+        // The scene math is mercator-only: mainMatrix means something else in
+        // globe projection (the aircraft layer switches to globe matrices,
+        // this layer can't yet), so hide the geometry instead of projecting
+        // it to bogus screen positions.
+        const inGlobe = this.isGlobeProjection();
+        this.mercatorGroup.visible = !inGlobe;
+        if (inGlobe || !this.sceneOrigin || !args) return;
+
+        this.camera.projectionMatrix = mercatorCameraMatrix(
+            args.defaultProjectionData.mainMatrix,
+            this.sceneOrigin
         );
-
-        const m = new THREE.Matrix4().fromArray(args.defaultProjectionData.mainMatrix);
-        const l = new THREE.Matrix4()
-            .makeTranslation(sceneOriginMercator.x, sceneOriginMercator.y, sceneOriginMercator.z)
-            .scale(new THREE.Vector3(
-                sceneOriginMercator.meterInMercatorCoordinateUnits(),
-                -sceneOriginMercator.meterInMercatorCoordinateUnits(),
-                sceneOriginMercator.meterInMercatorCoordinateUnits()
-            ));
-
-        this.camera.projectionMatrix = m.multiply(l);
     }
 }

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { MercatorCoordinate } from 'maplibre-gl';
 import type { Map as MapLibreMap } from 'maplibre-gl';
-import { altitudeScaledForOrigin, relativePositionMeters } from '../rendering/mercatorUtils';
+import { altitudeScaledForOrigin, mercatorCameraMatrix, relativePositionMeters } from '../rendering/mercatorUtils';
 import { getGlobeModelMatrix } from '../rendering/globeMatrix';
 import type { Render3DArgs } from '../rendering/CustomLayer3D';
 import type { AircraftData, DisplayOptions } from '../../../data/types';
@@ -61,17 +60,14 @@ export interface Aircraft3DTransformsDeps {
  * for both projection modes.
  */
 export class Aircraft3DTransforms {
-    private sceneOrigin: { lng: number; lat: number } | null = null; // Scene origin for relative positioning
-    private sceneOriginElevation: number = 0; // Scene origin elevation in meters
-    private maxDistanceFromOrigin: number = 10000; // Max distance in meters before repositioning origin
+    // Scene origin for relative positioning (mercator mode)
+    private sceneOrigin: { lng: number; lat: number } | null = null;
+    // Max distance in meters an aircraft may drift from the origin before it is repositioned
+    private readonly maxDistanceFromOrigin = 10000;
 
     // Inverse of the globe origin matrix for the current frame. Globe mesh
-    // matrices are made origin-relative with this so their translations stay
-    // small; the origin matrix itself is folded into the camera projection in
-    // applyGlobeCamera (computed on the CPU in double precision). Without this,
-    // the globe model matrix's huge absolute translations dwarf the tiny model
-    // scale and float32 rounding on the GPU quantizes vertices to ~meter
-    // steps, crumpling small aircraft into stretched "stringy" triangles.
+    // matrices are rebased with this so their translations stay small enough
+    // for GPU float32; see applyGlobeCamera for the full story.
     private globeOriginMatrixInverse: THREE.Matrix4 | null = null;
 
     constructor(private readonly deps: Aircraft3DTransformsDeps) {}
@@ -249,30 +245,18 @@ export class Aircraft3DTransforms {
      * Used when scene-based transform is active (mercator mode)
      */
     updateMeshTransform(mesh: THREE.Object3D, data: AircraftMeshData): void {
-        // Calculate position relative to scene origin in meters
         const relativePos = this.calculateRelativePosition(data.lat, data.lon);
-
         const { headingRad, finalScale } = this.computeMeshTransformBasics(mesh, data);
 
         // Altitude in meters from BlueSky, lat-corrected so the world Z
         // matches the route renderer (which has a different scene origin).
         const altitudeMeters = this.altitudeForOrigin(data.alt, data.lat, data.lon);
 
-        // Set position in meter coordinates relative to scene origin
-        // Scene coordinate system: (x=east, y=up, z=north)
-        mesh.position.set(
-            relativePos.east,         // x = east offset in meters
-            altitudeMeters,          // y = up (altitude) in meters
-            relativePos.north        // z = north offset in meters
-        );
+        // Scene frame: x=east, y=up, z=north, in meters from the scene origin
+        mesh.position.set(relativePos.east, altitudeMeters, relativePos.north);
 
-        // Set rotation for aircraft heading
-        // In our scene coordinate system (x=east, y=up, z=north):
-        // - Y-axis rotation controls heading (rotation around vertical axis)
-        // - 0° heading = north = positive Z direction
-        // - Aviation convention: 0°=N, 90°=E, 180°=S, 270°=W
-        // - Three.js Y-rotation: 0=+Z(north), π/2=+X(east), π=-Z(south), 3π/2=-X(west)
-        // - Model correction: subtract π/2 to account for model's default orientation
+        // Heading is a Y (vertical-axis) rotation: aviation 0°=N maps to
+        // three.js +Z, minus π/2 for the model's default orientation.
         mesh.rotation.set(0, headingRad - Math.PI / 2, 0);
 
         // Set scale
@@ -339,10 +323,8 @@ export class Aircraft3DTransforms {
     private updateMeshTransformForMercator(mesh: THREE.Object3D, data: AircraftMeshData): void {
         const { altitudeMeters, headingRad, finalScale } = this.computeMeshTransformBasics(mesh, data);
 
-        // Use traditional transform matrix for mercator
-        // Aviation convention: 0°=N, 90°=E, 180°=S, 270°=W
-        // Three.js Y-rotation: 0=+Z(north), π/2=+X(east), π=-Z(south), 3π/2=-X(west)
-        // Model correction: subtract π/2 to account for model's default orientation
+        // Same heading convention as updateMeshTransform, folded into an
+        // absolute mercator matrix instead of scene-relative position.
         const transformMatrix = this.deps.createFallbackMatrix(
             data.lon,
             data.lat,
@@ -389,30 +371,15 @@ export class Aircraft3DTransforms {
     }
 
     /**
-     * Per-frame camera projection for mercator mode: mainMatrix × scene
-     * origin translation × meters-to-mercator scale. Returns false when no
+     * Per-frame camera projection for mercator mode. Returns false when no
      * scene origin exists yet (nothing to project against).
      */
     applyMercatorCamera(args: Render3DArgs): boolean {
         if (!this.sceneOrigin) return false;
-
-        const sceneOriginMercator = MercatorCoordinate.fromLngLat(
-            [this.sceneOrigin.lng, this.sceneOrigin.lat],
-            this.sceneOriginElevation
+        this.deps.getCamera().projectionMatrix = mercatorCameraMatrix(
+            args.defaultProjectionData.mainMatrix,
+            this.sceneOrigin
         );
-
-        // Apply transform: mainMatrix * translation * scale.
-        // The mercatorGroup's rotateX(π/2) already flips scene-north into
-        // mercator-south, so we use a pure positive scale here (no Y mirror).
-        // Keeping all scales positive avoids mirroring the texture content
-        // of aircraft models (which would otherwise render text reversed).
-        const scale = sceneOriginMercator.meterInMercatorCoordinateUnits();
-        const m = new THREE.Matrix4().fromArray(args.defaultProjectionData.mainMatrix);
-        const l = new THREE.Matrix4()
-            .makeTranslation(sceneOriginMercator.x, sceneOriginMercator.y, sceneOriginMercator.z)
-            .scale(new THREE.Vector3(scale, scale, scale));
-
-        this.deps.getCamera().projectionMatrix = m.multiply(l);
         return true;
     }
 }
