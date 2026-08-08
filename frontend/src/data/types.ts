@@ -510,7 +510,7 @@ export interface DisplayOptions {
   showShapeFill: boolean;
   showShapeLines: boolean;
   showShapeLabels: boolean;
-  // Navigation data overlay (airports + waypoints from X-Plane navdata,
+  // Navigation data overlay (airports + navaids from OurAirports open data,
   // served as vector tiles - see scripts/navdata/)
   showAirports: boolean;
   showAirportIcons: boolean;
@@ -521,6 +521,8 @@ export interface DisplayOptions {
   showWaypointLabels: boolean;
   showRunways: boolean;
   showRunwayLabels: boolean;
+  // Taxiways & aprons: rendered from the basemap's OpenMapTiles 'aeroway'
+  // layer when available, else from the navdata archive's OSM-built layers.
   showPavement: boolean;
   // Snap drawing/creation clicks to the nearest navaid (airport/heliport/waypoint).
   snapToNavaids: boolean;

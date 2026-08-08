@@ -84,7 +84,7 @@ export class StateManager {
                 showAirports: true,
                 showAirportIcons: true,
                 showAirportLabels: true,
-                // Heliports are noisy (apt.dat has thousands), so off by default.
+                // Heliports are noisy (OurAirports has tens of thousands), so off by default.
                 showHeliports: false,
                 showWaypoints: true,
                 showWaypointIcons: true,
@@ -98,7 +98,9 @@ export class StateManager {
                 airportColor: '#4da3ff',
                 heliportColor: '#e0823c',
                 waypointColor: '#9aa7b4',
-                runwayColor: '#c8d2dc',
+                // Runways share the pavement colour so the whole airport
+                // surface reads as one material (labels carry the contrast).
+                runwayColor: '#5a6470',
                 pavementColor: '#5a6470',
                 aircraftIconSize: 0.8,
                 mapLabelsTextSize: 12,
