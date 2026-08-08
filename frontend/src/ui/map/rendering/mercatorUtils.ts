@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { MercatorCoordinate } from 'maplibre-gl';
 
 /**
@@ -47,4 +48,24 @@ export function altitudeScaledForOrigin(
     const pointMpm = MercatorCoordinate.fromLngLat([point.lng, point.lat]).meterInMercatorCoordinateUnits();
     const originMpm = MercatorCoordinate.fromLngLat([origin.lng, origin.lat]).meterInMercatorCoordinateUnits();
     return altMeters * (pointMpm / originMpm);
+}
+
+/**
+ * Camera projection matrix for a scene positioned in meters relative to
+ * `origin`: mainMatrix x translate(origin in mercator) x uniform meter scale.
+ *
+ * Expects the scene group to map its local (east, up, north) frame into
+ * mercator axes with a plain rotateX(PI/2) and no mirror — keeping every
+ * scale positive avoids flipping texture content (e.g. fuselage text).
+ */
+export function mercatorCameraMatrix(
+    mainMatrix: ArrayLike<number>,
+    origin: LngLatPoint
+): THREE.Matrix4 {
+    const originMercator = MercatorCoordinate.fromLngLat([origin.lng, origin.lat]);
+    const scale = originMercator.meterInMercatorCoordinateUnits();
+    const local = new THREE.Matrix4()
+        .makeTranslation(originMercator.x, originMercator.y, originMercator.z)
+        .scale(new THREE.Vector3(scale, scale, scale));
+    return new THREE.Matrix4().fromArray(mainMatrix).multiply(local);
 }
