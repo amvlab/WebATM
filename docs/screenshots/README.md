@@ -99,3 +99,35 @@ Liberty style's 3D buildings.
 | Fleet on Dark (dark theme) | A350 close-up on Dark (light theme) |
 | ![Fleet on Fiord, dark theme](fiord-fleet-dark.png) | ![B747 hero on Fiord, light theme](fiord-hero-light.png) |
 | Fleet on Fiord (dark theme) | B747 close-up on Fiord (light theme) |
+
+### Terrain — the Swiss Alps
+
+3D terrain switched on over the light Positron basemap: Mapterhorn `raster-dem`
+tiles drive both the terrain mesh and a hillshade layer, with live traffic
+cruising above the peaks at FL170–FL240. The simulation is paused while each
+frame is captured, so the header reads `Rate: 0x`.
+
+**Valais — Zermatt, Saas and the Simplon**
+
+| | |
+|---|---|
+| ![Fleet over the Valais Alps](swiss-valais-fleet-light.png) | ![A320 above Zermatt](swiss-matterhorn-a320.png) |
+| Fleet over the Valais Alps (light theme) | A320 above Zermatt and the Matterhorn (light theme) |
+| ![A350 over the Saas valley](swiss-valais-a350.png) | ![A380 above Macugnaga](swiss-valais-a380.png) |
+| A350 over the Saas valley (light theme) | A380 above Macugnaga, with traffic over the Simplon (light theme) |
+
+**Bernese Oberland — Interlaken, Jungfrau and the Brienzersee**
+
+| | |
+|---|---|
+| ![Fleet over the Bernese Oberland](swiss-jungfrau-fleet-light.png) | ![A320 above Lauterbrunnen](swiss-jungfrau-a320.png) |
+| Fleet over the Bernese Oberland (light theme) | A320 above Lauterbrunnen, Interlaken behind (light theme) |
+| ![B747 above Meiringen](swiss-oberland-b747.png) | |
+| B747 above Meiringen and the Brienzersee (light theme) | |
+
+**Lake Geneva and the Rhône valley**
+
+| | |
+|---|---|
+| ![Fleet over Lake Geneva](swiss-leman-fleet-light.png) | ![A350 above the Rhône valley](swiss-leman-a350.png) |
+| Fleet over Lake Geneva and the Rhône valley (light theme) | A350 above the Rhône valley near Aigle (light theme) |
