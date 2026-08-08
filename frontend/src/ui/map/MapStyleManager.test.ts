@@ -21,14 +21,14 @@ function makeMap(): { map: Map; setStyle: ReturnType<typeof vi.fn>; once: Return
     return { map, setStyle, once };
 }
 
-function makeManager(): {
+function makeManager(onBeforeStyleChange?: () => void): {
     mgr: MapStyleManager;
     setStyle: ReturnType<typeof vi.fn>;
     once: ReturnType<typeof vi.fn>;
 } {
     localStorage.clear();
     const { map, setStyle, once } = makeMap();
-    const mgr = new MapStyleManager(() => map);
+    const mgr = new MapStyleManager(() => map, onBeforeStyleChange);
     // Start on the remote default basemap (a https:// style URL).
     mgr.resolveInitialStyle();
     expect(mgr.getCurrentStyle().startsWith('http')).toBe(true);
@@ -76,6 +76,46 @@ describe('MapStyleManager offline fallback', () => {
         mgr.handleMapError({ error: err() });
 
         expect(setStyle).toHaveBeenCalledTimes(1);
+    });
+});
+
+/**
+ * Characterizes the before-style-change hook: it must fire before *every*
+ * map.setStyle call, from every trigger, so renderers that attached layers to
+ * the outgoing style's sources (NavdataRenderer's basemap-aeroway layers) can
+ * tear them down before MapLibre's style diff runs. If the hook ever fires
+ * after setStyle — or a trigger bypasses changeStyle — the "Source ... cannot
+ * be removed while layer ... is using it" race this guards against reopens.
+ */
+describe('MapStyleManager before-style-change hook', () => {
+    beforeEach(() => localStorage.clear());
+
+    it('invokes the hook before setStyle on a direct style change', () => {
+        const calls: string[] = [];
+        const { mgr, setStyle } = makeManager(() => calls.push('before'));
+        setStyle.mockImplementation(() => calls.push('setStyle'));
+
+        mgr.changeStyle('https://example.com/style.json');
+
+        expect(calls).toEqual(['before', 'setStyle']);
+    });
+
+    it('invokes the hook before setStyle on the error-event offline fallback', () => {
+        const calls: string[] = [];
+        const { mgr, setStyle } = makeManager(() => calls.push('before'));
+        setStyle.mockImplementation(() => calls.push('setStyle'));
+
+        mgr.handleMapError({ error: Object.assign(new Error('Failed to fetch'), { status: 0 }) });
+
+        expect(calls).toEqual(['before', 'setStyle']);
+    });
+
+    it('still swaps styles when no hook is registered', () => {
+        const { mgr, setStyle } = makeManager();
+
+        mgr.changeStyle('https://example.com/style.json');
+
+        expect(setStyle).toHaveBeenCalledWith('https://example.com/style.json');
     });
 });
 
@@ -154,6 +194,18 @@ describe('MapStyleManager first-load probe fallback', () => {
         await flushProbe();
 
         expect(setStyle).not.toHaveBeenCalled();
+    });
+
+    it('invokes the before-style-change hook before setStyle on the probe fallback', async () => {
+        const calls: string[] = [];
+        const { mgr, setStyle } = makeManager(() => calls.push('before'));
+        setStyle.mockImplementation(() => calls.push('setStyle'));
+        vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))));
+
+        mgr.armFirstLoadFallback();
+        await flushProbe();
+
+        expect(calls).toEqual(['before', 'setStyle']);
     });
 
     it('does not arm the probe when booting on a local (offline) style', () => {

@@ -27,6 +27,13 @@ export class NavdataRenderer {
     private mapDisplay: MapDisplay;
     private stateManager: StateManager;
     private initialized = false;
+    // Set while a basemap style swap is in flight (between prepareForStyleChange
+    // and the following onStyleChange), so a 'sourcedata' event racing the swap
+    // can't re-attach the basemap-aeroway layers to a source that's mid-removal.
+    private styleTransitioning = false;
+    // Disarms the map 'error' listener armed by the latest prepareForStyleChange
+    // call, if one is still pending (see armStyleSwapErrorReset).
+    private disarmStyleSwapErrorReset: (() => void) | null = null;
 
     private readonly SOURCE_ID = 'navdata';
     // Served statically; the pmtiles:// protocol is registered in MapDisplay.
@@ -506,6 +513,7 @@ export class NavdataRenderer {
      * precedence when present, to avoid double-drawing the same OSM geometry.
      */
     private tryAddBasemapAeroway(map: MapLibreMap): void {
+        if (this.styleTransitioning) return;
         if (
             map.getLayer(this.BASEMAP_PAVEMENT_FILL_LAYER_ID) ||
             map.getLayer(this.BASEMAP_TAXIWAYS_LINE_LAYER_ID)
@@ -694,17 +702,93 @@ export class NavdataRenderer {
     }
 
     /**
+     * Explicit teardown for the basemap-attached aeroway layers (see
+     * tryAddBasemapAeroway), called right before a style swap starts.
+     *
+     * MapLibre's own style diff removes layers whose source disappears, but
+     * only correctly if nothing re-attaches a layer to the dying source in
+     * between computing and executing that diff. The persistent 'sourcedata'
+     * listener registered in initialize() can do exactly that: on a slow or
+     * flaky connection (observed on the demo deployment, not locally), the
+     * basemap's vector-tile metadata can arrive - triggering
+     * tryAddBasemapAeroway - right as an offline-fallback swap
+     * (MapStyleManager.armFirstLoadFallback / handleMapError) is in flight,
+     * which surfaces as MapLibre's "Source ... cannot be removed while layer
+     * ... is using it" error. Removing the layers upfront and pausing
+     * tryAddBasemapAeroway (via styleTransitioning) until the new style has
+     * loaded closes that window.
+     */
+    public prepareForStyleChange(): void {
+        this.styleTransitioning = true;
+        const map = this.mapDisplay.getMap();
+        if (!map) return;
+        if (map.getLayer(this.BASEMAP_PAVEMENT_FILL_LAYER_ID)) {
+            map.removeLayer(this.BASEMAP_PAVEMENT_FILL_LAYER_ID);
+        }
+        if (map.getLayer(this.BASEMAP_TAXIWAYS_LINE_LAYER_ID)) {
+            map.removeLayer(this.BASEMAP_TAXIWAYS_LINE_LAYER_ID);
+        }
+        this.armStyleSwapErrorReset(map);
+    }
+
+    /**
+     * Arm the failure-path reset for the styleTransitioning pause.
+     *
+     * onStyleChange (driven by MapDisplay's 'style.load' handler) lifts the
+     * pause only when the incoming style actually loads. If the style document
+     * fetch fails instead — a mistyped custom style URL, or a network failure
+     * once the one-shot offline fallback has already been used up — no
+     * 'style.load' ever fires and the pause would stick forever, permanently
+     * suppressing tryAddBasemapAeroway. So a map 'error' during the swap lifts
+     * the pause too. Worst case an unrelated (e.g. tile) error lifts it a
+     * little early, restoring the pre-pause self-healing re-attach behavior —
+     * never a stuck latch.
+     */
+    private armStyleSwapErrorReset(map: MapLibreMap): void {
+        this.disarmStyleSwapErrorReset?.();
+        const onSwapError = (): void => {
+            map.off('error', onSwapError);
+            // MapLibre dispatches events to a snapshot of the listener list,
+            // so this still runs for the very error event whose offline
+            // fallback (handleMapError -> changeStyle -> prepareForStyleChange)
+            // already started a newer swap. Never lift that newer swap's pause.
+            if (this.disarmStyleSwapErrorReset !== disarm) return;
+            this.disarmStyleSwapErrorReset = null;
+            this.styleTransitioning = false;
+        };
+        const disarm = (): void => {
+            map.off('error', onSwapError);
+            this.disarmStyleSwapErrorReset = null;
+        };
+        map.on('error', onSwapError);
+        this.disarmStyleSwapErrorReset = disarm;
+    }
+
+    /**
+     * The style swap concluded (or the renderer is going away): resume
+     * tryAddBasemapAeroway and drop any pending 'error' failure-path reset.
+     */
+    private endStyleTransition(): void {
+        this.styleTransitioning = false;
+        this.disarmStyleSwapErrorReset?.();
+    }
+
+    /**
      * Re-add layers after a basemap style change wipes them (mirrors the
      * pattern used by ShapeRenderer / MapOverlay).
      */
     public onStyleChange(): void {
         logger.debug('NavdataRenderer', 'Map style changed - recreating layers');
+        this.endStyleTransition();
         const map = this.mapDisplay.getMap();
         if (!map) return;
         this.setupMapLayers(map);
     }
 
     public destroy(): void {
+        // A teardown mid-swap must not leave the pause latched (or the error
+        // listener attached) into a later re-initialize.
+        this.endStyleTransition();
         this.initialized = false;
         logger.info('NavdataRenderer', 'Destroyed');
     }
