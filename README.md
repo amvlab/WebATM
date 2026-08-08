@@ -52,7 +52,7 @@ Full documentation lives at **[docs.amvlab.eu](https://docs.amvlab.eu/)**:
 
 ## License
 
-Copyright (c) 2025 [amvlab](https://amvlab.eu)
+Copyright (c) 2025–2026 amvlab
 
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE) file for details.
 
@@ -64,4 +64,4 @@ The offline basemap is built from [Protomaps](https://protomaps.com/) planet bui
 
 ## Support
 
-For inquiries and support, please contact [amvlab](https://amvlab.eu).
+For inquiries and support, please contact amvlab.
