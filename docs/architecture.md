@@ -6,20 +6,19 @@ with MapLibre GL. The two halves talk over Socket.IO.
 
 ## Data flow
 
-```
-BlueSky server (ZMQ 11000/11001)
-        │
-        ▼
-BlueSkyClient  ──  WebATM/bluesky_client.py
-        │
-        ▼
-BlueSkyProxy   ──  WebATM/proxy/  (managers + handlers)
-        │
-        ▼
-Flask + Socket.IO  ──  WebATM/app.py, WebATM/server/
-        │
-        ▼
-TypeScript client  ──  frontend/src/  (MapLibre GL visualization)
+```mermaid
+flowchart TB
+    BS["<strong>BlueSky server</strong><br>ZMQ 11000 / 11001"]
+    BC["<strong>BlueSkyClient</strong><br><code>WebATM/bluesky_client.py</code>"]
+    BP["<strong>BlueSkyProxy</strong><br><code>WebATM/proxy/</code> (managers + handlers)"]
+    FL["<strong>Flask + Socket.IO</strong><br><code>WebATM/app.py</code>, <code>WebATM/server/</code>"]
+    TS["<strong>TypeScript client</strong><br><code>frontend/src/</code> (MapLibre GL visualization)"]
+
+    BS -- "simulation data" --> BC
+    BC --> BP
+    BP --> FL
+    FL -- "Socket.IO" --> TS
+    TS -. "user commands" .-> BS
 ```
 
 1. WebATM starts and (by default) auto-launches a headless BlueSky server.

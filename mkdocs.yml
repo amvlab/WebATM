@@ -5,7 +5,10 @@ site_description: >-
 site_url: https://docs.amvlab.eu/
 repo_url: https://github.com/amvlab/WebATM
 repo_name: amvlab/WebATM
-copyright: Copyright &copy; 2025&ndash;2026 amvlab &mdash; AGPL-3.0
+copyright: >-
+  Copyright &copy; 2025
+  <a href="https://amvlab.eu" target="_blank" rel="noopener">amvlab</a>
+  &mdash; AGPL-3.0
 
 theme:
   name: material
@@ -82,7 +85,13 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
-  - pymdownx.superfences
+  # The mermaid custom fence turns ```mermaid blocks into rendered,
+  # theme-aware diagrams (Zensical loads the Mermaid.js runtime on demand).
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
 
 plugins:
   - search

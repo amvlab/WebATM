@@ -109,57 +109,7 @@ Start/Stop/Restart controls and a live server log in the UI — see the
     docker build -f Dockerfile.integrated -t webatm-integrated:latest .    # integrated
     ```
 
-## Option 2: Running from source
-
-| Requirement | Version | Notes |
-|---|---|---|
-| Python | 3.13+ | managed with [uv](https://docs.astral.sh/uv/) |
-| Node.js | 22+ | with npm, for building the TypeScript frontend |
-| BlueSky | 1.1.0+ | automatically managed by WebATM |
-
-!!! note "BlueSky compatibility"
-    WebATM works best with the
-    [amvlab fork of BlueSky](https://github.com/amvlab/bluesky), and is also
-    compatible with the latest
-    [BlueSky from TU Delft](https://github.com/TUDelft-CNS-ATM/bluesky).
-
-1. **Clone the repository**
-
-    ```bash
-    git clone https://github.com/amvlab/WebATM
-    cd WebATM
-    ```
-
-2. **Install Python dependencies** (with [uv](https://docs.astral.sh/uv/))
-
-    ```bash
-    uv sync
-    ```
-
-    This creates a virtual environment and installs the runtime and
-    development dependencies pinned in `uv.lock`. Prefix commands with
-    `uv run` (e.g. `uv run python WebATM.py`) to use that environment, or
-    activate it with `source .venv/bin/activate`.
-
-3. **Build frontend assets**
-
-    ```bash
-    script/build_frontend.sh
-    ```
-
-4. **Start the application**
-
-    ```bash
-    script/run_webatm.sh
-    ```
-
-5. **Open the web interface** at <http://localhost:8082>
-
-Everything beyond running the app — linting, type checking, the test
-suites, rebuilding the frontend on change, and building this documentation
-site — is covered in the [Development Workflow](development.md).
-
-## Option 3: Prebuilt release (source, no Node.js)
+## Option 2: Prebuilt release (source, no Node.js)
 
 Use this to run WebATM directly from source without installing Node.js or
 building the frontend yourself. You still clone the repo for the Python
@@ -224,3 +174,53 @@ static-asset tarball that changes rarely.
     The assets tarball already includes `WebATM/static/tiles/world.pmtiles`.
     To use it, open **Settings → Map Display Configuration → Offline (Local
     PMTiles)** in the web UI — see [Offline Use (PMTiles)](offline-pmtiles.md).
+
+## Option 3: Running from source
+
+| Requirement | Version | Notes |
+|---|---|---|
+| Python | 3.13+ | managed with [uv](https://docs.astral.sh/uv/) |
+| Node.js | 22+ | with npm, for building the TypeScript frontend |
+| BlueSky | 1.1.0+ | automatically managed by WebATM |
+
+!!! note "BlueSky compatibility"
+    WebATM works best with the
+    [amvlab fork of BlueSky](https://github.com/amvlab/bluesky), and is also
+    compatible with the latest
+    [BlueSky from TU Delft](https://github.com/TUDelft-CNS-ATM/bluesky).
+
+1. **Clone the repository**
+
+    ```bash
+    git clone https://github.com/amvlab/WebATM
+    cd WebATM
+    ```
+
+2. **Install Python dependencies** (with [uv](https://docs.astral.sh/uv/))
+
+    ```bash
+    uv sync
+    ```
+
+    This creates a virtual environment and installs the runtime and
+    development dependencies pinned in `uv.lock`. Prefix commands with
+    `uv run` (e.g. `uv run python WebATM.py`) to use that environment, or
+    activate it with `source .venv/bin/activate`.
+
+3. **Build frontend assets**
+
+    ```bash
+    script/build_frontend.sh
+    ```
+
+4. **Start the application**
+
+    ```bash
+    script/run_webatm.sh
+    ```
+
+5. **Open the web interface** at <http://localhost:8082>
+
+Everything beyond running the app — linting, type checking, the test
+suites, rebuilding the frontend on change, and building this documentation
+site — is covered in the [Development Workflow](development.md).

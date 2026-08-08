@@ -88,8 +88,8 @@ See the [Architecture](architecture.md) page for the full picture, and the
 
 ## License & acknowledgments
 
-Copyright © 2025–2026 amvlab. Licensed under the GNU Affero General Public License
-v3.0 (AGPL-3.0).
+Copyright © 2025 [amvlab](https://amvlab.eu). Licensed under the GNU Affero
+General Public License v3.0 (AGPL-3.0).
 
 This software incorporates **BlueSky — The Open Air Traffic Simulator**
 technology developed by TU Delft (Delft University of Technology).
