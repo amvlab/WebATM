@@ -5,7 +5,10 @@ site_description: >-
 site_url: https://docs.amvlab.eu/
 repo_url: https://github.com/amvlab/WebATM
 repo_name: amvlab/WebATM
-copyright: Copyright &copy; 2025&ndash;2026 amvlab &mdash; AGPL-3.0
+copyright: >-
+  Copyright &copy; 2025&ndash;2026
+  <a href="https://amvlab.eu" target="_blank" rel="noopener">amvlab</a>
+  &mdash; AGPL-3.0
 
 theme:
   name: material
