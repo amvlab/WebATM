@@ -341,6 +341,10 @@ export class App {
             }
         });
 
+        this.mapDisplay.onBeforeStyleChange(() => {
+            this.navdataRenderer?.prepareForStyleChange();
+        });
+
         this.mapDisplay.onStyleChange(() => {
             this.mapOverlay?.onStyleChange();
             this.shapeRenderer?.onStyleChange();

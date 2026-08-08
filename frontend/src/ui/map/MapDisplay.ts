@@ -33,10 +33,14 @@ export class MapDisplay {
     private mapContainer: string;
     private currentProjection: 'mercator' | 'globe' = 'mercator';
     private styleChangeCallback: (() => void) | null = null;
+    private beforeStyleChangeCallback: (() => void) | null = null;
     private mapLoadCallback: (() => void) | null = null;
 
     // Style selection, persistence, and offline fallback
-    private readonly styleManager = new MapStyleManager(() => this.map);
+    private readonly styleManager = new MapStyleManager(
+        () => this.map,
+        () => this.beforeStyleChangeCallback?.()
+    );
 
     private readonly STORAGE_KEY_PROJECTION = 'webatm-map-projection';
     private readonly STORAGE_KEY_CENTER = 'map-center';
@@ -540,6 +544,16 @@ export class MapDisplay {
     }
 
     /**
+     * Set a callback to be invoked right before every style swap starts
+     * (map.setStyle is about to be called), so listeners can tear down
+     * layers they attached to the outgoing style's sources first.
+     * @param callback - Function to call before the style change
+     */
+    public onBeforeStyleChange(callback: () => void): void {
+        this.beforeStyleChangeCallback = callback;
+    }
+
+    /**
      * Set a callback to be invoked when the map finishes loading
      * @param callback - Function to call when map loads
      */
@@ -571,6 +585,7 @@ export class MapDisplay {
             this.map.remove();
             this.map = null;
             this.styleChangeCallback = null;
+            this.beforeStyleChangeCallback = null;
             this.mapLoadCallback = null;
             logger.debug('MapDisplay', 'MapDisplay destroyed');
         }

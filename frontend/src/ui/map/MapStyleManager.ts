@@ -47,7 +47,14 @@ export class MapStyleManager {
     // of hanging on the browser's connect timeout (which can be minutes).
     private readonly FIRST_LOAD_PROBE_TIMEOUT_MS = 5000;
 
-    constructor(private readonly getMap: () => Map | null) {}
+    constructor(
+        private readonly getMap: () => Map | null,
+        // Invoked synchronously right before every map.setStyle() call, from
+        // every trigger (user selection, first-load probe, network-error
+        // fallback) - lets other renderers tear down layers they attached to
+        // the outgoing style's sources before MapLibre's diff runs.
+        private readonly onBeforeStyleChange?: () => void
+    ) {}
 
     /**
      * Resolve the style the map should start with: the user's saved
@@ -92,6 +99,7 @@ export class MapStyleManager {
                 this.getMap()?.resize();
             });
 
+            this.onBeforeStyleChange?.();
             map.setStyle(styleUrl);
 
             // Hide the map style message now that a style has been selected
