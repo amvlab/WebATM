@@ -91,6 +91,20 @@ deep-zoomed into the Liberty style's 3D buildings at a tiny
 ![Rotterdam city centre close-up](screenshots/liberty-rotterdam-drone-hero.png)
 *Deep zoom into the Rotterdam 3D cityscape (light theme)*
 
+### Liberty (3D buildings) — eVTOL & drone close-ups over Rotterdam
+
+Hero close-ups of the bespoke `EVTOL.glb` and `drone.glb` 3D models hovering
+low over central Rotterdam, between the Liberty style's 3D buildings.
+
+![eVTOL close-up, light theme](screenshots/liberty-rotterdam-evtol-hero-light.png)
+*eVTOL over the city centre (light theme)*
+
+![Delivery drone close-up, dark theme](screenshots/liberty-rotterdam-drone-hero-dark.png)
+*Delivery drone over the Wijnhaven (dark theme)*
+
+![eVTOL and drone swarm](screenshots/liberty-rotterdam-uam-pair-light.png)
+*Mixed eVTOL + drone swarm near the Markthal (light theme)*
+
 ### Positron, Bright, Dark & Fiord — airliners
 
 ![Fleet on Positron, light theme](screenshots/positron-fleet-light.png)
