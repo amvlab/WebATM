@@ -76,21 +76,6 @@ Live traffic and the 3D overlay rendered on the OpenFreeMap vector basemaps
 (Positron, Bright, Liberty, Dark, Fiord) instead of the offline PMTiles
 bundle. Both the dark (default) and light UI themes are shown.
 
-### Liberty (3D buildings) — drones over Rotterdam
-
-Six DJI Matrice 600 (`M600`) drones spawned over central Rotterdam,
-deep-zoomed into the Liberty style's 3D buildings at a tiny
-`aircraft3DScale` of 0.01.
-
-![Drones over Rotterdam, dark theme](screenshots/liberty-rotterdam-drones-dark.png)
-*M600 drones over Rotterdam (dark theme)*
-
-![Drones over Rotterdam, light theme](screenshots/liberty-rotterdam-drones-light.png)
-*M600 drones over Rotterdam (light theme)*
-
-![Rotterdam city centre close-up](screenshots/liberty-rotterdam-drone-hero.png)
-*Deep zoom into the Rotterdam 3D cityscape (light theme)*
-
 ### Liberty (3D buildings) — eVTOL & drone close-ups over Rotterdam
 
 Hero close-ups of the bespoke `EVTOL.glb` and `drone.glb` 3D models hovering
