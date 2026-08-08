@@ -464,7 +464,7 @@ def register_basic_routes(app, session_manager):
         """Search airports and waypoints by identifier (GET /api/navdata/search).
 
         Powers the map "go to" box. Backed by the SQLite FTS5 index built
-        offline from X-Plane data (see ``scripts/navdata/``). Query
+        offline from OurAirports open data (see ``scripts/navdata/``). Query
         parameters:
 
         - ``q``: identifier/name prefix to match (required).
