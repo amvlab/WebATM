@@ -2140,6 +2140,28 @@ html.wa-open-threeD-controls #threeD-controls {
     font-weight: bold;
 }
 
+.node-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.node-kill-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 4px;
+    border-radius: 3px;
+}
+
+.node-kill-btn:hover {
+    color: var(--accent-danger-bright);
+    background-color: var(--accent-danger-tint);
+}
+
 .node-details {
     font-size: var(--panel-font-size);
     color: var(--text-secondary);

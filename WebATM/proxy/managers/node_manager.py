@@ -157,6 +157,7 @@ class NodeManager:
         node_id_str = id2str(node_id)
         if node_id_str in self.proxy.tracked_nodes:
             del self.proxy.tracked_nodes[node_id_str]
+            self._failover_active_node(node_id)
             self._emit_node_info()
 
         # Check if all nodes have been removed - this indicates server shutdown
@@ -169,6 +170,30 @@ class NodeManager:
             logger.warning(" All nodes removed - checking for server shutdown...")
             # Use a timer to check again in a moment to confirm it's really a shutdown
             threading.Timer(1.0, self._check_node_shutdown).start()
+
+    def _failover_active_node(self, removed_node_id):
+        """Re-activate a surviving node when the active node disappears.
+
+        Without this, deleting the active node (e.g. via DELNODE) leaves the
+        client subscribed to a dead node: data stops flowing, the header
+        eventually flips to disconnected, and the map freezes even though the
+        server and its other nodes are alive.
+        """
+        try:
+            client = self.proxy.bluesky_client
+            if client is None or client.act_id != removed_node_id:
+                return
+            for node_data in self.proxy.tracked_nodes.values():
+                replacement = node_data.get("node_id")
+                if replacement:
+                    logger.info(
+                        f"Active node {safe_decode(removed_node_id)} removed; "
+                        f"switching to {safe_decode(replacement)}"
+                    )
+                    client.actnode(replacement)
+                    return
+        except Exception as e:
+            logger.error(f" Error failing over active node: {e}")
 
     def _check_node_shutdown(self):
         """Check if server is really shut down after all nodes removed."""
@@ -267,3 +292,19 @@ class NodeManager:
         if self.proxy.bluesky_client is None:
             raise RuntimeError("Network client not initialized")
         return self.proxy.bluesky_client.addnodes(count, server_id=server_id)
+
+    def delnode(self, node_id):
+        """Request termination of a single simulation node via DELNODE.
+
+        Args:
+            node_id (bytes): ID of the node to terminate.
+
+        Returns:
+            Any: The result of ``BlueSkyClient.delnode``.
+
+        Raises:
+            RuntimeError: If the network client is not initialized.
+        """
+        if self.proxy.bluesky_client is None:
+            raise RuntimeError("Network client not initialized")
+        return self.proxy.bluesky_client.delnode(node_id)

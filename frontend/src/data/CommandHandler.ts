@@ -607,8 +607,9 @@ export class CommandHandler {
      *
      * BlueSky's real QUIT (see bluesky/network/server.py) is a *server-wide
      * shutdown*: it stops the headless server's loop and terminates every node
-     * child process — there is no per-node quit. WebATM deliberately does NOT
-     * forward QUIT to BlueSky:
+     * child process — killing a single node is the separate DELNODE message,
+     * exposed via the Simulation Nodes panel's per-node kill button. WebATM
+     * deliberately does NOT forward QUIT to BlueSky:
      *   - The standalone build connects to a shared remote server, so forwarding
      *     QUIT would tear it down for every other user.
      *   - The integrated build bundles its own server, but its lifecycle is

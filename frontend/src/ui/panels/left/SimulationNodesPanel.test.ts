@@ -4,8 +4,9 @@
  * node list and selector, so periodic node_info updates neither flicker nor
  * destroy elements mid-click.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SimulationNodesPanel } from './SimulationNodesPanel';
+import { SocketManager } from '../../../core/SocketManager';
 import { NodeInfo, NodeData } from '../../../data/types';
 
 const node = (num: number, overrides: Partial<NodeData> = {}): NodeData => ({
@@ -140,5 +141,51 @@ describe('SimulationNodesPanel', () => {
 
         expect(document.getElementById('total-nodes')!.textContent).toBe('1');
         expect(document.getElementById('active-node-display')!.textContent).toBe('0xAB12');
+    });
+
+    describe('kill button', () => {
+        const emitted: Array<[string, unknown]> = [];
+        const fakeSocket = {
+            connected: true,
+            on: vi.fn(),
+            off: vi.fn(),
+            emit: (event: string, payload: unknown) => emitted.push([event, payload]),
+        };
+        const fakeSocketManager = {
+            getSocket: () => fakeSocket,
+        } as unknown as SocketManager;
+
+        beforeEach(() => {
+            emitted.length = 0;
+            panel.setSocketManager(fakeSocketManager);
+        });
+
+        it('emits del_node after confirmation without switching the active node', () => {
+            vi.stubGlobal('confirm', vi.fn(() => true));
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+
+            items()[1].querySelector<HTMLElement>('.node-kill-btn')!.click();
+
+            expect(emitted).toEqual([['del_node', { node_id: 'b' }]]);
+            vi.unstubAllGlobals();
+        });
+
+        it('does nothing when the confirmation is declined', () => {
+            vi.stubGlobal('confirm', vi.fn(() => false));
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+
+            items()[1].querySelector<HTMLElement>('.node-kill-btn')!.click();
+
+            expect(emitted).toEqual([]);
+            vi.unstubAllGlobals();
+        });
+
+        it('clicking the item body still switches the node', () => {
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+
+            items()[1].click();
+
+            expect(emitted).toEqual([['set_active_node', { node_id: 'b' }]]);
+        });
     });
 });

@@ -73,6 +73,10 @@ class FakeBlueSkyClient:
         self.sent.append(("ADDNODES", {"count": count}, server_id))
         return True
 
+    def delnode(self, node_id):
+        self.sent.append(("DELNODE", node_id, None))
+        return True
+
     def close(self):
         self.closed = True
 

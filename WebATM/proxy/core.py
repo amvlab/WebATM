@@ -232,6 +232,10 @@ class BlueSkyProxy:
         """Delegate addnodes call to network proxy."""
         return self.node_mgr.addnodes(count, server_id=server_id)
 
+    def delnode(self, node_id):
+        """Delegate delnode call to network proxy."""
+        return self.node_mgr.delnode(node_id)
+
     # ========================================================================
     # Command Processing - Delegate to CommandProcessor
     # ========================================================================

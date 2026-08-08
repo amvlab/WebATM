@@ -972,6 +972,17 @@ class BlueSkyClient:
         )
         return self.send("ADDNODES", {"count": count}, target_server)
 
+    def delnode(self, node_id):
+        """Tell the owning server to terminate a single simulation node.
+
+        The DELNODE message carries the raw node id and is addressed to the
+        server that spawned the node (same group, sequence index 0). Servers
+        without DELNODE support ignore unknown topics, so this is safe to
+        send to older BlueSky versions.
+        """
+        target_server = node_id[:-1] + seqidx2id(0)
+        return self.send("DELNODE", node_id, target_server)
+
     def on_node_added_request_data(self, node_id):
         """When a new node is announced, request the initial/current state of all
         subscribed shared states."""
