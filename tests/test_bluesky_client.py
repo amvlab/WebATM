@@ -276,6 +276,22 @@ class TestBlueSkyClientConstruction:
         # No socket / not running -> graceful False.
         assert client.send("STACK", "CRE KL204") is False
 
+    def test_delnode_targets_owning_server(self, monkeypatch):
+        """DELNODE must carry the raw node id and be addressed to the server
+        that spawned the node (same group, sequence index 0)."""
+        client = BlueSkyClient()
+        sent = []
+        monkeypatch.setattr(
+            client,
+            "send",
+            lambda topic, data="", to_group="": sent.append((topic, data, to_group)),
+        )
+        node_id = b"\x01\x02\x03\x04\x82"
+
+        client.delnode(node_id)
+
+        assert sent == [("DELNODE", node_id, b"\x01\x02\x03\x04" + seqidx2id(0))]
+
     def test_update_when_not_connected_returns_false(self):
         client = BlueSkyClient()
         assert client.update() is False

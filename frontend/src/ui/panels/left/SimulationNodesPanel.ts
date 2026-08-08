@@ -8,7 +8,7 @@
  * - Refresh and add node actions
  *
  * Communication with Python backend:
- * - Emits: 'get_nodes', 'set_active_node', 'add_nodes'
+ * - Emits: 'get_nodes', 'set_active_node', 'add_nodes', 'del_node'
  * - Receives: 'node_info' event with NodeInfo data
  */
 
@@ -22,6 +22,7 @@ interface NodeItemRefs {
     root: HTMLElement;
     alias: HTMLElement;
     badge: HTMLElement;
+    killButton: HTMLElement;
     status: HTMLElement;
     time: HTMLElement;
     idLine: HTMLElement;
@@ -244,7 +245,10 @@ export class SimulationNodesPanel extends BasePanel {
         root.innerHTML = `
             <div class="node-header">
                 <strong></strong>
-                <span class="active-badge" hidden>Active</span>
+                <span class="node-header-actions">
+                    <span class="active-badge" hidden>Active</span>
+                    <button class="node-kill-btn" title="Kill this node">&times;</button>
+                </span>
             </div>
             <div class="node-details">
                 <div class="node-status"></div>
@@ -258,10 +262,18 @@ export class SimulationNodesPanel extends BasePanel {
             this.switchNode(nodeId);
         });
 
+        const killButton = root.querySelector('.node-kill-btn') as HTMLElement;
+        killButton.addEventListener('click', (e) => {
+            // Don't let the kill click also switch the active node
+            e.stopPropagation();
+            this.killNode(nodeId);
+        });
+
         return {
             root,
             alias: root.querySelector('strong') as HTMLElement,
             badge: root.querySelector('.active-badge') as HTMLElement,
+            killButton,
             status: root.querySelector('.node-status') as HTMLElement,
             time: root.querySelector('.node-time') as HTMLElement,
             idLine: root.querySelector('.node-id') as HTMLElement,
@@ -376,6 +388,43 @@ export class SimulationNodesPanel extends BasePanel {
         logger.info('SimulationNodesPanel', 'Adding new node');
         socket.emit('add_nodes', { count: 1 });
         this.logToConsole('Adding new simulation node...');
+    }
+
+    /**
+     * Kill a single simulation node (requires a BlueSky server with DELNODE
+     * support; older servers ignore the request)
+     */
+    private killNode(nodeId: string): void {
+        if (!nodeId || !this.socketManager) {
+            logger.warn('SimulationNodesPanel', 'Cannot kill node: SocketManager not set');
+            return;
+        }
+
+        const socket = this.socketManager.getSocket();
+        if (!socket || !socket.connected) {
+            logger.warn('SimulationNodesPanel', 'Cannot kill node: not connected');
+            this.logToConsole('ERROR: Not connected to BlueSky server', true);
+            return;
+        }
+
+        // BlueSky refuses to delete its last node (and echoes the refusal);
+        // mirror that here for immediate feedback without a round-trip
+        if (this.nodeData?.total_nodes === 1) {
+            logger.warn('SimulationNodesPanel', 'Refusing to kill the last node');
+            this.logToConsole('ERROR: Cannot kill the last node — use QUIT to disconnect, or the server controls to stop the server', true);
+            return;
+        }
+
+        const nodeData = this.nodeData?.nodes[nodeId];
+        const friendlyName = nodeData ? `Node ${nodeData.node_num || 1}` : nodeId;
+
+        if (!confirm(`Kill ${friendlyName}? Its running simulation will be lost.`)) {
+            return;
+        }
+
+        logger.info('SimulationNodesPanel', 'Killing node:', friendlyName);
+        socket.emit('del_node', { node_id: nodeId });
+        this.logToConsole(`Killing node: ${friendlyName}`);
     }
 
     /**

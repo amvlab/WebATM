@@ -161,3 +161,37 @@ def register_socket_handlers(socketio, session_manager):
             logger.info(f"Added {count} nodes to server {server_id}")
         except Exception as e:
             logger.info(f"Error adding nodes: {e}")
+
+    @socketio.on("del_node")
+    def on_del_node(data):
+        """Terminate a single simulation node (``del_node`` event).
+
+        The frontend sends hex-string node IDs; the handler looks up the
+        original binary ID in the proxy's tracked nodes before delegating to
+        ``delnode``, which sends a DELNODE message to the owning server. The
+        node's removal flows back through the normal node-removed pipeline
+        (tracked-nodes cleanup, active-node failover, ``node_info`` emission).
+
+        Args:
+            data (dict): Payload with the hex-string ``node_id``.
+        """
+        node_id = (data or {}).get("node_id")
+        if not node_id:
+            return
+
+        node_data = current_app.bluesky_proxy.tracked_nodes.get(node_id)
+        if node_data is None:
+            logger.debug(
+                f"Could not find node ID for: {node_id} "
+                f"(available: {list(current_app.bluesky_proxy.tracked_nodes.keys())})"
+            )
+            return
+
+        binary_node_id = node_data.get("node_id")
+        logger.info(
+            f"Requesting node termination: {node_id} (binary: {binary_node_id})"
+        )
+        try:
+            current_app.bluesky_proxy.delnode(binary_node_id)
+        except Exception as e:
+            logger.info(f"Error deleting node {node_id}: {e}")

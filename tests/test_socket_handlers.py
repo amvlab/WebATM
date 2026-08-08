@@ -87,6 +87,22 @@ class TestNodeEvents:
         client.emit("set_active_node", {"node_id": "abcd1234"})
         assert client.is_connected()
 
+    def test_del_node_unknown_id(self, sio):
+        app, socketio, client = sio
+        client.get_received()
+        client.emit("del_node", {"node_id": "deadbeef"})
+        # Unknown node id is logged and ignored; connection stays up.
+        assert client.is_connected()
+
+    def test_del_node_without_network_client(self, sio):
+        """A tracked node but no network client (disconnected) raises
+        RuntimeError inside delnode; the handler must swallow it."""
+        app, socketio, client = sio
+        client.get_received()
+        app.bluesky_proxy.tracked_nodes["abcd1234"] = {"node_id": b"\x01\x02"}
+        client.emit("del_node", {"node_id": "abcd1234"})
+        assert client.is_connected()
+
     def test_command_with_malformed_payload(self, sio):
         app, socketio, client = sio
         client.get_received()

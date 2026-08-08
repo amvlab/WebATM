@@ -148,6 +148,33 @@ class TestNodeRemoval:
     def test_on_node_removed_unknown_is_noop(self, proxy):
         proxy.node_mgr._on_node_removed(b"\xaa\xbb\xcc\xdd\x81")  # should not raise
 
+    def test_removing_active_node_fails_over_to_survivor(self, proxy, fake_client):
+        """Deleting the active node (e.g. via DELNODE) must re-activate a
+        surviving node, or the client stays subscribed to a dead node and the
+        UI reads as disconnected while the server is alive."""
+        active_bytes = b"\x01\x02\x03\x04\x81"
+        survivor_bytes = b"\x01\x02\x03\x04\x82"
+        proxy.bluesky_client = fake_client
+        fake_client.act_id = active_bytes
+        proxy.tracked_nodes[active_bytes.hex()] = {"node_id": active_bytes}
+        proxy.tracked_nodes[survivor_bytes.hex()] = {"node_id": survivor_bytes}
+
+        proxy.node_mgr._on_node_removed(active_bytes)
+
+        assert fake_client.act_id == survivor_bytes
+
+    def test_removing_inactive_node_keeps_active_node(self, proxy, fake_client):
+        active_bytes = b"\x01\x02\x03\x04\x81"
+        other_bytes = b"\x01\x02\x03\x04\x82"
+        proxy.bluesky_client = fake_client
+        fake_client.act_id = active_bytes
+        proxy.tracked_nodes[active_bytes.hex()] = {"node_id": active_bytes}
+        proxy.tracked_nodes[other_bytes.hex()] = {"node_id": other_bytes}
+
+        proxy.node_mgr._on_node_removed(other_bytes)
+
+        assert fake_client.act_id == active_bytes
+
 
 class TestEmitNodeInfo:
     def test_emits_node_info_payload(self, proxy, fake_socketio):
@@ -259,3 +286,13 @@ class TestDelegationToNetworkClient:
         proxy.bluesky_client = fake_client
         proxy.node_mgr.addnodes(3, server_id=b"SRV")
         assert ("ADDNODES", {"count": 3}, b"SRV") in fake_client.sent
+
+    def test_delnode_raises_without_client(self, proxy):
+        proxy.bluesky_client = None
+        with pytest.raises(RuntimeError):
+            proxy.node_mgr.delnode(b"node")
+
+    def test_delnode_delegates(self, proxy, fake_client):
+        proxy.bluesky_client = fake_client
+        proxy.node_mgr.delnode(b"node")
+        assert ("DELNODE", b"node", None) in fake_client.sent
