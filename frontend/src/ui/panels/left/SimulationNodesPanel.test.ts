@@ -170,6 +170,18 @@ describe('SimulationNodesPanel', () => {
             vi.unstubAllGlobals();
         });
 
+        it('warns about disconnection when killing the last node', () => {
+            const confirmSpy = vi.fn(() => true);
+            vi.stubGlobal('confirm', confirmSpy);
+            panel.update(nodeInfo({ a: node(1) }, 'a'));
+
+            items()[0].querySelector<HTMLElement>('.node-kill-btn')!.click();
+
+            expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('last node'));
+            expect(emitted).toEqual([['del_node', { node_id: 'a' }]]);
+            vi.unstubAllGlobals();
+        });
+
         it('does nothing when the confirmation is declined', () => {
             vi.stubGlobal('confirm', vi.fn(() => false));
             panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));

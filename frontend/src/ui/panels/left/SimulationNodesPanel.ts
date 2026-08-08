@@ -410,7 +410,12 @@ export class SimulationNodesPanel extends BasePanel {
         const nodeData = this.nodeData?.nodes[nodeId];
         const friendlyName = nodeData ? `Node ${nodeData.node_num || 1}` : nodeId;
 
-        if (!confirm(`Kill ${friendlyName}? Its running simulation will be lost.`)) {
+        // BlueSky keeps its server up with zero nodes, but WebATM reads "all
+        // nodes gone" as a server shutdown and disconnects — be honest about it
+        const message = this.nodeData?.total_nodes === 1
+            ? `Kill ${friendlyName}? This is the last node — WebATM will disconnect from the server.`
+            : `Kill ${friendlyName}? Its running simulation will be lost.`;
+        if (!confirm(message)) {
             return;
         }
 
