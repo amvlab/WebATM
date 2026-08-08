@@ -9,11 +9,15 @@ import { logger } from '../../../utils/Logger';
  * NavdataRenderer - renders the static airports + waypoints overlay.
  *
  * Unlike ShapeRenderer (which pushes simulation GeoJSON into geojson sources),
- * this reads a pre-built vector-tile archive produced offline from X-Plane
- * navigation data (see scripts/navdata/). The archive is served as a single
- * static PMTiles file and exposes two source-layers, "airports" and
- * "waypoints". Because the tiles load themselves, this renderer only has to
- * declare the source + layers once and toggle their visibility.
+ * this reads a pre-built vector-tile archive produced offline from the
+ * public-domain OurAirports data (see scripts/navdata/). The archive is served
+ * as a single static PMTiles file and exposes the source-layers "airports",
+ * "heliports", "waypoints" (radio navaids) and "runways" - plus "pavement"
+ * (aprons), "taxiways" and "buildings" (terminals/hangars) when the archive
+ * was built with an OpenStreetMap extract (those layers simply stay empty
+ * otherwise). Because the tiles load
+ * themselves, this renderer only has to declare the source + layers once and
+ * toggle their visibility.
  *
  * If the archive is missing (the offline build step hasn't been run), MapLibre
  * simply emits tile-load errors that MapDisplay already suppresses, so the rest
@@ -35,6 +39,8 @@ export class NavdataRenderer {
     private readonly WAYPOINTS_SRC_LAYER = 'waypoints';
     private readonly RUNWAYS_SRC_LAYER = 'runways';
     private readonly PAVEMENT_SRC_LAYER = 'pavement';
+    private readonly TAXIWAYS_SRC_LAYER = 'taxiways';
+    private readonly BUILDINGS_SRC_LAYER = 'buildings';
 
     private readonly AIRPORTS_LAYER_ID = 'navdata-airports';
     private readonly AIRPORT_LABELS_LAYER_ID = 'navdata-airport-labels';
@@ -46,6 +52,22 @@ export class NavdataRenderer {
     private readonly RUNWAYS_LINE_LAYER_ID = 'navdata-runways-line';
     private readonly RUNWAY_LABELS_LAYER_ID = 'navdata-runway-labels';
     private readonly PAVEMENT_FILL_LAYER_ID = 'navdata-pavement-fill';
+    private readonly TAXIWAYS_LINE_LAYER_ID = 'navdata-taxiways-line';
+    private readonly TAXIWAY_LABELS_LAYER_ID = 'navdata-taxiway-labels';
+    private readonly BUILDINGS_FILL_LAYER_ID = 'navdata-buildings-fill';
+
+    // Terminals/hangars sit visually between the aprons (darker) and runways
+    // (lighter); not surfaced as a user colour picker.
+    private readonly BUILDING_COLOR = '#8a93a8';
+
+    // Taxiways/aprons straight from the basemap: OpenMapTiles-schema styles
+    // (OpenFreeMap, MapTiler, ...) already ship an 'aeroway' source-layer in
+    // the tiles the browser downloads anyway, so on those basemaps the
+    // pavement overlay needs no extra data build at all. Detected at runtime
+    // via the source's advertised vector layers (see tryAddBasemapAeroway).
+    private readonly AEROWAY_SRC_LAYER = 'aeroway';
+    private readonly BASEMAP_PAVEMENT_FILL_LAYER_ID = 'navdata-basemap-pavement-fill';
+    private readonly BASEMAP_TAXIWAYS_LINE_LAYER_ID = 'navdata-basemap-taxiways-line';
 
     // ----------------------------------------------------------------------
     // Zoom control for the navdata overlay - tune it all here. These drive the
@@ -57,7 +79,8 @@ export class NavdataRenderer {
     private readonly LABEL_MINZOOM = {
         airport: 6,
         waypoint: 9,
-        runway: 13
+        runway: 13,
+        taxiway: 14
     };
 
     // Airport importance gating: each [zoom, minRank] means "from this zoom,
@@ -149,6 +172,12 @@ export class NavdataRenderer {
 
         this.setupMapLayers(map);
 
+        // Basemap sources load their metadata asynchronously (and reload on
+        // every style switch), so watch sourcedata to find out when an
+        // OpenMapTiles 'aeroway' layer becomes available. The handler is a
+        // cheap no-op once the layers exist.
+        map.on('sourcedata', () => this.tryAddBasemapAeroway(map));
+
         // React to visibility / colour changes from the display options panel.
         this.stateManager.subscribe('displayOptions', (newOptions) => {
             if (newOptions) {
@@ -169,14 +198,18 @@ export class NavdataRenderer {
             map.addSource(this.SOURCE_ID, {
                 type: 'vector',
                 url: this.SOURCE_URL,
+                // Taxiways/aprons come from OSM when the archive was built
+                // with an --osm-pbf extract; ODbL requires the credit.
                 attribution:
-                    '<a href="https://developer.x-plane.com/docs/data-development-documentation/">X-Plane navdata</a> (GPL)'
+                    '<a href="https://ourairports.com/data/">OurAirports</a> (Public Domain) | ' +
+                    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             });
         }
 
         const vis = (on: boolean) => (on ? 'visible' : 'none');
 
-        // Pavement (taxiways/aprons) at the very bottom, then runways on top.
+        // Pavement (OSM aprons) at the very bottom, taxiway centrelines above
+        // it, then runways, then the point overlays on top.
         if (!map.getLayer(this.PAVEMENT_FILL_LAYER_ID)) {
             map.addLayer({
                 id: this.PAVEMENT_FILL_LAYER_ID,
@@ -185,9 +218,49 @@ export class NavdataRenderer {
                 'source-layer': this.PAVEMENT_SRC_LAYER,
                 paint: {
                     'fill-color': opts.pavementColor || '#5a6470',
-                    'fill-opacity': 0.5
+                    // Opaque on purpose: pavement, centrelines and runways
+                    // share one colour, so full opacity makes overlaps merge
+                    // into a single seamless surface instead of stacking
+                    // darker where features cross.
+                    'fill-opacity': 1
                 },
                 layout: { visibility: vis(opts.showAirports && opts.showPavement) }
+            });
+        }
+
+        // Terminals/hangars above the aprons, below the taxiway centrelines.
+        if (!map.getLayer(this.BUILDINGS_FILL_LAYER_ID)) {
+            map.addLayer({
+                id: this.BUILDINGS_FILL_LAYER_ID,
+                type: 'fill',
+                source: this.SOURCE_ID,
+                'source-layer': this.BUILDINGS_SRC_LAYER,
+                paint: {
+                    'fill-color': this.BUILDING_COLOR,
+                    'fill-opacity': 1
+                },
+                layout: { visibility: vis(opts.showAirports && opts.showPavement) }
+            });
+        }
+
+        if (!map.getLayer(this.TAXIWAYS_LINE_LAYER_ID)) {
+            map.addLayer({
+                id: this.TAXIWAYS_LINE_LAYER_ID,
+                type: 'line',
+                source: this.SOURCE_ID,
+                'source-layer': this.TAXIWAYS_SRC_LAYER,
+                paint: {
+                    'line-color': opts.pavementColor || '#5a6470',
+                    // Centrelines read as narrow strips that widen as the
+                    // airport fills the screen.
+                    'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1, 14, 3, 16, 8],
+                    'line-opacity': 1
+                },
+                layout: {
+                    'line-cap': 'round',
+                    'line-join': 'round',
+                    visibility: vis(opts.showAirports && opts.showPavement)
+                }
             });
         }
 
@@ -200,7 +273,10 @@ export class NavdataRenderer {
                 'source-layer': this.RUNWAYS_SRC_LAYER,
                 paint: {
                     'fill-color': opts.runwayColor || '#c8d2dc',
-                    'fill-opacity': 0.55
+                    // Opaque, and deliberately added after the taxiway
+                    // centrelines: the strip masks lines crossing it, so
+                    // intersections don't show through.
+                    'fill-opacity': 1
                 },
                 layout: { visibility: vis(opts.showAirports && opts.showRunways) }
             });
@@ -375,7 +451,9 @@ export class NavdataRenderer {
                     'text-allow-overlap': false
                 },
                 paint: {
-                    'text-color': opts.runwayColor || '#c8d2dc',
+                    // Theme ink, not the runway colour - the label sits on the
+                    // strip itself, so it must contrast with it.
+                    'text-color': pal.waypoint,
                     'text-halo-color': pal.halo,
                     'text-halo-width': 1.4
                 }
@@ -383,7 +461,152 @@ export class NavdataRenderer {
             this.setRunwayLabelVisibility(map, opts);
         }
 
+        // Taxiway designators ("A4"), along the centreline, deep zoom only —
+        // they come from the OSM `ref` tag, so untagged taxiways simply have
+        // no label.
+        if (!map.getLayer(this.TAXIWAY_LABELS_LAYER_ID)) {
+            map.addLayer({
+                id: this.TAXIWAY_LABELS_LAYER_ID,
+                type: 'symbol',
+                source: this.SOURCE_ID,
+                'source-layer': this.TAXIWAYS_SRC_LAYER,
+                minzoom: this.LABEL_MINZOOM.taxiway,
+                filter: ['has', 'ref'],
+                layout: {
+                    'text-field': ['get', 'ref'],
+                    'text-font': ['Open Sans Regular'],
+                    // One step below airport labels, like waypoint labels.
+                    'text-size': Math.max(1, labelSize - 1),
+                    'symbol-placement': 'line',
+                    'text-allow-overlap': false,
+                    visibility: vis(opts.showAirports && opts.showPavement)
+                },
+                paint: {
+                    'text-color': pal.waypoint,
+                    'text-halo-color': pal.halo,
+                    'text-halo-width': 1.2
+                }
+            });
+        }
+
         logger.debug('NavdataRenderer', 'Map layers created');
+    }
+
+    /**
+     * Render taxiways/aprons from the basemap itself when its schema carries
+     * them, so no offline OSM build is needed:
+     *
+     * - OpenMapTiles styles (OpenFreeMap, MapTiler, ...) ship an 'aeroway'
+     *   source-layer with apron/taxiway polygons + taxiway centrelines.
+     * - Protomaps styles (the offline basemap) have no aprons at all, but a
+     *   deep-zoom extract carries taxiway centrelines in the 'roads' layer
+     *   (kind=aeroway / kind_detail=taxiway).
+     *
+     * The navdata archive's own pavement layers (built with --osm-pbf) take
+     * precedence when present, to avoid double-drawing the same OSM geometry.
+     */
+    private tryAddBasemapAeroway(map: MapLibreMap): void {
+        if (
+            map.getLayer(this.BASEMAP_PAVEMENT_FILL_LAYER_ID) ||
+            map.getLayer(this.BASEMAP_TAXIWAYS_LINE_LAYER_ID)
+        ) return;
+
+        const vectorLayerIds = (id: string): string[] | undefined =>
+            (map.getSource(id) as { vectorLayerIds?: string[] } | undefined)?.vectorLayerIds;
+
+        // The navdata archive was built with OSM pavement - it wins.
+        if (vectorLayerIds(this.SOURCE_ID)?.includes('pavement')) return;
+
+        const sources = map.getStyle()?.sources ?? {};
+        const findSource = (srcLayer: string): string | undefined =>
+            Object.keys(sources).find(
+                (id) => id !== this.SOURCE_ID && vectorLayerIds(id)?.includes(srcLayer)
+            );
+
+        const opts = this.stateManager.getDisplayOptions();
+        const visibility = opts.showAirports && opts.showPavement ? 'visible' : 'none';
+        const color = opts.pavementColor || '#5a6470';
+        const lineWidth: ExpressionSpecification =
+            ['interpolate', ['linear'], ['zoom'], 11, 1, 14, 3, 16, 8];
+        // Slot beneath our own overlay layers so runways/points stay on top.
+        const beforeId = map.getLayer(this.PAVEMENT_FILL_LAYER_ID)
+            ? this.PAVEMENT_FILL_LAYER_ID
+            : undefined;
+
+        const omtSource = findSource(this.AEROWAY_SRC_LAYER);
+        if (omtSource) {
+            // Aprons (and taxiways mapped as areas) as fills...
+            map.addLayer({
+                id: this.BASEMAP_PAVEMENT_FILL_LAYER_ID,
+                type: 'fill',
+                source: omtSource,
+                'source-layer': this.AEROWAY_SRC_LAYER,
+                minzoom: 10,
+                filter: ['all',
+                    ['==', ['geometry-type'], 'Polygon'],
+                    ['in', ['get', 'class'], ['literal', ['apron', 'taxiway']]]
+                ],
+                paint: { 'fill-color': color, 'fill-opacity': 1 },
+                layout: { visibility }
+            }, beforeId);
+
+            // ...and taxiway centrelines as lines.
+            map.addLayer({
+                id: this.BASEMAP_TAXIWAYS_LINE_LAYER_ID,
+                type: 'line',
+                source: omtSource,
+                'source-layer': this.AEROWAY_SRC_LAYER,
+                minzoom: 10,
+                filter: ['all',
+                    ['==', ['geometry-type'], 'LineString'],
+                    ['==', ['get', 'class'], 'taxiway']
+                ],
+                paint: {
+                    'line-color': color,
+                    'line-width': lineWidth,
+                    'line-opacity': 1
+                },
+                layout: {
+                    'line-cap': 'round',
+                    'line-join': 'round',
+                    visibility
+                }
+            }, beforeId);
+
+            logger.debug('NavdataRenderer', `Basemap aeroway layers added (source: ${omtSource})`);
+            return;
+        }
+
+        // Protomaps schema ('roads' layer exists; OpenMapTiles uses
+        // 'transportation' instead, so this never matches an OMT style).
+        // Only taxiway centrelines are available - Protomaps builds carry no
+        // apron polygons; those need the --osm-pbf navdata build.
+        const pmSource = findSource('roads');
+        if (pmSource) {
+            map.addLayer({
+                id: this.BASEMAP_TAXIWAYS_LINE_LAYER_ID,
+                type: 'line',
+                source: pmSource,
+                'source-layer': 'roads',
+                minzoom: 10,
+                filter: ['all',
+                    ['==', ['get', 'kind'], 'aeroway'],
+                    ['==', ['get', 'kind_detail'], 'taxiway']
+                ],
+                paint: {
+                    'line-color': color,
+                    'line-width': lineWidth,
+                    'line-opacity': 1
+                },
+                layout: {
+                    'line-cap': 'round',
+                    'line-join': 'round',
+                    visibility
+                }
+            }, beforeId);
+
+            logger.debug('NavdataRenderer', `Basemap taxiway layer added (Protomaps source: ${pmSource})`);
+        }
     }
 
     private setRunwayLabelVisibility(map: MapLibreMap, opts: DisplayOptions): void {
@@ -422,6 +645,11 @@ export class NavdataRenderer {
         };
 
         setVis(this.PAVEMENT_FILL_LAYER_ID, opts.showAirports && opts.showPavement);
+        setVis(this.TAXIWAYS_LINE_LAYER_ID, opts.showAirports && opts.showPavement);
+        setVis(this.TAXIWAY_LABELS_LAYER_ID, opts.showAirports && opts.showPavement);
+        setVis(this.BUILDINGS_FILL_LAYER_ID, opts.showAirports && opts.showPavement);
+        setVis(this.BASEMAP_PAVEMENT_FILL_LAYER_ID, opts.showAirports && opts.showPavement);
+        setVis(this.BASEMAP_TAXIWAYS_LINE_LAYER_ID, opts.showAirports && opts.showPavement);
         setVis(this.RUNWAYS_FILL_LAYER_ID, opts.showAirports && opts.showRunways);
         setVis(this.RUNWAYS_LINE_LAYER_ID, opts.showAirports && opts.showRunways);
         setVis(this.RUNWAY_LABELS_LAYER_ID, opts.showAirports && opts.showRunways && opts.showRunwayLabels);
@@ -438,10 +666,15 @@ export class NavdataRenderer {
         const runwayColor = opts.runwayColor || '#c8d2dc';
         const pavementColor = opts.pavementColor || '#5a6470';
         setColor(this.PAVEMENT_FILL_LAYER_ID, 'fill-color', pavementColor);
+        setColor(this.TAXIWAYS_LINE_LAYER_ID, 'line-color', pavementColor);
+        setColor(this.BASEMAP_PAVEMENT_FILL_LAYER_ID, 'fill-color', pavementColor);
+        setColor(this.BASEMAP_TAXIWAYS_LINE_LAYER_ID, 'line-color', pavementColor);
         setColor(this.RUNWAYS_FILL_LAYER_ID, 'fill-color', runwayColor);
         setColor(this.RUNWAYS_LINE_LAYER_ID, 'line-color', runwayColor);
-        setColor(this.RUNWAY_LABELS_LAYER_ID, 'text-color', runwayColor);
+        setColor(this.RUNWAY_LABELS_LAYER_ID, 'text-color', pal.waypoint);
         setColor(this.RUNWAY_LABELS_LAYER_ID, 'text-halo-color', pal.halo);
+        setColor(this.TAXIWAY_LABELS_LAYER_ID, 'text-color', pal.waypoint);
+        setColor(this.TAXIWAY_LABELS_LAYER_ID, 'text-halo-color', pal.halo);
         setColor(this.WAYPOINTS_LAYER_ID, 'circle-color', pal.waypoint);
         setColor(this.WAYPOINT_LABELS_LAYER_ID, 'text-color', pal.waypoint);
         setColor(this.WAYPOINT_LABELS_LAYER_ID, 'text-halo-color', pal.halo);
@@ -457,6 +690,7 @@ export class NavdataRenderer {
         setSize(this.AIRPORT_LABELS_LAYER_ID, labelSize);
         setSize(this.WAYPOINT_LABELS_LAYER_ID, Math.max(1, labelSize - 1));
         setSize(this.RUNWAY_LABELS_LAYER_ID, labelSize);
+        setSize(this.TAXIWAY_LABELS_LAYER_ID, Math.max(1, labelSize - 1));
     }
 
     /**
