@@ -275,6 +275,7 @@ WebATM/static/vendor/
 WebATM/static/tiles/*.pmtiles
 
 WebATM/static/glyphs/*
+!WebATM/static/glyphs/README.md
 WebATM/static/navdata/*
 
 # Release tarballs built by script/build_release_tarball.sh and
