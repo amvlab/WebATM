@@ -82,8 +82,10 @@ class NodeManager:
                 f"Emitted {count} {event} shapes to {self.proxy.connected_clients} clients"
             )
         else:
-            # Nothing for the active node: emit empty to clear any existing shapes
-            self.proxy.socketio.emit(event, {})
+            # Nothing for the active node: emit the authoritative empty set so
+            # the previous node's shapes leave the map. A bare {} would be
+            # parsed as a legacy single-shape payload and ignored by browsers.
+            self.proxy.socketio.emit(event, {"polys": {}})
             logger.debug(f"Emitted empty {event} data to clear")
 
     def _on_node_added(self, node_id):

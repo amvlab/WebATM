@@ -179,6 +179,66 @@ class TestEmitNodeInfo:
         assert fake_socketio.count("node_info") == 0
 
 
+class TestEmitActiveNodePolyData:
+    """Shape (re-)emission when the active node changes."""
+
+    def _make_active(self, proxy, fake_client, node_bytes=b"\x01\x02\x03\x04\x81"):
+        node_hex = node_bytes.hex()
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        fake_client.act_id = node_bytes
+        proxy.tracked_nodes[node_hex] = {"node_id": node_bytes}
+        return node_hex
+
+    def test_emits_stored_shapes_of_active_node(
+        self, proxy, fake_client, fake_socketio
+    ):
+        node_hex = self._make_active(proxy, fake_client)
+        stored = {"polys": {"AREA1": {"name": "AREA1", "lat": [52.0], "lon": [4.0]}}}
+        proxy.poly_data_by_node[node_hex] = stored
+
+        proxy.node_mgr._emit_active_node_poly_data()
+
+        assert fake_socketio.last("poly") == stored
+        # No polylines stored for the node -> cleared with the empty set.
+        assert fake_socketio.last("polyline") == {"polys": {}}
+
+    def test_clears_with_authoritative_empty_set_when_node_has_no_shapes(
+        self, proxy, fake_client, fake_socketio
+    ):
+        """Regression: switching to a node without shapes must emit
+        ``{"polys": {}}``. The frontend parses a bare ``{}`` as a legacy
+        single-shape payload and ignores it, so the previous node's shapes
+        would stay on the map."""
+        other_hex = "aabbccdd81"
+        proxy.poly_data_by_node[other_hex] = {"polys": {"OLD": {"name": "OLD"}}}
+        self._make_active(proxy, fake_client)
+
+        proxy.node_mgr._emit_active_node_poly_data()
+
+        assert fake_socketio.last("poly") == {"polys": {}}
+        assert fake_socketio.last("polyline") == {"polys": {}}
+
+    def test_clears_when_no_active_node(self, proxy, fake_client, fake_socketio):
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+
+        proxy.node_mgr._emit_active_node_poly_data()
+
+        assert fake_socketio.last("poly") == {"polys": {}}
+        assert fake_socketio.last("polyline") == {"polys": {}}
+
+    def test_no_emit_without_clients(self, proxy, fake_client, fake_socketio):
+        self._make_active(proxy, fake_client)
+        proxy.connected_clients = 0
+
+        proxy.node_mgr._emit_active_node_poly_data()
+
+        assert fake_socketio.count("poly") == 0
+        assert fake_socketio.count("polyline") == 0
+
+
 class TestDelegationToNetworkClient:
     def test_actnode_raises_without_client(self, proxy):
         proxy.bluesky_client = None
