@@ -47,12 +47,15 @@ browser↔WebATM socket. The BlueSky server is left running.
 
 Terminating one simulation node without touching the rest of the tree is a
 separate `DELNODE` message, sent to the owning server when the per-node kill
-button in the Simulation Nodes panel is used. It requires a BlueSky server
-with `DELNODE` support — older servers silently ignore the request. When the
-*active* node is killed, WebATM automatically switches to a surviving node so
-the map and status indicators stay live. This works in both build variants
-(it goes over the normal command channel, not the integrated process
-manager).
+button in the Simulation Nodes panel is used (the `DELNODE [nodeid]` console
+command works too — bare `DELNODE` kills the active node). It requires a
+BlueSky server with `DELNODE` support — older servers silently ignore the
+request. When the *active* node is killed, WebATM automatically switches to
+a surviving node so the map and status indicators stay live. BlueSky refuses
+to delete its last remaining node (stopping the server is `QUIT` territory),
+and WebATM mirrors that refusal in the panel. This works in both build
+variants (it goes over the normal command channel, not the integrated
+process manager).
 
 ## Build and run
 

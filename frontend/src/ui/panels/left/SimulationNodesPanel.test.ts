@@ -170,15 +170,17 @@ describe('SimulationNodesPanel', () => {
             vi.unstubAllGlobals();
         });
 
-        it('warns about disconnection when killing the last node', () => {
+        it('refuses to kill the last node without asking the server', () => {
             const confirmSpy = vi.fn(() => true);
             vi.stubGlobal('confirm', confirmSpy);
             panel.update(nodeInfo({ a: node(1) }, 'a'));
 
             items()[0].querySelector<HTMLElement>('.node-kill-btn')!.click();
 
-            expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('last node'));
-            expect(emitted).toEqual([['del_node', { node_id: 'a' }]]);
+            // BlueSky's server refuses last-node deletion; the panel mirrors
+            // that client-side: no confirmation prompt, nothing sent.
+            expect(confirmSpy).not.toHaveBeenCalled();
+            expect(emitted).toEqual([]);
             vi.unstubAllGlobals();
         });
 

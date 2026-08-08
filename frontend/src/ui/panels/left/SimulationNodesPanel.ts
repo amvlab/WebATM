@@ -407,15 +407,18 @@ export class SimulationNodesPanel extends BasePanel {
             return;
         }
 
+        // BlueSky refuses to delete its last node (and echoes the refusal);
+        // mirror that here for immediate feedback without a round-trip
+        if (this.nodeData?.total_nodes === 1) {
+            logger.warn('SimulationNodesPanel', 'Refusing to kill the last node');
+            this.logToConsole('ERROR: Cannot kill the last node — use QUIT to disconnect, or the server controls to stop the server', true);
+            return;
+        }
+
         const nodeData = this.nodeData?.nodes[nodeId];
         const friendlyName = nodeData ? `Node ${nodeData.node_num || 1}` : nodeId;
 
-        // BlueSky keeps its server up with zero nodes, but WebATM reads "all
-        // nodes gone" as a server shutdown and disconnects — be honest about it
-        const message = this.nodeData?.total_nodes === 1
-            ? `Kill ${friendlyName}? This is the last node — WebATM will disconnect from the server.`
-            : `Kill ${friendlyName}? Its running simulation will be lost.`;
-        if (!confirm(message)) {
+        if (!confirm(`Kill ${friendlyName}? Its running simulation will be lost.`)) {
             return;
         }
 
