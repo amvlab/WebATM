@@ -137,6 +137,10 @@ venv.bak/
 
 # mkdocs documentation
 /site
+# Derived docs config written by script/generate_docs_config.py
+/mkdocs.generated.yml
+# TypeDoc-generated frontend API reference (script/build_docs.sh)
+/docs/frontend/api/
 
 # mypy
 .mypy_cache/
