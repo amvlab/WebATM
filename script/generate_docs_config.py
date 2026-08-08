@@ -19,6 +19,7 @@ Usage: uv run --group docs python script/generate_docs_config.py
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -34,6 +35,33 @@ GENERATED_HEADER = (
     "# Produced by script/generate_docs_config.py from mkdocs.yml, with\n"
     "# directory nav entries (e.g. `frontend/api/`) expanded into explicit\n"
     "# trees. Edit mkdocs.yml instead and rebuild.\n"
+)
+
+# mkdocs.yml uses the MkDocs-specific `!!python/name:` tag (e.g. for the
+# pymdownx.superfences mermaid custom fence). Plain safe_load rejects it, so
+# round-trip it through a str subclass that remembers the dotted name and is
+# dumped back with the same tag.
+_PYTHON_NAME_TAG = "tag:yaml.org,2002:python/name:"
+
+
+class _PythonName(str):
+    """A `!!python/name:<dotted.name>` scalar, preserved verbatim."""
+
+
+class _ConfigLoader(yaml.SafeLoader):
+    pass
+
+
+class _ConfigDumper(yaml.SafeDumper):
+    pass
+
+
+_ConfigLoader.add_multi_constructor(
+    _PYTHON_NAME_TAG, lambda loader, suffix, node: _PythonName(suffix)
+)
+_ConfigDumper.add_representer(
+    _PythonName,
+    lambda dumper, value: dumper.represent_scalar(_PYTHON_NAME_TAG + str(value), ""),
 )
 
 
@@ -85,12 +113,19 @@ def expand_nav(node):
 
 
 def main() -> None:
-    config = yaml.safe_load(SOURCE_CONFIG.read_text(encoding="utf-8"))
+    config = yaml.load(SOURCE_CONFIG.read_text(encoding="utf-8"), Loader=_ConfigLoader)
     config["nav"] = expand_nav(config.get("nav", []))
 
-    body = yaml.safe_dump(
-        config, sort_keys=False, allow_unicode=True, default_flow_style=False
+    body = yaml.dump(
+        config,
+        Dumper=_ConfigDumper,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
     )
+    # PyYAML renders the empty scalar of a `!!python/name:` node as an
+    # explicit '' — strip it back to the bare-tag form MkDocs documents.
+    body = re.sub(r"^(\s*.*!!python/name:\S+) ''$", r"\1", body, flags=re.MULTILINE)
     GENERATED_CONFIG.write_text(GENERATED_HEADER + body, encoding="utf-8")
     print(f"wrote {GENERATED_CONFIG.relative_to(REPO_ROOT)}")
 
