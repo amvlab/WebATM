@@ -128,24 +128,3 @@ frame is captured, so the header reads `Rate: 0x`.
 
 ![A320 above Zermatt](screenshots/swiss-matterhorn-a320.png)
 *A320 above Zermatt and the Matterhorn (light theme)*
-
-![A350 over the Saas valley](screenshots/swiss-valais-a350.png)
-*A350 over the Saas valley (light theme)*
-
-![A380 above Macugnaga](screenshots/swiss-valais-a380.png)
-*A380 above Macugnaga, with traffic over the Simplon (light theme)*
-
-![Fleet over the Bernese Oberland](screenshots/swiss-jungfrau-fleet-light.png)
-*Fleet over the Bernese Oberland (light theme)*
-
-![A320 above Lauterbrunnen](screenshots/swiss-jungfrau-a320.png)
-*A320 above Lauterbrunnen, Interlaken behind (light theme)*
-
-![B747 above Meiringen](screenshots/swiss-oberland-b747.png)
-*B747 above Meiringen and the Brienzersee (light theme)*
-
-![Fleet over Lake Geneva](screenshots/swiss-leman-fleet-light.png)
-*Fleet over Lake Geneva and the Rhône valley (light theme)*
-
-![A350 above the Rhône valley](screenshots/swiss-leman-a350.png)
-*A350 above the Rhône valley near Aigle (light theme)*
