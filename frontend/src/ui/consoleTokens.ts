@@ -102,6 +102,32 @@ export function getArgAtCursor(value: string, cursorPos: number): ArgAtCursor {
     };
 }
 
+export interface TokenReplacement {
+    value: string;
+    cursor: number;
+}
+
+/**
+ * Replace the token spanning [tokenStart, tokenEnd) with `replacement`.
+ * At end-of-input a trailing space is appended so the user can keep
+ * typing the next argument; mid-input the tail is left untouched. The
+ * returned cursor sits right after the inserted text.
+ */
+export function replaceToken(
+    value: string,
+    tokenStart: number,
+    tokenEnd: number,
+    replacement: string
+): TokenReplacement {
+    const before = value.substring(0, tokenStart);
+    const after = value.substring(tokenEnd);
+    const atEnd = after.length === 0;
+    return {
+        value: atEnd ? before + replacement + ' ' : before + replacement + after,
+        cursor: tokenStart + replacement.length + (atEnd ? 1 : 0),
+    };
+}
+
 /**
  * Find the character index in `value` where the argument at position
  * `argIndex` begins (the command token is at conceptual index -1).

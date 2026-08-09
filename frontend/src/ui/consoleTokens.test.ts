@@ -9,6 +9,7 @@ import {
     argStartIndex,
     findAcidContext,
     findPanContext,
+    replaceToken,
 } from './consoleTokens';
 
 describe('tokenizeInput', () => {
@@ -175,5 +176,28 @@ describe('findPanContext', () => {
         expect(findPanContext('PAN 52', 6)).toBeNull();
         expect(findPanContext('PAN 52.3', 8)).toBeNull();
         expect(findPanContext('PAN -4', 6)).toBeNull();
+    });
+});
+
+describe('replaceToken', () => {
+    it('appends a trailing space when replacing the token at end-of-input', () => {
+        expect(replaceToken('CRE KL123,A38', 10, 13, 'A388')).toEqual({
+            value: 'CRE KL123,A388 ',
+            cursor: 15,
+        });
+    });
+
+    it('leaves the tail untouched when replacing mid-input', () => {
+        expect(replaceToken('CRE KL123,A38 52 4', 10, 13, 'A388')).toEqual({
+            value: 'CRE KL123,A388 52 4',
+            cursor: 14,
+        });
+    });
+
+    it('replaces the command token, keeping following arguments', () => {
+        expect(replaceToken('MCR 5', 0, 3, 'MCRE')).toEqual({
+            value: 'MCRE 5',
+            cursor: 4,
+        });
     });
 });

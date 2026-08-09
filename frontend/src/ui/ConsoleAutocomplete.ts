@@ -1,7 +1,13 @@
 import { Dropdown } from '../utils/dropdown';
 import { OPENAP_AIRCRAFT_TYPES } from '../data/aircraftTypes';
 import { parseSignature, getDisplaySignature } from '../data/CommandSignature';
-import { getArgAtCursor, findAcidContext, findPanContext, AcidContext } from './consoleTokens';
+import {
+    getArgAtCursor,
+    findAcidContext,
+    findPanContext,
+    replaceToken,
+    AcidContext,
+} from './consoleTokens';
 import type { CommandDict } from '../data/types';
 import type { NavdataSearchResult } from '../data/navdataSearch';
 
@@ -285,29 +291,12 @@ export class ConsoleAutocomplete {
         this.deps.onAfterSelect();
     }
 
-    /**
-     * Replace the argument token under the cursor with `replacement`. When the
-     * cursor is at end-of-input the replacement is followed by a space so the
-     * user can keep typing the next argument; mid-input replacements leave
-     * whatever followed the token untouched and place the cursor right after
-     * the inserted text.
-     */
+    /** Replace the argument token under the cursor with `replacement`. */
     private replaceTokenAtCursor(input: HTMLInputElement, replacement: string): void {
-        const value = input.value;
-        const cursorPos = this.getCursorPos(input);
-        const { tokenStart, tokenEnd } = getArgAtCursor(value, cursorPos);
-
-        const before = value.substring(0, tokenStart);
-        const after = value.substring(tokenEnd);
-        const atEnd = after.length === 0;
-
-        const newValue = atEnd
-            ? before + replacement + ' '
-            : before + replacement + after;
-        const newCursor = tokenStart + replacement.length + (atEnd ? 1 : 0);
-
-        input.value = newValue;
-        input.setSelectionRange(newCursor, newCursor);
+        const { tokenStart, tokenEnd } = getArgAtCursor(input.value, this.getCursorPos(input));
+        const replaced = replaceToken(input.value, tokenStart, tokenEnd, replacement);
+        input.value = replaced.value;
+        input.setSelectionRange(replaced.cursor, replaced.cursor);
     }
 
     private hideAcidDropdown(): void {

@@ -15,9 +15,14 @@ import {
 } from '../data/CommandSignature';
 import { searchNavdata } from '../data/navdataSearch';
 import { CommandHistory } from './CommandHistory';
-import { argStartIndex, getArgAtCursor } from './consoleTokens';
+import { argStartIndex, getArgAtCursor, replaceToken } from './consoleTokens';
 import { CommandListView } from './CommandListView';
 import { ConsoleAutocomplete } from './ConsoleAutocomplete';
+
+/** True on macOS/iOS, where keyboard hints should show ⌘ instead of Ctrl. */
+function isMacPlatform(): boolean {
+    return /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+}
 
 export class Console {
     private history = new CommandHistory();
@@ -59,13 +64,9 @@ export class Console {
         this.applyPlatformPlaceholder();
     }
 
-    /**
-     * Swap the placeholder's "Ctrl+K" hint for "⌘+K" on macOS so the
-     * always-visible discoverability clue matches the platform.
-     */
+    /** Swap the placeholder's "Ctrl+K" hint for "⌘+K" on macOS. */
     private applyPlatformPlaceholder(): void {
-        const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
-        if (!isMac) return;
+        if (!isMacPlatform()) return;
         const input = document.getElementById('console-input') as HTMLInputElement | null;
         if (!input) return;
         input.placeholder = input.placeholder.replace('Ctrl+K', '⌘+K');
@@ -73,12 +74,8 @@ export class Console {
 
     /**
      * Create the argument-signature hint row shown directly above the input.
-     *
-     * Unlike the inline ghost-text suggestion (which only shows the *remaining*
-     * args), this row renders the *full* signature for the typed command and
-     * highlights the arg the cursor is currently on. Hidden when the input is
-     * empty or the command isn't in cmddict. Sits above the input so it
-     * doesn't push the layout down as the user types.
+     * Unlike the ghost-text suggestion (remaining args only), this renders the
+     * full signature and highlights the arg the cursor is on.
      */
     private createArgHint(): void {
         const inputContainer = document.querySelector('.console-input-container');
@@ -177,9 +174,7 @@ export class Console {
                     this.updateMapPicker();
                     break;
                 case 'Enter':
-                    this.handleCommand(input.value);
-                    this.history.add(input.value);
-                    this.resetInput();
+                    this.submitCurrent();
                     break;
                 case 'Escape':
                     this.autocomplete.hideTransient();
@@ -233,11 +228,9 @@ export class Console {
             });
         }
 
-        // Handle the "Send" button as a click-driven mirror of the Enter key.
-        // Dismiss the autocomplete dropdown first so a visible suggestion can't
-        // swallow the submit, send whatever is currently typed via the shared
-        // submitCurrent() path, then return focus to the input so the user can
-        // keep typing the next command.
+        // The "Send" button mirrors the Enter key. Dismiss the autocomplete
+        // dropdown first so a visible suggestion can't swallow the submit,
+        // then return focus so the user can keep typing.
         const sendButton = document.getElementById('send-command');
         if (sendButton) {
             sendButton.addEventListener('click', () => {
@@ -270,51 +263,40 @@ export class Console {
         return Array.from(allCommands).sort();
     }
 
+    /**
+     * Tab completion for the token under the cursor: the command name on
+     * the first token, the aircraft type on CRE/MCRE's type slot. Uses the
+     * same separator rules (spaces and commas) as the rest of the console.
+     */
     private autoComplete(): void {
         const input = document.getElementById('console-input') as HTMLInputElement;
-        if (!input) return;
+        if (!input || !input.value.trim()) return;
 
         const value = input.value;
+        const { currentArgIndex, partialText, tokenStart, tokenEnd, parts } =
+            getArgAtCursor(value, this.getCursorPos(input));
+        if (partialText.length === 0) return;
 
-        // Don't autocomplete empty input
-        if (!value.trim()) return;
-
-        const words = value.split(' ');
-        const currentWord = words[words.length - 1].toUpperCase();
-
+        const upperPartial = partialText.toUpperCase();
         let suggestions: string[] = [];
 
-        if (words.length === 1) {
-            // Complete command - use merged command list
-            const allCommands = this.getAllCommands();
-
-            // Only filter if there's something to match
-            if (currentWord.length > 0) {
-                suggestions = allCommands.filter(cmd =>
-                    cmd.startsWith(currentWord)
-                );
-            }
-        } else if (words.length > 1) {
-            // Complete aircraft type for CRE/MCRE commands.
-            // CRE acid, type, lat, lon, hdg, alt, spd  -> type is the 2nd argument
-            // MCRE count, type, alt, spd, dest         -> type is also the 2nd argument
-            const cmd = words[0].toUpperCase();
-            if ((cmd === 'CRE' || cmd === 'MCRE') && words.length === 3 && currentWord.length > 0) {
+        if (currentArgIndex === -1) {
+            suggestions = this.getAllCommands().filter(cmd => cmd.startsWith(upperPartial));
+        } else if (currentArgIndex === 1) {
+            // The type slot: 2nd argument of both CRE and MCRE.
+            const cmd = parts[0].toUpperCase();
+            if (cmd === 'CRE' || cmd === 'MCRE') {
                 suggestions = OPENAP_AIRCRAFT_TYPES.filter(type =>
-                    type.startsWith(currentWord)
+                    type.startsWith(upperPartial)
                 );
             }
         }
 
         if (suggestions.length === 1) {
-            // Single match - complete it
-            words[words.length - 1] = suggestions[0];
-            input.value = words.join(' ');
-
-            // Move cursor to end
-            input.setSelectionRange(input.value.length, input.value.length);
+            const replaced = replaceToken(value, tokenStart, tokenEnd, suggestions[0]);
+            input.value = replaced.value;
+            input.setSelectionRange(replaced.cursor, replaced.cursor);
         } else if (suggestions.length > 1) {
-            // Multiple matches - show them in console
             this.showSuggestions(suggestions);
         }
     }
@@ -503,13 +485,8 @@ export class Console {
     }
 
     /**
-     * Update the inline argument-signature hint row beneath the input.
-     *
-     * Renders one chip per arg in the signature; the chip the cursor sits
-     * on gets the `current` modifier so the user can see which argument
-     * they're filling in. When the typed command isn't in cmddict (and
-     * cmddict has actually loaded), we replace the chips with a pointer to
-     * the command palette so the user has a clue when they're stuck.
+     * Render one chip per signature arg, marking the one under the cursor.
+     * Unknown commands get a pointer to the command palette instead.
      */
     private updateArgHint(): void {
         if (!this.argHint) return;
@@ -596,10 +573,9 @@ export class Console {
         message.textContent = 'unknown — press';
         this.argHint.appendChild(message);
 
-        const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
         const kbd = document.createElement('kbd');
         kbd.className = 'cmd-arg-kbd';
-        kbd.textContent = isMac ? '⌘' : 'Ctrl';
+        kbd.textContent = isMacPlatform() ? '⌘' : 'Ctrl';
         this.argHint.appendChild(kbd);
 
         const plus = document.createElement('span');
@@ -631,12 +607,9 @@ export class Console {
     }
 
     /**
-     * Replace the console input contents with `text`, focus the input,
-     * move the cursor to the end, and refresh all derived UI (suggestion,
-     * arg hint, ACID/type autocomplete, map picker).
-     *
-     * Used by the command palette modal and left panel to drop a selected
-     * command name into the input.
+     * Replace the input contents with `text`, focus it with the cursor at
+     * the end, and refresh all derived UI. Used by the command palette and
+     * left panel to drop a selected command name into the input.
      */
     public setInputValue(text: string): void {
         const input = document.getElementById('console-input') as HTMLInputElement;
@@ -701,14 +674,10 @@ export class Console {
     }
 
     /**
-     * Check whether the cursor sits on a lat/lon/hdg parameter of the current
-     * command according to the BlueSky cmddict signature. When it does,
-     * returns a context object consumed by ConsoleMapPicker.
-     *
-     * For POLY-family commands the cmddict signature ends with `...` to mean
-     * "and so on with more lat,lon pairs". We detect that and synthetically
-     * extend the params list so the picker stays engaged across many clicks
-     * instead of disabling after the first explicit pair.
+     * When the cursor sits on a lat/lon/hdg parameter of the current command
+     * (per the cmddict signature), return a context for ConsoleMapPicker.
+     * Variadic `...` signatures (POLY family) are synthetically extended with
+     * repeating lat,lon pairs so the picker stays engaged across many clicks.
      */
     private getGeoContext(value: string, cursorPos: number): GeoContext | null {
         const { currentArgIndex, parts } = getArgAtCursor(value, cursorPos);
@@ -740,8 +709,8 @@ export class Console {
         if (variadic && tailIsLatLon) {
             const latStart = baseParams.length - 2;
             const extended = [...baseParams];
-            // Push enough pairs that any reasonable polygon fits and the
-            // trailing-comma logic in insertGeoValue keeps adding `,`.
+            // Enough pairs that any reasonable polygon fits and insertGeoValue
+            // keeps appending `,`.
             const target = Math.max(currentArgIndex + 4, baseParams.length + 40);
             while (extended.length < target) {
                 const offset = (extended.length - latStart) % 2;
@@ -792,24 +761,15 @@ export class Console {
     }
 
     /**
-     * Insert a value into the console input, overwriting the argument slot(s)
-     * starting at `replaceFromArgIndex`. Used by ConsoleMapPicker to drop
-     * coordinates or a heading into the command being typed.
-     *
-     * The replacement is slot-based rather than token-based: if the user has
-     * already typed values for lat and lon and then clicks on the map, the
-     * picker will pass replaceFromArgIndex = (lat's index) and the full pair,
-     * and this method truncates everything from the start of the lat slot
-     * onwards before inserting. That way a single click cleanly replaces both
-     * coordinates without leaving fragments behind.
+     * Insert a value into the console input, truncating everything from the
+     * argument slot at `replaceFromArgIndex` onward first so a map click
+     * cleanly replaces already-typed coordinates. Used by ConsoleMapPicker.
      *
      * @param value - The text to insert (e.g. "52.370000,4.900000" or "270")
-     * @param replaceFromArgIndex - The argument index to truncate back to.
-     *     Everything from this slot onward is discarded before the insert.
-     * @param argsAdvanced - How many arguments the insertion fills starting
-     *     at replaceFromArgIndex. Used to decide whether a trailing comma
-     *     (more args expected) or a trailing space (command complete) is
-     *     appended. Pass 2 for a lat,lon pair, 1 for a single value.
+     * @param replaceFromArgIndex - The argument slot to truncate back to.
+     * @param argsAdvanced - How many arguments the insertion fills: decides
+     *     whether a trailing comma (more args expected) or a space (command
+     *     complete) is appended. Pass 2 for a lat,lon pair, 1 for one value.
      */
     public insertGeoValue(
         value: string,
