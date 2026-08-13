@@ -66,6 +66,52 @@ describe('Aircraft3DModelLoader cache disposal', () => {
         matSpies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1));
     });
 
+    it('drops the recorded raw dimensions on clearCache()', () => {
+        const loader = makeLoader();
+        const { model } = multiMaterialModel();
+
+        loader.load('A320.glb');
+        captured.onLoad?.({ scene: model });
+        expect(loader.rawMaxDim('A320.glb')).toBeGreaterThan(0);
+
+        loader.clearCache();
+
+        expect(loader.rawMaxDim('A320.glb')).toBeUndefined();
+    });
+
+    it('lets an in-flight load re-populate the cache after clearCache()', () => {
+        const loader = makeLoader();
+        const { model } = multiMaterialModel();
+
+        loader.load('A320.glb');
+        loader.clearCache(); // load still in flight
+
+        captured.onLoad?.({ scene: model });
+
+        expect(loader.get('A320.glb')).toBe(model);
+    });
+
+    it('discards a load that completes after clearAll()', () => {
+        const onModelLoaded = vi.fn();
+        const loader = new Aircraft3DModelLoader({
+            getMaxAnisotropy: () => 1,
+            onModelLoaded,
+        });
+        const { model, geometry, materials } = multiMaterialModel();
+        const geomSpy = vi.spyOn(geometry, 'dispose');
+        const matSpies = materials.map((m) => vi.spyOn(m, 'dispose'));
+
+        loader.load('A320.glb');
+        loader.clearAll(); // teardown while the load is in flight
+
+        captured.onLoad?.({ scene: model });
+
+        expect(loader.get('A320.glb')).toBeUndefined();
+        expect(onModelLoaded).not.toHaveBeenCalled();
+        expect(geomSpy).toHaveBeenCalledTimes(1);
+        matSpies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1));
+    });
+
     it('disposes cached model resources on clearAll()', () => {
         const loader = makeLoader();
         const { model, geometry, materials } = multiMaterialModel();
