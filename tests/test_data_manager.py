@@ -124,3 +124,24 @@ class TestUsesPersistentManagers:
         )
         data = proxy.data_mgr.get_current_data()
         assert data["node_info"]["active_node"] == "deadbeef81"
+
+    def test_get_current_data_node_info_is_serialized(self, proxy):
+        """The initial_data snapshot must carry the same JSON-safe node_info
+        payload as the node_info event — no raw bytes (which Socket.IO would
+        ship as binary attachments and the frontend NodeData type can't use)."""
+        node_bytes = b"\x01\x02\x03\x04\x81"
+        proxy.tracked_nodes[node_bytes.hex()] = {
+            "node_id": node_bytes,
+            "server_id": b"SRV\x80\x80",
+        }
+        proxy.tracked_servers[b"SRV\x80\x80"] = {"server_id": b"SRV\x80\x80"}
+
+        node_info = proxy.data_mgr.get_current_data()["node_info"]
+
+        node_entry = node_info["nodes"][node_bytes.hex()]
+        assert isinstance(node_entry["node_id"], str)
+        assert isinstance(node_entry["server_id"], str)
+        assert "server_id_hex" in node_entry
+        assert all(isinstance(k, str) for k in node_info["servers"])
+        # The proxy's internal store keeps its binary IDs untouched.
+        assert proxy.tracked_nodes[node_bytes.hex()]["node_id"] == node_bytes
