@@ -60,6 +60,15 @@ export class Aircraft3DFleet {
         this.aircraft.forEach(cb);
     }
 
+    /** Apply the transform matching the projection the mesh lives in. */
+    private applyTransform(mesh: THREE.Object3D, data: AircraftMeshData, isGlobe: boolean): void {
+        if (isGlobe) {
+            this.deps.transforms.updateMeshTransformForGlobe(mesh, data);
+        } else {
+            this.deps.transforms.updateMeshTransform(mesh, data);
+        }
+    }
+
     /**
      * Scale factor that converts this model's raw GLB units into
      * real-world meters for the given ICAO. Multiply by the user's
@@ -108,14 +117,8 @@ export class Aircraft3DFleet {
         }
 
         const isGlobe = this.deps.isGlobeProjection();
-
-        if (isGlobe) {
-            this.deps.transforms.updateMeshTransformForGlobe(mesh, data);
-            this.deps.getGlobeGroup()?.add(mesh);
-        } else {
-            this.deps.transforms.updateMeshTransform(mesh, data);
-            this.deps.getMercatorGroup()?.add(mesh);
-        }
+        this.applyTransform(mesh, data, isGlobe);
+        (isGlobe ? this.deps.getGlobeGroup() : this.deps.getMercatorGroup())?.add(mesh);
 
         this.aircraft.set(id, {
             mesh,
@@ -147,13 +150,9 @@ export class Aircraft3DFleet {
             );
         }
 
-        // Update transform appropriate for the current group the mesh is in
-        // Note: If projection changed, switchGroups handles moving
-        if (aircraftMesh.currentGroup === 'globe') {
-            this.deps.transforms.updateMeshTransformForGlobe(aircraftMesh.mesh, data);
-        } else {
-            this.deps.transforms.updateMeshTransform(aircraftMesh.mesh, data);
-        }
+        // Transform for the group the mesh is currently in; if the
+        // projection changed, switchGroups handles moving it.
+        this.applyTransform(aircraftMesh.mesh, data, aircraftMesh.currentGroup === 'globe');
 
         aircraftMesh.data = data;
         aircraftMesh.lastUpdate = Date.now();
@@ -249,11 +248,7 @@ export class Aircraft3DFleet {
     reapplyAllTransforms(): void {
         const isGlobe = this.deps.isGlobeProjection();
         this.aircraft.forEach((aircraftMesh) => {
-            if (isGlobe) {
-                this.deps.transforms.updateMeshTransformForGlobe(aircraftMesh.mesh, aircraftMesh.data);
-            } else {
-                this.deps.transforms.updateMeshTransform(aircraftMesh.mesh, aircraftMesh.data);
-            }
+            this.applyTransform(aircraftMesh.mesh, aircraftMesh.data, isGlobe);
         });
     }
 
@@ -288,20 +283,9 @@ export class Aircraft3DFleet {
         logger.debug('Aircraft3DFleet', `Switching ${this.aircraft.size} aircraft to ${toGlobe ? 'globe' : 'mercator'} group`);
 
         this.aircraft.forEach((aircraftMesh) => {
-            // Remove from current group
             sourceGroup.remove(aircraftMesh.mesh);
-
-            // Add to target group
             targetGroup.add(aircraftMesh.mesh);
-
-            // Update the transform for the new projection mode
-            if (toGlobe) {
-                this.deps.transforms.updateMeshTransformForGlobe(aircraftMesh.mesh, aircraftMesh.data);
-            } else {
-                this.deps.transforms.updateMeshTransform(aircraftMesh.mesh, aircraftMesh.data);
-            }
-
-            // Update tracking
+            this.applyTransform(aircraftMesh.mesh, aircraftMesh.data, toGlobe);
             aircraftMesh.currentGroup = toGlobe ? 'globe' : 'mercator';
         });
     }
