@@ -39,9 +39,10 @@ export class AircraftInteractionManager {
     private lastExplicitPosCommand: string | null = null;
     private lastExplicitPosTime: number = 0;
 
-    // Optional reference to the route drawing manager - when route drawing is
-    // active, empty-map clicks are waypoint placements, not aircraft deselects.
-    private isRouteDrawingActive: (() => boolean) | null = null;
+    // Optional predicate reporting whether any map drawing tool (route,
+    // shape, aircraft placement) is active - those clicks are point
+    // placements, not aircraft deselects.
+    private isDrawingToolActive: (() => boolean) | null = null;
 
     // Document-level listeners and state subscriptions, released in destroy()
     // (map listeners die with the map, but these would outlive it).
@@ -108,9 +109,9 @@ export class AircraftInteractionManager {
             setTimeout(() => {
                 if (!this.map) return;
 
-                // If the route drawing tool is active, an empty-map click is a
-                // waypoint placement, not a request to unselect the aircraft.
-                if (this.isRouteDrawingActive && this.isRouteDrawingActive()) {
+                // If a drawing tool is active, an empty-map click is a point
+                // placement, not a request to unselect the aircraft.
+                if (this.isDrawingToolActive && this.isDrawingToolActive()) {
                     return;
                 }
 
@@ -478,12 +479,13 @@ export class AircraftInteractionManager {
     }
 
     /**
-     * Register a predicate that reports whether interactive route drawing is
-     * currently in progress. When true, empty-map clicks are suppressed from
-     * the "unselect aircraft" path so they can be consumed as waypoint drops.
+     * Register a predicate that reports whether any interactive drawing tool
+     * (route, shape, aircraft placement) is in progress. When true, empty-map
+     * clicks are suppressed from the "unselect aircraft" path so they can be
+     * consumed as point drops.
      */
-    public setRouteDrawingActiveCheck(check: () => boolean): void {
-        this.isRouteDrawingActive = check;
+    public setDrawingToolActiveCheck(check: () => boolean): void {
+        this.isDrawingToolActive = check;
     }
 
     /**

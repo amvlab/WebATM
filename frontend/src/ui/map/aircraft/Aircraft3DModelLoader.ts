@@ -63,6 +63,13 @@ export class Aircraft3DModelLoader {
         this.loader.load(
             path,
             (gltf) => {
+                // clearAll() ran while this request was in flight: the
+                // owner tore everything down, so discard the result
+                // instead of resurrecting the cache.
+                if (!this.loadingModels.has(path)) {
+                    this.disposeModel(gltf.scene);
+                    return;
+                }
                 this.loadingModels.delete(path);
                 this.normalizeModel(gltf.scene, path);
                 this.loadedModels.set(path, gltf.scene);
@@ -92,38 +99,37 @@ export class Aircraft3DModelLoader {
      * re-populate the cache.
      */
     public clearCache(): void {
-        this.disposeCachedModels();
+        this.loadedModels.forEach((model) => this.disposeModel(model));
         this.loadedModels.clear();
+        this.rawMaxDims.clear();
         this.animationClips.clear();
     }
 
-    /** Full teardown: dispose and drop the cache, forget in-flight loads. */
+    /**
+     * Full teardown: dispose and drop the cache, forget in-flight loads
+     * (their completions are discarded in load()'s callback).
+     */
     public clearAll(): void {
-        this.disposeCachedModels();
-        this.loadedModels.clear();
-        this.animationClips.clear();
+        this.clearCache();
         this.loadingModels.clear();
     }
 
     /**
-     * Dispose the geometry and materials of every cached model. Aircraft
-     * meshes are clones that share these resources, so callers must detach
-     * all live meshes before clearing the cache. Materials may be a single
-     * instance or an array (multi-material meshes), so handle both.
+     * Dispose a model's geometry and materials. Aircraft meshes are clones
+     * that share these resources, so callers must detach all live meshes
+     * first. Materials may be a single instance or an array.
      */
-    private disposeCachedModels(): void {
-        this.loadedModels.forEach((model) => {
-            model.traverse((child) => {
-                if (child instanceof THREE.Mesh) {
-                    child.geometry.dispose();
-                    const material = child.material;
-                    if (Array.isArray(material)) {
-                        material.forEach((m) => m.dispose());
-                    } else if (material instanceof THREE.Material) {
-                        material.dispose();
-                    }
+    private disposeModel(model: THREE.Group): void {
+        model.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+                child.geometry.dispose();
+                const material = child.material;
+                if (Array.isArray(material)) {
+                    material.forEach((m) => m.dispose());
+                } else if (material instanceof THREE.Material) {
+                    material.dispose();
                 }
-            });
+            }
         });
     }
 
@@ -205,10 +211,8 @@ export class Aircraft3DModelLoader {
             }
         });
 
-        // Don't set model.rotation here - it gets ignored anyway because we use mesh.matrix
-        // The rotation is applied in updateMeshTransform() via the transform matrix
-        // This ensures heading rotation works correctly
-
+        // No rotation here: heading is applied per-aircraft in the
+        // updateMeshTransform* methods.
         logger.debug('Aircraft3DModelLoader', `Model normalized: path=${path}, rawMax=${rawMax.toFixed(2)}, size=${size.x.toFixed(1)}x${size.y.toFixed(1)}x${size.z.toFixed(1)}, anisotropy=${maxAnisotropy}`);
     }
 }

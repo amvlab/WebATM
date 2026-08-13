@@ -29,61 +29,25 @@ export class MapControlsPanel extends BasePanel {
     protected onInit(): void {
         logger.debug('MapControlsPanel', 'MapControlsPanel initialized');
 
-        // Set up button event handlers
-        this.setupButtonHandlers();
+        this.bindClick('create-aircraft-btn', () =>
+            this.withManager(this.aircraftCreationManager, 'AircraftCreationManager', m => m.showModal()));
+        this.bindClick('draw-shape-btn', () =>
+            this.withManager(this.shapeDrawingManager, 'ShapeDrawingManager', m => m.toggleDrawing()));
+        this.bindClick('draw-route-btn', () =>
+            this.withManager(this.routeDrawingManager, 'RouteDrawingManager', m => m.toggleDrawing()));
 
-        // Set up map info update handlers
         this.setupMapInfoHandlers();
     }
 
     /**
-     * Set up button event handlers
+     * Run a drawing-button action against its manager, or tell the user the
+     * map is still loading when the manager hasn't been wired up yet.
      */
-    private setupButtonHandlers(): void {
-        this.bindClick('create-aircraft-btn', () => this.onCreateAircraftClick());
-        this.bindClick('draw-shape-btn', () => this.onDrawShapeClick());
-        this.bindClick('draw-route-btn', () => this.onDrawRouteClick());
-    }
-
-    /**
-     * Handle Create Aircraft button click
-     */
-    private onCreateAircraftClick(): void {
-        logger.debug('MapControlsPanel', 'Create Aircraft button clicked');
-        // Will be connected to AircraftCreationManager
-        if (this.aircraftCreationManager) {
-            this.aircraftCreationManager.showModal();
+    private withManager<T>(manager: T | null, name: string, action: (manager: T) => void): void {
+        if (manager) {
+            action(manager);
         } else {
-            logger.warn('MapControlsPanel', 'AircraftCreationManager not set - map may still be loading');
-            // Optionally show a user-friendly message
-            alert('Map is still loading. Please wait a moment and try again.');
-        }
-    }
-
-    /**
-     * Handle Draw Shape button click
-     */
-    private onDrawShapeClick(): void {
-        logger.debug('MapControlsPanel', 'Draw Shape button clicked');
-        // Will be connected to ShapeDrawingManager
-        if (this.shapeDrawingManager) {
-            this.shapeDrawingManager.toggleDrawing();
-        } else {
-            logger.warn('MapControlsPanel', 'ShapeDrawingManager not set - map may still be loading');
-            // Optionally show a user-friendly message
-            alert('Map is still loading. Please wait a moment and try again.');
-        }
-    }
-
-    /**
-     * Handle Draw Route button click
-     */
-    private onDrawRouteClick(): void {
-        logger.debug('MapControlsPanel', 'Draw Route button clicked');
-        if (this.routeDrawingManager) {
-            this.routeDrawingManager.toggleDrawing();
-        } else {
-            logger.warn('MapControlsPanel', 'RouteDrawingManager not set - map may still be loading');
+            logger.warn('MapControlsPanel', `${name} not set - map may still be loading`);
             alert('Map is still loading. Please wait a moment and try again.');
         }
     }
@@ -163,121 +127,69 @@ export class MapControlsPanel extends BasePanel {
         logger.debug('MapControlsPanel', 'Map event listeners attached for zoom and bbox updates');
     }
 
-    /**
-     * Update the zoom level display
-     */
     private updateZoomDisplay(): void {
-        if (!this.mapDisplay) return;
-
-        const map = this.mapDisplay.getMap();
+        const map = this.mapDisplay?.getMap();
         if (!map) return;
 
         this.setText('current-zoom', map.getZoom().toFixed(1));
     }
 
-    /**
-     * Update the bounding box display
-     */
     private updateBoundingBoxDisplay(): void {
-        if (!this.mapDisplay) return;
-
-        const map = this.mapDisplay.getMap();
+        const map = this.mapDisplay?.getMap();
         if (!map) return;
 
         const bounds = map.getBounds();
-
         this.setText('bbox-north', bounds.getNorth().toFixed(2));
         this.setText('bbox-south', bounds.getSouth().toFixed(2));
         this.setText('bbox-east', bounds.getEast().toFixed(2));
         this.setText('bbox-west', bounds.getWest().toFixed(2));
     }
 
-    /**
-     * Set the AircraftCreationManager instance
-     */
     public setAircraftCreationManager(manager: AircraftCreationManager): void {
         this.aircraftCreationManager = manager;
-        logger.debug('MapControlsPanel', 'MapControlsPanel connected to AircraftCreationManager');
     }
 
-    /**
-     * Set the ShapeDrawingManager instance
-     */
     public setShapeDrawingManager(manager: ShapeDrawingManager): void {
         this.shapeDrawingManager = manager;
-        logger.debug('MapControlsPanel', 'MapControlsPanel connected to ShapeDrawingManager');
     }
 
-    /**
-     * Set the RouteDrawingManager instance
-     */
     public setRouteDrawingManager(manager: RouteDrawingManager): void {
         this.routeDrawingManager = manager;
-        logger.debug('MapControlsPanel', 'MapControlsPanel connected to RouteDrawingManager');
     }
 
-    /**
-     * Zoom in by one level
-     */
+    /** Zoom in by one level */
     public zoomIn(): void {
-        if (!this.mapDisplay) {
-            logger.warn('MapControlsPanel', 'Cannot zoom in: MapDisplay not set');
-            return;
-        }
-
-        const map = this.mapDisplay.getMap();
+        const map = this.mapDisplay?.getMap();
         if (!map) {
-            logger.warn('MapControlsPanel', 'Cannot zoom in: Map not initialized');
+            logger.warn('MapControlsPanel', 'Cannot zoom in: map not ready');
             return;
         }
-
-        const currentZoom = map.getZoom();
-        map.easeTo({ zoom: currentZoom + 1, duration: 300 });
-        logger.debug('MapControlsPanel', 'Zooming in to level:', currentZoom + 1);
+        map.easeTo({ zoom: map.getZoom() + 1, duration: 300 });
     }
 
-    /**
-     * Zoom out by one level
-     */
+    /** Zoom out by one level */
     public zoomOut(): void {
-        if (!this.mapDisplay) {
-            logger.warn('MapControlsPanel', 'Cannot zoom out: MapDisplay not set');
-            return;
-        }
-
-        const map = this.mapDisplay.getMap();
+        const map = this.mapDisplay?.getMap();
         if (!map) {
-            logger.warn('MapControlsPanel', 'Cannot zoom out: Map not initialized');
+            logger.warn('MapControlsPanel', 'Cannot zoom out: map not ready');
             return;
         }
-
-        const currentZoom = map.getZoom();
-        map.easeTo({ zoom: currentZoom - 1, duration: 300 });
-        logger.debug('MapControlsPanel', 'Zooming out to level:', currentZoom - 1);
+        map.easeTo({ zoom: map.getZoom() - 1, duration: 300 });
     }
 
-    /**
-     * Reset view to default center and zoom
-     */
+    /** Reset view to the default center and zoom */
     public resetView(): void {
-        if (!this.mapDisplay) {
-            logger.warn('MapControlsPanel', 'Cannot reset view: MapDisplay not set');
-            return;
-        }
-
-        const map = this.mapDisplay.getMap();
+        const map = this.mapDisplay?.getMap();
         if (!map) {
-            logger.warn('MapControlsPanel', 'Cannot reset view: Map not initialized');
+            logger.warn('MapControlsPanel', 'Cannot reset view: map not ready');
             return;
         }
-
         map.flyTo({
             center: this.DEFAULT_CENTER,
             zoom: this.DEFAULT_ZOOM,
             duration: 1000,
             essential: true
         });
-        logger.debug('MapControlsPanel', 'Resetting view to default center and zoom');
     }
 
     /**

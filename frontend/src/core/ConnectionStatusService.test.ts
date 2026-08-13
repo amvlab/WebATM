@@ -76,7 +76,6 @@ describe('ConnectionStatusService', () => {
             service.setWebSocketConnected(true);
             const status = service.getStatus();
             expect(status.webSocketConnected).toBe(true);
-            expect(status.webSocketState).toBe('connected');
             expect(echoManager.success).toHaveBeenCalledWith('Connected to WebATM server');
         });
 
@@ -97,6 +96,17 @@ describe('ConnectionStatusService', () => {
             service.setWebSocketConnected(false);
             expect(service.isBlueSkyConnected()).toBe(false);
             expect(service.isFullyConnected()).toBe(false);
+        });
+
+        it('a WebSocket disconnect also clears receivingData', () => {
+            // Regression: receivingData used to stay true forever after a
+            // WebSocket drop, because the guarded timeout path skipped it.
+            service.setWebSocketConnected(true);
+            service.onSimInfoReceived();
+            expect(service.isReceivingData()).toBe(true);
+
+            service.setWebSocketConnected(false);
+            expect(service.isReceivingData()).toBe(false);
         });
     });
 
@@ -124,6 +134,71 @@ describe('ConnectionStatusService', () => {
             expect(service.isReceivingData()).toBe(false);
             expect(echoManager.warning).toHaveBeenCalledWith(
                 expect.stringContaining('No data received'));
+        });
+
+        it('an explicit disconnect cancels the pending no-data timer', () => {
+            // Regression: after a deliberate disconnect (QUIT,
+            // server_disconnected, Stop in the integrated build) the armed
+            // 5s timer used to fire anyway and echo a spurious
+            // "No data received ... connection may be lost" warning.
+            service.onSimInfoReceived(); // arms the 5s timer
+
+            service.setBlueSkyConnected(false); // e.g. QUIT
+            expect(service.isReceivingData()).toBe(false);
+
+            (echoManager.warning as ReturnType<typeof vi.fn>).mockClear();
+            vi.advanceTimersByTime(10000);
+            expect(echoManager.warning).not.toHaveBeenCalledWith(
+                expect.stringContaining('No data received'));
+        });
+
+        it('a deliberate disconnect ignores in-flight data during the grace window', () => {
+            // Regression: after QUIT, data events already buffered in the
+            // socket flipped the status straight back to "Connected" and
+            // re-armed the timer, producing a phantom connect flash and a
+            // spurious warning 5s later.
+            const nowSpy = vi.spyOn(Date, 'now');
+            nowSpy.mockReturnValue(1000);
+            service.onSimInfoReceived();
+
+            service.expectDisconnect(); // QUIT
+            service.setBlueSkyConnected(false);
+
+            // A trailing acdata event arrives 100ms later - ignored.
+            nowSpy.mockReturnValue(1100);
+            service.onAircraftDataReceived();
+            expect(service.isBlueSkyConnected()).toBe(false);
+
+            (echoManager.warning as ReturnType<typeof vi.fn>).mockClear();
+            vi.advanceTimersByTime(10000);
+            expect(echoManager.warning).not.toHaveBeenCalledWith(
+                expect.stringContaining('No data received'));
+        });
+
+        it('data still flowing after the grace window reconnects as usual', () => {
+            const nowSpy = vi.spyOn(Date, 'now');
+            nowSpy.mockReturnValue(1000);
+            service.onSimInfoReceived();
+
+            service.expectDisconnect(); // disconnect request that failed
+            service.setBlueSkyConnected(false);
+
+            // Data keeps arriving well past the 2s grace window.
+            nowSpy.mockReturnValue(4000);
+            service.onAircraftDataReceived();
+            expect(service.isBlueSkyConnected()).toBe(true);
+        });
+
+        it('exposes the grace window so data consumers can drop in-flight frames', () => {
+            const nowSpy = vi.spyOn(Date, 'now');
+            nowSpy.mockReturnValue(1000);
+            expect(service.isInDisconnectGrace()).toBe(false);
+
+            service.expectDisconnect();
+            expect(service.isInDisconnectGrace()).toBe(true);
+
+            nowSpy.mockReturnValue(4000); // past the 2s default
+            expect(service.isInDisconnectGrace()).toBe(false);
         });
 
         it('continuous data keeps the connection alive past the timeout window', () => {

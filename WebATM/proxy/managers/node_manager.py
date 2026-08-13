@@ -2,6 +2,7 @@
 
 import threading
 import time
+import traceback
 
 from ...bluesky_client import safe_decode, seqid2idx, seqidx2id
 from ...logger import get_logger
@@ -37,8 +38,7 @@ class NodeManager:
             return None
 
         try:
-            # act_id is raw bytes in the network client; tracked_nodes is
-            # keyed by the hex-string form.
+            # act_id is raw bytes; tracked_nodes is keyed by hex strings.
             active_id_str = id2str(self.proxy.bluesky_client.act_id)
             if active_id_str in self.proxy.tracked_nodes:
                 return active_id_str
@@ -65,8 +65,6 @@ class NodeManager:
             )
         except Exception as e:
             logger.error(f" Error emitting active node POLY/POLYLINE data: {e}")
-            import traceback
-
             traceback.print_exc()
 
     def _emit_shapes(self, active_node_id, data_by_node, event):
@@ -89,27 +87,26 @@ class NodeManager:
             logger.debug(f"Emitted empty {event} data to clear")
 
     def _on_node_added(self, node_id):
-        """Callback when a new node is discovered."""
+        """Callback when a new node is discovered.
+
+        Tracks the node (keyed by hex string, matching SIMINFO sender IDs),
+        flips the proxy to connected on the first node, and re-activates the
+        client when its recorded active node no longer exists.
+        """
         try:
-            # Hex string keys for consistency with SIMINFO
             node_id_str = id2str(node_id)
 
             if node_id_str not in self.proxy.tracked_nodes:
                 server_id = node_id[:-1] + seqidx2id(0)
-                if (
-                    server_id not in self.proxy.bluesky_client.servers
-                ):  # Check standalone proxy's known servers
+                if server_id not in self.proxy.bluesky_client.servers:
                     server_id = b"0"  # Ungrouped
                 if server_id not in self.proxy.tracked_servers:
                     self._on_server_added(server_id)
 
-                node_num = seqid2idx(node_id[-1])
-
-                # Store using hex string key for consistency with SIMINFO
                 self.proxy.tracked_nodes[node_id_str] = {
-                    "node_id": node_id,  # Keep original binary for internal use
-                    "node_id_str": node_id_str,  # Hex string for display
-                    "node_num": node_num,
+                    "node_id": node_id,  # original binary, for internal use
+                    "node_id_str": node_id_str,
+                    "node_num": seqid2idx(node_id[-1]),
                     "server_id": server_id,
                     "status": "init",
                     "time": "00:00:00",
@@ -119,36 +116,49 @@ class NodeManager:
                     f"Node {safe_decode(node_id)} added (total: {len(self.proxy.tracked_nodes)})"
                 )
 
-                # Update connection status immediately when nodes are detected
-                if not self.proxy.was_connected and len(self.proxy.tracked_nodes) > 0:
+                self._reactivate_if_active_node_gone(node_id)
+
+                if not self.proxy.was_connected:
                     self.proxy.was_connected = True
-                    # Start the data-flow timeout clock from "first node
-                    # appeared" (no data could arrive before a node existed).
-                    # This handler runs inside bluesky_client.update() and flips
-                    # was_connected first, so the network timer's own reset (only
-                    # runs while `not was_connected`) is skipped — reset here too,
-                    # else the stale start_client() timestamp times out at once.
+                    # Restart the data-flow timeout clock from "first node
+                    # appeared". This runs inside bluesky_client.update() and
+                    # flips was_connected before the network timer's own reset
+                    # (guarded on `not was_connected`) can run, so without this
+                    # a stale start_client() timestamp times out immediately.
                     self.proxy.last_successful_update = time.time()
                     logger.info(" Connection established")
                     self.proxy._emit_connection_status(True)
 
-                # The standalone proxy auto-selects the first node, so we don't need to do it manually here
-                # Emit updated node list to connected clients
                 if self.proxy.running:
                     self._emit_node_info()
         except Exception as e:
             logger.error(f" Error in _on_node_added: {e}")
-            import traceback
-
             traceback.print_exc()
+
+    def _reactivate_if_active_node_gone(self, node_id):
+        """Activate a newly discovered node if the client's active node is dead.
+
+        The network client auto-selects only the very first node it ever sees;
+        after that, ``_failover_active_node`` re-activates a survivor when the
+        active node is removed. But when the last node vanishes (e.g. its
+        process crashes) there is no survivor: ``act_id`` keeps pointing at the
+        dead node, and a node added afterwards would never be activated. The
+        actonly topics (ACDATA/ROUTEDATA) would stay subscribed to the dead
+        node, no traffic would flow, and the data-flow timeout would tear down
+        a live connection. Activating the newcomer here re-subscribes those
+        topics and resumes the data flow.
+        """
+        client = self.proxy.bluesky_client
+        if client.act_id is None or client.act_id not in client.nodes:
+            logger.info(
+                f"No live active node; activating new node {safe_decode(node_id)}"
+            )
+            client.actnode(node_id)
 
     def _on_server_added(self, server_id):
         """Callback when a server is discovered."""
         if server_id not in self.proxy.tracked_servers:
-            # Simple server tracking - just store the ID
             self.proxy.tracked_servers[server_id] = {"server_id": server_id}
-
-            # Emit updated server list to connected clients
             if self.proxy.running:
                 self._emit_node_info()
 
@@ -160,15 +170,14 @@ class NodeManager:
             self._failover_active_node(node_id)
             self._emit_node_info()
 
-        # Check if all nodes have been removed - this indicates server shutdown
-        # Add a small delay to avoid false positives during normal node transitions
+        # All nodes gone usually means server shutdown; re-check after a short
+        # delay to avoid false positives during normal node transitions.
         if (
             len(self.proxy.tracked_nodes) == 0
             and self.proxy.was_connected
             and self.proxy.running
         ):
             logger.warning(" All nodes removed - checking for server shutdown...")
-            # Use a timer to check again in a moment to confirm it's really a shutdown
             threading.Timer(1.0, self._check_node_shutdown).start()
 
     def _failover_active_node(self, removed_node_id):
@@ -213,51 +222,52 @@ class NodeManager:
             del self.proxy.tracked_servers[server_id]
             self._emit_node_info()
 
+    def serialize_node_info(self):
+        """Build the JSON-serializable ``node_info`` payload.
+
+        Decodes the binary node/server IDs kept in ``tracked_nodes`` and
+        ``tracked_servers`` into the string forms the frontend expects
+        (``NodeData`` in ``frontend/src/data/types.ts``). Used for both the
+        ``node_info`` Socket.IO event and the ``initial_data`` snapshot.
+
+        Returns:
+            dict: ``nodes``, ``servers``, ``active_node`` and ``total_nodes``.
+        """
+        nodes_data = {}
+        for node_id_str, tracked in self.proxy.tracked_nodes.items():
+            node_data = tracked.copy()
+            if "node_id" in node_data:
+                node_data["node_id"] = safe_decode(node_data["node_id"])
+            if "server_id" in node_data:
+                raw_server_id = node_data["server_id"]
+                node_data["server_id"] = safe_decode(raw_server_id)
+                node_data["server_id_hex"] = id2str(raw_server_id)
+                node_data["server_id_raw"] = str(raw_server_id)
+            nodes_data[node_id_str] = node_data
+
+        servers_data = {}
+        for server_id, tracked in self.proxy.tracked_servers.items():
+            server_data = tracked.copy()
+            if "server_id" in server_data:
+                server_data["server_id"] = safe_decode(server_data["server_id"])
+            servers_data[safe_decode(server_id)] = server_data
+
+        return {
+            "nodes": nodes_data,
+            "servers": servers_data,
+            "active_node": self._get_safe_active_node(),
+            "total_nodes": len(self.proxy.tracked_nodes),
+        }
+
     def _emit_node_info(self):
         """Emit current node and server information to connected clients."""
-        if self.proxy.socketio and self.proxy.connected_clients > 0:
-            try:
-                # Convert node data for JSON serialization
-                nodes_data = {}
-                for k, v in self.proxy.tracked_nodes.items():
-                    # k is already a hex string, v contains node data
-                    # Make a copy and ensure all values are JSON serializable
-                    node_data = v.copy()
-                    if "node_id" in node_data:
-                        node_data["node_id"] = safe_decode(node_data["node_id"])
-                    if "server_id" in node_data:
-                        # Include decoded, hex, and raw server ID
-                        raw_server_id = node_data["server_id"]
-                        node_data["server_id"] = safe_decode(raw_server_id)
-                        node_data["server_id_hex"] = id2str(raw_server_id)
-                        node_data["server_id_raw"] = str(
-                            raw_server_id
-                        )  # Raw byte string representation
-                    nodes_data[k] = node_data  # k is already the hex string
-
-                servers_data = {}
-                for k, v in self.proxy.tracked_servers.items():
-                    key = safe_decode(k)
-                    server_data = v.copy()
-                    if "server_id" in server_data:
-                        server_data["server_id"] = safe_decode(server_data["server_id"])
-                    servers_data[key] = server_data
-
-                # Get active node safely
-                active_node = self._get_safe_active_node()
-
-                node_info = {
-                    "nodes": nodes_data,
-                    "servers": servers_data,
-                    "active_node": active_node,
-                    "total_nodes": len(self.proxy.tracked_nodes),
-                }
-                self.proxy.socketio.emit("node_info", node_info)
-            except Exception as e:
-                logger.error(f" Error emitting node info: {e}")
-                import traceback
-
-                traceback.print_exc()
+        if not (self.proxy.socketio and self.proxy.connected_clients > 0):
+            return
+        try:
+            self.proxy.socketio.emit("node_info", self.serialize_node_info())
+        except Exception as e:
+            logger.error(f" Error emitting node info: {e}")
+            traceback.print_exc()
 
     def actnode(self, node_id):
         """Select the active simulation node via the network client.

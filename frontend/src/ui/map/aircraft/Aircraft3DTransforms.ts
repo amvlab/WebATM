@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import { altitudeScaledForOrigin, mercatorCameraMatrix, relativePositionMeters } from '../rendering/mercatorUtils';
+import type { LngLatPoint } from '../rendering/mercatorUtils';
+import { isValidCoordinate } from '../../../utils/maplibre';
 import { getGlobeModelMatrix } from '../rendering/globeMatrix';
 import type { Render3DArgs } from '../rendering/CustomLayer3D';
 import type { AircraftData, DisplayOptions } from '../../../data/types';
@@ -76,75 +78,64 @@ export class Aircraft3DTransforms {
      * Initialize or update scene origin based on aircraft positions.
      * Returns true when the origin was repositioned, in which case the
      * caller must re-apply mercator transforms to existing meshes.
+     *
+     * Invalid records (NaN or out-of-range lat/lon — BlueSky delivers
+     * these, e.g. after a MOVE beyond lat 90) are ignored, mirroring the
+     * per-aircraft guard in the renderers. A poisoned origin would make
+     * MercatorCoordinate.fromLngLat throw on every mesh and camera update.
      */
     updateSceneOrigin(aircraftData: AircraftData): boolean {
+        const valid: LngLatPoint[] = [];
+        for (let i = 0; i < aircraftData.lat.length; i++) {
+            if (isValidCoordinate(aircraftData.lat[i], aircraftData.lon[i])) {
+                valid.push({ lng: aircraftData.lon[i], lat: aircraftData.lat[i] });
+            }
+        }
+
         if (!this.sceneOrigin) {
-            // Initialize scene origin with first aircraft or map center
-            if (aircraftData.lat.length > 0) {
-                this.sceneOrigin = {
-                    lng: aircraftData.lon[0],
-                    lat: aircraftData.lat[0]
-                };
+            if (valid.length > 0) {
+                this.sceneOrigin = { ...valid[0] };
             } else {
                 // Fallback to map center if available
                 const center = this.deps.getMap()?.getCenter();
                 if (!center) return false;
-                this.sceneOrigin = {
-                    lng: center.lng,
-                    lat: center.lat
-                };
+                this.sceneOrigin = { lng: center.lng, lat: center.lat };
             }
             logger.debug('Aircraft3DTransforms', `Scene origin set to: ${this.sceneOrigin.lng.toFixed(6)}, ${this.sceneOrigin.lat.toFixed(6)}`);
         }
 
-        // Check if any aircraft is too far from current origin
-        let needsRepositioning = false;
-        for (let i = 0; i < aircraftData.lat.length; i++) {
-            const distance = this.calculateDistance(
-                this.sceneOrigin.lat, this.sceneOrigin.lng,
-                aircraftData.lat[i], aircraftData.lon[i]
-            );
-            if (distance > this.maxDistanceFromOrigin) {
-                needsRepositioning = true;
-                break;
-            }
-        }
+        const origin = this.sceneOrigin;
+        const needsRepositioning = valid.some((p) =>
+            this.calculateDistance(origin.lat, origin.lng, p.lat, p.lng) > this.maxDistanceFromOrigin
+        );
 
-        if (needsRepositioning) {
-            return this.repositionSceneOrigin(aircraftData);
-        }
-        return false;
+        return needsRepositioning ? this.repositionSceneOrigin(valid) : false;
     }
 
     /**
-     * Reposition scene origin to aircraft centroid. Returns true when the
-     * origin actually moved (changes under 10 m are skipped).
+     * Reposition scene origin to the centroid of the given (valid) aircraft
+     * positions. Returns true when the origin actually moved (changes under
+     * 10 m are skipped).
      */
-    private repositionSceneOrigin(aircraftData: AircraftData): boolean {
-        if (aircraftData.lat.length === 0) return false;
+    private repositionSceneOrigin(coords: LngLatPoint[]): boolean {
+        if (coords.length === 0) return false;
 
-        // Calculate centroid of all aircraft
         let sumLat = 0;
         let sumLng = 0;
-        for (let i = 0; i < aircraftData.lat.length; i++) {
-            sumLat += aircraftData.lat[i];
-            sumLng += aircraftData.lon[i];
+        for (const c of coords) {
+            sumLat += c.lat;
+            sumLng += c.lng;
         }
-
         const newOrigin = {
-            lng: sumLng / aircraftData.lon.length,
-            lat: sumLat / aircraftData.lat.length
+            lng: sumLng / coords.length,
+            lat: sumLat / coords.length
         };
 
-        // Check if the new origin is significantly different from current origin
-        // Only reposition if difference is meaningful (> 10 meters)
         const distanceToNewOrigin = this.calculateDistance(
             this.sceneOrigin!.lat, this.sceneOrigin!.lng,
             newOrigin.lat, newOrigin.lng
         );
-
         if (distanceToNewOrigin < 10) {
-            // Origin change is too small to be meaningful, skip repositioning
             return false;
         }
 

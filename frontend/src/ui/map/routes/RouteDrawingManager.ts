@@ -212,10 +212,12 @@ export class RouteDrawingManager extends BaseDrawingManager {
             drawBtn.classList.add('active');
         }
 
+        // Claim the map first (cancelling any other tool's draw, which hides
+        // the shared banner), then show this draw's banner.
+        this.enableMapDrawing();
         this.showDrawingBanner(
             `Drawing route for ${this.targetAircraftId} (leader from ${this.leaderAnchorLabel}) - Click to add waypoints, right-click or Enter to finish, Esc to cancel`
         );
-        this.enableMapDrawing();
         this.preview.updateDrawing(this.routePoints, this.leaderAnchor);
 
         logger.info(

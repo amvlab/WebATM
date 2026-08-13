@@ -204,8 +204,6 @@ class DataManager:
         else:
             logger.debug(" No active node - not including any shapes in initial data")
 
-        from ...bluesky_client import safe_decode
-
         return {
             "traffic_data": self.proxy.traffic_data,
             "sim_data": self.proxy.sim_data,
@@ -218,13 +216,7 @@ class DataManager:
                 "server_ip": self.proxy.server_ip,
                 "last_update": self.proxy.last_successful_update,
             },
-            "node_info": {
-                "nodes": self.proxy.tracked_nodes.copy(),
-                "servers": {
-                    safe_decode(k): v for k, v in self.proxy.tracked_servers.items()
-                },
-                "active_node": active_node_id,
-                "total_nodes": len(self.proxy.tracked_nodes),
-            },
+            # Same serialized shape as the node_info event (no raw bytes).
+            "node_info": self.proxy.node_mgr.serialize_node_info(),
             "timestamp": time.time(),
         }

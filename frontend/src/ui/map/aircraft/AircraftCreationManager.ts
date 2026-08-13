@@ -13,6 +13,7 @@ import {
 import { pointFeature, lineStringFeature } from '../../../utils/geojson';
 import { roundedBearing } from '../../../utils/geo';
 import { isTextEntryTarget } from '../../../utils/dom';
+import { claimDrawing, releaseDrawing } from '../drawingExclusion';
 import {
     AircraftCreationForm,
     AircraftCreationData,
@@ -60,6 +61,14 @@ export class AircraftCreationManager {
      */
     public showModal(): void {
         this.form.showModal();
+    }
+
+    /**
+     * Whether click-to-place aircraft creation is currently active. Consumed
+     * by AircraftInteractionManager to suppress empty-map-click deselection.
+     */
+    public isDrawing(): boolean {
+        return this.aircraftDrawingMode;
     }
 
     /**
@@ -118,6 +127,10 @@ export class AircraftCreationManager {
             return;
         }
 
+        // Cancel any in-progress shape/route draw so two tools never consume
+        // the same map clicks.
+        claimDrawing(this, () => this.stopAircraftDrawing());
+
         // Match the crosshair cursor used by the console map picker and the
         // shape/route drawing modes so every drawing mode looks the same.
         map.getCanvas().style.cursor = DRAWING_CURSOR;
@@ -154,26 +167,19 @@ export class AircraftCreationManager {
      * Disable aircraft map drawing
      */
     private disableAircraftMapDrawing(): void {
+        // The map can already be gone at teardown; the document-level Escape
+        // listener and the drawing claim must be released regardless.
         const map = this.mapDisplay.getMap();
-        if (!map) return;
-
-        // Restore MapLibre's default cursor when leaving drawing mode.
-        map.getCanvas().style.cursor = '';
-
-        if (this.aircraftMapClickHandler) {
-            map.off('click', this.aircraftMapClickHandler);
-            this.aircraftMapClickHandler = null;
+        if (map) {
+            // Restore MapLibre's default cursor when leaving drawing mode.
+            map.getCanvas().style.cursor = '';
+            if (this.aircraftMapClickHandler) map.off('click', this.aircraftMapClickHandler);
+            if (this.aircraftMouseMoveHandler) map.off('mousemove', this.aircraftMouseMoveHandler);
+            if (this.aircraftSnapHoverHandler) map.off('mousemove', this.aircraftSnapHoverHandler);
         }
-
-        if (this.aircraftMouseMoveHandler) {
-            map.off('mousemove', this.aircraftMouseMoveHandler);
-            this.aircraftMouseMoveHandler = null;
-        }
-
-        if (this.aircraftSnapHoverHandler) {
-            map.off('mousemove', this.aircraftSnapHoverHandler);
-            this.aircraftSnapHoverHandler = null;
-        }
+        this.aircraftMapClickHandler = null;
+        this.aircraftMouseMoveHandler = null;
+        this.aircraftSnapHoverHandler = null;
         this.navaidSnapper.clearHighlight();
 
         if (this.aircraftEscapeHandler) {
@@ -183,6 +189,7 @@ export class AircraftCreationManager {
 
         this.aircraftPosition = null;
         this.clearTemporaryAircraftDrawing();
+        releaseDrawing(this);
     }
 
     /**

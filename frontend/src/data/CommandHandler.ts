@@ -635,7 +635,9 @@ export class CommandHandler {
         // Reflect the explicit disconnect immediately in the single source of
         // truth the header — and, in the integrated build, the server-control
         // status — both read, so the indicators agree without waiting on the
-        // data-flow timeout.
+        // data-flow timeout. expectDisconnect() keeps data events already in
+        // flight from flipping the status right back to connected.
+        connectionStatus.expectDisconnect();
         connectionStatus.setBlueSkyConnected(false);
 
         this.sendEcho('Disconnected from BlueSky server (the server itself is left running)', 'info');

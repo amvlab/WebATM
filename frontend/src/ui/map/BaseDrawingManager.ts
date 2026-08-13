@@ -3,6 +3,7 @@ import type { MapMouseEvent } from 'maplibre-gl';
 import type { NavaidSnapper } from './navdata/NavaidSnapper';
 import { DRAWING_CURSOR } from '../../utils/maplibre';
 import { isTextEntryTarget } from '../../utils/dom';
+import { claimDrawing, releaseDrawing } from './drawingExclusion';
 
 /**
  * BaseDrawingManager - shared interactive point-drawing lifecycle for the
@@ -97,6 +98,10 @@ export abstract class BaseDrawingManager {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
+        // Cancel any other tool's in-progress draw (shape vs route vs
+        // aircraft placement) so two tools never consume the same clicks.
+        claimDrawing(this, () => this.cancelDrawing());
+
         map.getCanvas().style.cursor = DRAWING_CURSOR;
 
         this.onDrawingEnabled();
@@ -116,11 +121,9 @@ export abstract class BaseDrawingManager {
      * Restore the map to normal mode and tear down all drawing handlers.
      */
     protected disableMapDrawing(): void {
-        const map = this.mapDisplay.getMap();
-        if (!map) return;
-
         this.suspendMapInteraction();
         this.onDrawingDisabled();
+        releaseDrawing(this);
     }
 
     /**
@@ -131,23 +134,19 @@ export abstract class BaseDrawingManager {
      * Idempotent.
      */
     protected suspendMapInteraction(): void {
+        // The map can already be gone at teardown; the document-level keydown
+        // listener and the navaid highlight must be released regardless.
         const map = this.mapDisplay.getMap();
-        if (!map) return;
+        if (map) {
+            map.getCanvas().style.cursor = '';
+            if (this.mapClickHandler) map.off('click', this.mapClickHandler);
+            if (this.mapRightClickHandler) map.off('contextmenu', this.mapRightClickHandler);
+            if (this.mapMouseMoveHandler) map.off('mousemove', this.mapMouseMoveHandler);
+        }
+        this.mapClickHandler = null;
+        this.mapRightClickHandler = null;
+        this.mapMouseMoveHandler = null;
 
-        map.getCanvas().style.cursor = '';
-
-        if (this.mapClickHandler) {
-            map.off('click', this.mapClickHandler);
-            this.mapClickHandler = null;
-        }
-        if (this.mapRightClickHandler) {
-            map.off('contextmenu', this.mapRightClickHandler);
-            this.mapRightClickHandler = null;
-        }
-        if (this.mapMouseMoveHandler) {
-            map.off('mousemove', this.mapMouseMoveHandler);
-            this.mapMouseMoveHandler = null;
-        }
         if (this.keyDownHandler) {
             document.removeEventListener('keydown', this.keyDownHandler);
             this.keyDownHandler = null;

@@ -410,6 +410,9 @@ export class SettingsModal {
 
             if (result.success) {
                 this.saveServerIP(serverIp);
+                // Reflect the real host in the header status string, which
+                // otherwise reports its 'localhost' default forever.
+                connectionStatus.setServerIP(serverIp);
                 this.close();
 
                 // Move focus back to command console

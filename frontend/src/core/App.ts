@@ -373,13 +373,15 @@ export class App {
             this.navaidSnapper
         );
 
-        // Let AircraftInteractionManager know when route drawing is active so
-        // it can skip its empty-map-click "unselect aircraft" behavior while
-        // waypoints are being placed.
-        if (this.aircraftInteractionManager && this.routeDrawingManager) {
+        // Let AircraftInteractionManager know when a drawing tool is active
+        // so it can skip its empty-map-click "unselect aircraft" behavior
+        // while points are being placed.
+        if (this.aircraftInteractionManager) {
             const rdm = this.routeDrawingManager;
-            this.aircraftInteractionManager.setRouteDrawingActiveCheck(
-                () => rdm.isDrawing()
+            const sdm = this.shapeDrawingManager;
+            const acm = this.aircraftCreationManager;
+            this.aircraftInteractionManager.setDrawingToolActiveCheck(
+                () => !!(rdm?.isDrawing() || sdm?.isDrawing() || acm?.isDrawing())
             );
         }
 

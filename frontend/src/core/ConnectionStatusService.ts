@@ -1,16 +1,9 @@
 /**
- * Connection Status Service
+ * Centralized singleton service holding every connection state: the WebSocket
+ * to the WebATM server, the BlueSky server connection, and data reception.
  *
- * Centralized singleton service for managing all connection states in the application.
- * This service tracks:
- * - WebSocket connection to WebATM server
- * - BlueSky server connection status (derived from receiving data)
- * - Data reception status
- *
- * The connection status should be available across all TypeScript classes.
- *
- * Key concept: As long as we're receiving any data (nodeinfo, siminfo, or acdata),
- * we're connected to BlueSky server. If no data is received for DATA_TIMEOUT_MS,
+ * Key concept: receiving any server data (nodeinfo, siminfo, acdata, shapes)
+ * proves the BlueSky connection is up. If nothing arrives for DATA_TIMEOUT_MS,
  * the connection is considered lost.
  */
 
@@ -18,16 +11,12 @@ import { echoManager } from '../ui/EchoManager';
 import { logger } from '../utils/Logger';
 import { EventEmitter } from '../utils/events';
 
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
-
 export interface ConnectionStatusData {
     // WebSocket connection to WebATM
     webSocketConnected: boolean;
-    webSocketState: ConnectionState;
 
-    // BlueSky server connection (determined by nodeinfo receipt)
+    // BlueSky server connection (derived from receiving data)
     blueSkyConnected: boolean;
-    blueSkyState: ConnectionState;
 
     // Data flow indicators
     receivingData: boolean;
@@ -45,18 +34,14 @@ type ConnectionStatusListener = (status: ConnectionStatusData) => void;
 type ConnectionEventCallback = (connected: boolean) => void;
 
 /**
- * Centralized Connection Status Service
- *
- * This service maintains the single source of truth for all connection states.
+ * Single source of truth for all connection states.
  */
 export class ConnectionStatusService {
     private static instance: ConnectionStatusService | null = null;
 
     private status: ConnectionStatusData = {
         webSocketConnected: false,
-        webSocketState: 'disconnected',
         blueSkyConnected: false,
-        blueSkyState: 'disconnected',
         receivingData: false,
         lastDataReceived: null,
         lastNodeInfoReceived: null,
@@ -68,23 +53,23 @@ export class ConnectionStatusService {
     private dataTimeoutId: number | null = null;
     private readonly DATA_TIMEOUT_MS = 5000; // Consider disconnected if no data for 5 seconds
 
-    // Wall-clock time the active no-data timeout was armed, plus how many times
-    // we have deferred a disconnect because that timeout fired late. A
-    // setTimeout that fires far past its delay means the event loop was blocked
-    // (a heavy synchronous task such as loading a large GeoJSON, a long GC
-    // pause, or a backgrounded tab) - during that window the socket cannot
-    // deliver data even when the server is perfectly healthy, so "no data" is
-    // not evidence of a real disconnect. We defer (bounded) and let live data
-    // confirm the connection instead of flashing a false "BlueSky disconnected".
+    // A setTimeout that fires far past its delay means the event loop was
+    // blocked (heavy synchronous work, GC pause, backgrounded tab). During
+    // that window the socket couldn't deliver data anyway, so "no data" is
+    // not evidence of a real disconnect - we defer (bounded) and let live
+    // data confirm the connection instead of flashing a false disconnect.
     private dataTimeoutArmedAt = 0;
     private stallDeferrals = 0;
     private readonly MAX_STALL_DEFERRALS = 2;
     private readonly STALL_OVERSHOOT_MS = 1500;
 
+    // End of the deliberate-disconnect grace window (see expectDisconnect).
+    private ignoreDataUntil = 0;
+
     // Initial connection tracking
     private isInitialLoadComplete: boolean = false;
     private initialConnectionCheckTimer: number | null = null;
-    private readonly INITIAL_CONNECTION_CHECK_DELAY_MS = 500; // Wait 0.5s before checking initial connection
+    private readonly INITIAL_CONNECTION_CHECK_DELAY_MS = 500;
 
     // Connection event callbacks
     private blueSkyDisconnectEmitter = new EventEmitter<boolean>('ConnectionStatus.disconnect');
@@ -123,9 +108,6 @@ export class ConnectionStatusService {
         return unsubscribe;
     }
 
-    /**
-     * Notify all listeners of status change
-     */
     private notifyListeners(): void {
         this.statusEmitter.emit(this.getStatus());
     }
@@ -147,12 +129,10 @@ export class ConnectionStatusService {
     public setWebSocketConnected(connected: boolean): void {
         const changed = this.status.webSocketConnected !== connected;
         this.status.webSocketConnected = connected;
-        this.status.webSocketState = connected ? 'connected' : 'disconnected';
 
         if (changed) {
             logger.info('ConnectionStatus', `WebSocket: ${connected ? 'connected' : 'disconnected'}`);
 
-            // Log to echo messages
             if (connected) {
                 echoManager.success('Connected to WebATM server');
             } else {
@@ -168,44 +148,35 @@ export class ConnectionStatusService {
         }
     }
 
-    /**
-     * Set WebSocket to connecting state
-     */
-    public setWebSocketConnecting(): void {
-        this.status.webSocketState = 'connecting';
-        echoManager.info('⟳ Connecting to WebATM server...');
-        this.notifyListeners();
-    }
-
-    /**
-     * Set WebSocket to error state
-     */
-    public setWebSocketError(): void {
-        this.status.webSocketState = 'error';
-        this.status.webSocketConnected = false;
-        echoManager.error('✗ WebATM server connection error');
-        this.notifyListeners();
-    }
-
     // ========================================
     // BlueSky Server Connection Methods
     // ========================================
 
     /**
-     * Update BlueSky server connection status
-     * This should be called when nodeinfo is received or connection is explicitly lost
+     * Update BlueSky server connection status.
+     * Called when data is received, or when the connection is known to be
+     * down (explicit disconnect, server_disconnected, WebSocket drop).
      */
     public setBlueSkyConnected(connected: boolean): void {
         const changed = this.status.blueSkyConnected !== connected;
         const wasConnected = this.status.blueSkyConnected;
 
         this.status.blueSkyConnected = connected;
-        this.status.blueSkyState = connected ? 'connected' : 'disconnected';
+
+        if (!connected) {
+            // The connection is known to be down: the pending no-data timer
+            // is now meaningless. Without this it fires up to DATA_TIMEOUT_MS
+            // later and echoes a false "no data received" warning after a
+            // deliberate disconnect (e.g. QUIT), and receivingData would
+            // stay stale after a WebSocket drop.
+            this.clearDataTimeout();
+            this.stallDeferrals = 0;
+            this.setReceivingData(false);
+        }
 
         if (changed) {
             logger.info('ConnectionStatus', `BlueSky: ${connected ? 'connected' : 'disconnected'}`);
 
-            // Log to echo messages
             if (connected) {
                 echoManager.success('Connected to BlueSky server');
             } else {
@@ -222,12 +193,24 @@ export class ConnectionStatusService {
     }
 
     /**
-     * Set BlueSky to connecting state
+     * A deliberate disconnect (QUIT, server_disconnected) is happening: data
+     * events already in flight would otherwise flip the status straight back
+     * to connected and re-arm the no-data timer, which then fires a spurious
+     * "connection may be lost" warning 5s after a clean disconnect. Ignore
+     * data for a short grace window; data still flowing after it (e.g. the
+     * disconnect request failed) reconnects as usual.
      */
-    public setBlueSkyConnecting(): void {
-        this.status.blueSkyState = 'connecting';
-        echoManager.info('⟳ Connecting to BlueSky server...');
-        this.notifyListeners();
+    public expectDisconnect(graceMs: number = 2000): void {
+        this.ignoreDataUntil = Date.now() + graceMs;
+    }
+
+    /**
+     * True while the deliberate-disconnect grace window is open. Lets data
+     * consumers (e.g. SocketManager) drop in-flight frames that would
+     * repaint the traffic the disconnect just cleared.
+     */
+    public isInDisconnectGrace(): boolean {
+        return Date.now() < this.ignoreDataUntil;
     }
 
     /**
@@ -237,6 +220,10 @@ export class ConnectionStatusService {
      * the receivingData flag.
      */
     private onServerDataReceived(kind: string, marksReceivingData: boolean): void {
+        if (Date.now() < this.ignoreDataUntil) {
+            logger.debug('ConnectionStatus', `${kind} ignored - disconnect grace window`);
+            return;
+        }
         logger.debug('ConnectionStatus', `${kind} received`);
 
         if (!this.status.blueSkyConnected) {
@@ -254,12 +241,10 @@ export class ConnectionStatusService {
 
     /**
      * Called when nodeinfo is received
-     * This is an indicator that we're connected to BlueSky server
      */
     public onNodeInfoReceived(): void {
         const now = Date.now();
 
-        // Calculate interval between nodeinfo messages
         if (this.status.lastNodeInfoReceived !== null) {
             this.status.nodeInfoInterval = now - this.status.lastNodeInfoReceived;
         }
@@ -270,7 +255,6 @@ export class ConnectionStatusService {
 
     /**
      * Called when simulation info (siminfo) is received
-     * This is a strong indicator that we're connected and receiving data
      */
     public onSimInfoReceived(): void {
         this.status.lastDataReceived = Date.now();
@@ -279,7 +263,6 @@ export class ConnectionStatusService {
 
     /**
      * Called when aircraft data (acdata) is received
-     * This is a strong indicator that we're connected and receiving data
      */
     public onAircraftDataReceived(): void {
         this.status.lastDataReceived = Date.now();
@@ -288,7 +271,6 @@ export class ConnectionStatusService {
 
     /**
      * Called when shape data (poly/polyline) is received
-     * This is an indicator that we're connected to BlueSky server
      */
     public onShapeDataReceived(): void {
         this.status.lastDataReceived = Date.now();
@@ -297,7 +279,6 @@ export class ConnectionStatusService {
 
     /**
      * Reset the timeout that detects when we stop receiving any data
-     * This is called when we receive nodeinfo, siminfo, or acdata
      */
     private resetDataTimeout(): void {
         // Fresh data clears any stall-deferral budget and re-arms the timer.
@@ -307,9 +288,7 @@ export class ConnectionStatusService {
 
     /** (Re)arm the no-data timeout, recording when it was armed. */
     private armDataTimeout(): void {
-        if (this.dataTimeoutId !== null) {
-            window.clearTimeout(this.dataTimeoutId);
-        }
+        this.clearDataTimeout();
         this.dataTimeoutArmedAt = Date.now();
         this.dataTimeoutId = window.setTimeout(
             () => this.onDataTimeoutExpired(),
@@ -317,16 +296,23 @@ export class ConnectionStatusService {
         );
     }
 
+    /** Cancel the pending no-data timeout, if any. */
+    private clearDataTimeout(): void {
+        if (this.dataTimeoutId !== null) {
+            window.clearTimeout(this.dataTimeoutId);
+            this.dataTimeoutId = null;
+        }
+    }
+
     /**
-     * Called when the no-data timeout fires. Distinguishes a genuine server
-     * silence from a local main-thread stall: if the callback ran far later
-     * than its scheduled delay, the page was frozen (so no data could have been
-     * received regardless of server health). In that case we defer the
-     * disconnect and re-arm, giving live data a chance to reset the timer.
-     * Bounded by MAX_STALL_DEFERRALS so a persistently blocked loop still
-     * eventually reports a real outage.
+     * Called when the no-data timeout fires. A callback that ran far later
+     * than its scheduled delay means the page was frozen, so the silence is
+     * a local stall rather than a server outage: defer the disconnect and
+     * re-arm (bounded by MAX_STALL_DEFERRALS). Otherwise treat the silence
+     * as a real disconnect.
      */
     private onDataTimeoutExpired(): void {
+        this.dataTimeoutId = null;
         const overshoot = Date.now() - this.dataTimeoutArmedAt - this.DATA_TIMEOUT_MS;
 
         if (overshoot > this.STALL_OVERSHOOT_MS && this.stallDeferrals < this.MAX_STALL_DEFERRALS) {
@@ -340,14 +326,11 @@ export class ConnectionStatusService {
             return;
         }
 
-        // Either the timer fired on schedule (a real silence) or we have
-        // deferred as long as we are willing to - treat it as a disconnect.
         this.stallDeferrals = 0;
-        logger.warn('ConnectionStatus', 'No data received (nodeinfo, siminfo, or acdata) - BlueSky may be disconnected');
-        echoManager.warning('⚠ No data received from BlueSky server - connection may be lost');
         if (this.status.blueSkyConnected) {
+            logger.warn('ConnectionStatus', 'No data received (nodeinfo, siminfo, or acdata) - BlueSky may be disconnected');
+            echoManager.warning('⚠ No data received from BlueSky server - connection may be lost');
             this.setBlueSkyConnected(false);
-            this.setReceivingData(false);
         }
     }
 
@@ -357,7 +340,6 @@ export class ConnectionStatusService {
 
     /**
      * Update data reception status
-     * Called when simulation data (siminfo, acdata) is received
      */
     public setReceivingData(receiving: boolean): void {
         const changed = this.status.receivingData !== receiving;
@@ -370,17 +352,6 @@ export class ConnectionStatusService {
         if (changed) {
             logger.debug('ConnectionStatus', `Receiving data: ${receiving}`);
             this.notifyListeners();
-        }
-    }
-
-    /**
-     * Called when any simulation data is received
-     */
-    public onDataReceived(): void {
-        this.status.lastDataReceived = Date.now();
-
-        if (!this.status.receivingData) {
-            this.setReceivingData(true);
         }
     }
 
@@ -408,13 +379,6 @@ export class ConnectionStatusService {
      */
     public isFullyConnected(): boolean {
         return this.status.webSocketConnected && this.status.blueSkyConnected;
-    }
-
-    /**
-     * Check if WebSocket is connected
-     */
-    public isWebSocketConnected(): boolean {
-        return this.status.webSocketConnected;
     }
 
     /**
@@ -460,15 +424,9 @@ export class ConnectionStatusService {
             return 'Disconnected from BlueSky server. Please visit settings and make sure that (1) BlueSky server has been started and (2) You are connected to server.';
         }
 
-        if (this.status.blueSkyConnected && this.status.receivingData) {
-            return `Connected to BlueSky server at ${this.status.serverIP}.`;
-        }
-
-        if (this.status.blueSkyConnected && !this.status.receivingData) {
-            return `Connected to BlueSky server at ${this.status.serverIP} (No Data).`;
-        }
-
-        return 'Unknown connection status';
+        return this.status.receivingData
+            ? `Connected to BlueSky server at ${this.status.serverIP}.`
+            : `Connected to BlueSky server at ${this.status.serverIP} (No Data).`;
     }
 
     /**
@@ -479,9 +437,7 @@ export class ConnectionStatusService {
 
         this.status = {
             webSocketConnected: false,
-            webSocketState: 'disconnected',
             blueSkyConnected: false,
-            blueSkyState: 'disconnected',
             receivingData: false,
             lastDataReceived: null,
             lastNodeInfoReceived: null,
@@ -489,30 +445,24 @@ export class ConnectionStatusService {
             nodeInfoInterval: null
         };
 
-        if (this.dataTimeoutId !== null) {
-            window.clearTimeout(this.dataTimeoutId);
-            this.dataTimeoutId = null;
-        }
+        this.clearDataTimeout();
         this.stallDeferrals = 0;
         this.dataTimeoutArmedAt = 0;
+        this.ignoreDataUntil = 0;
 
         logger.info('ConnectionStatus', 'Reset all connection states');
         this.notifyListeners();
     }
 
     /**
-     * Get detailed status for debugging
+     * Get detailed status for debugging (window.connectionStatus helper)
      */
     public getDetailedStatus(): string {
         const status = this.getStatus();
         return JSON.stringify({
-            webSocket: {
-                connected: status.webSocketConnected,
-                state: status.webSocketState
-            },
+            webSocket: { connected: status.webSocketConnected },
             blueSky: {
                 connected: status.blueSkyConnected,
-                state: status.blueSkyState,
                 lastNodeInfo: status.lastNodeInfoReceived ?
                     `${Date.now() - status.lastNodeInfoReceived}ms ago` : 'never',
                 interval: status.nodeInfoInterval ? `${status.nodeInfoInterval}ms` : 'unknown'
@@ -532,16 +482,13 @@ export class ConnectionStatusService {
     // Initial Connection Checking Methods
     // ========================================
 
-    /**
-     * Load initial load state from sessionStorage
-     */
     private loadInitialLoadState(): void {
         this.isInitialLoadComplete = sessionStorage.getItem('bluesky-initial-load-complete') === 'true';
     }
 
     /**
-     * Start initial connection check
-     * This checks if we're connected after a delay on first page load
+     * On the first page load of a session, invoke onNotConnected if no
+     * BlueSky connection is established shortly after startup.
      */
     public startInitialConnectionCheck(onNotConnected: () => void): void {
         if (this.isInitialLoadComplete) {
@@ -582,19 +529,9 @@ export class ConnectionStatusService {
         });
     }
 
-    /**
-     * Mark initial load as complete
-     */
     private markInitialLoadComplete(): void {
         this.isInitialLoadComplete = true;
         sessionStorage.setItem('bluesky-initial-load-complete', 'true');
-    }
-
-    /**
-     * Check if initial load is complete
-     */
-    public isInitialLoad(): boolean {
-        return !this.isInitialLoadComplete;
     }
 
     // ========================================
@@ -609,9 +546,6 @@ export class ConnectionStatusService {
         return this.blueSkyDisconnectEmitter.subscribe(callback);
     }
 
-    /**
-     * Trigger all disconnect callbacks
-     */
     private triggerDisconnectCallbacks(): void {
         logger.debug('ConnectionStatus', 'Triggering disconnect callbacks');
         this.blueSkyDisconnectEmitter.emit(false);
