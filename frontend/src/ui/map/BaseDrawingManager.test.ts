@@ -57,7 +57,11 @@ class TestDrawingManager extends BaseDrawingManager {
     protected onPointAdded(point: DrawingPoint): void { this.points.push(point); }
     protected onCursorMove(point: DrawingPoint): void { this.cursorMoves.push(point); }
     protected finishDrawing(): void { this.finished(); }
-    protected cancelDrawing(): void { this.cancelled(); }
+    // Mirrors the real subclasses: cancelling stops the draw.
+    protected cancelDrawing(): void {
+        this.cancelled();
+        this.stop();
+    }
 }
 
 describe('BaseDrawingManager', () => {
@@ -68,10 +72,14 @@ describe('BaseDrawingManager', () => {
     const clickEvent = (lat: number, lng: number) =>
         ({ lngLat: { lat, lng }, preventDefault: vi.fn() }) as unknown as MapMouseEvent;
 
-    function createManager(finishOnEnter = false): TestDrawingManager {
-        map = createFakeMap();
+    function createManager(
+        finishOnEnter = false,
+        getMap?: () => ReturnType<typeof createFakeMap> | null
+    ): TestDrawingManager {
+        const ownMap = createFakeMap();
+        map = ownMap;
         snapper = { snap: vi.fn(() => null), highlight: vi.fn(), clearHighlight: vi.fn() };
-        const mapDisplay = { getMap: () => map } as unknown as MapDisplay;
+        const mapDisplay = { getMap: getMap ?? (() => ownMap) } as unknown as MapDisplay;
         return new TestDrawingManager(mapDisplay, snapper as unknown as NavaidSnapper, finishOnEnter);
     }
 
@@ -177,5 +185,53 @@ describe('BaseDrawingManager', () => {
         const idle = createManager();
         idle.destroy();
         expect(idle.cancelled).not.toHaveBeenCalled();
+    });
+
+    it('starting a second drawing tool cancels the first (mutual exclusion)', () => {
+        const first = createManager();
+        const firstMap = map;
+        first.start();
+
+        const second = createManager();
+        second.start();
+
+        expect(first.cancelled).toHaveBeenCalledTimes(1);
+        expect(first.isDrawing()).toBe(false);
+        expect(second.isDrawing()).toBe(true);
+
+        // Clicks reach only the second tool now.
+        firstMap.fire('click', clickEvent(51, 3));
+        map.fire('click', clickEvent(52, 4));
+        expect(first.points).toEqual([]);
+        expect(second.points).toEqual([{ lat: 52, lng: 4 }]);
+    });
+
+    it('stopping again after a draw was cancelled does not re-cancel the new tool', () => {
+        const first = createManager();
+        first.start();
+        const second = createManager();
+        second.start();
+
+        // The first tool releasing its (already lost) claim must not affect
+        // the second tool's active draw.
+        first.stop();
+        expect(second.isDrawing()).toBe(true);
+        expect(second.cancelled).not.toHaveBeenCalled();
+    });
+
+    it('stop with the map already gone still releases the keydown listener and hooks', () => {
+        let liveMap: ReturnType<typeof createFakeMap> | null = null;
+        const gone = createManager(false, () => liveMap);
+        liveMap = map;
+        gone.start();
+
+        const removeSpy = vi.spyOn(document, 'removeEventListener');
+        liveMap = null;
+        gone.stop();
+
+        expect(gone.disabled).toHaveBeenCalledTimes(1);
+        expect(removeSpy).toHaveBeenCalledWith('keydown', expect.any(Function));
+        expect(snapper.clearHighlight).toHaveBeenCalled();
+        removeSpy.mockRestore();
     });
 });

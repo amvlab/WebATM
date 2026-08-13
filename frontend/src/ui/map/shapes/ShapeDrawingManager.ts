@@ -192,10 +192,12 @@ export class ShapeDrawingManager extends BaseDrawingManager {
             drawBtn.classList.add('active');
         }
 
+        // Claim the map first (cancelling any other tool's draw, which hides
+        // the shared banner), then show this draw's banner.
+        this.enableMapDrawing();
         this.showDrawingBanner(
             `${this.getBannerPrefix()} - ${START_INSTRUCTIONS[this.currentShapeType]}`
         );
-        this.enableMapDrawing();
 
         logger.info('ShapeDrawingManager', `Started drawing ${this.currentShapeType}: ${this.currentShapeName}`);
     }
