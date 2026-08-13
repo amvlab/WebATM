@@ -137,6 +137,45 @@ class TestUsesPersistentManagers:
         assert reasons == ["All nodes removed (server shutdown)"]
 
 
+class TestReactivateOnNodeAdded:
+    """A node discovered while the client's active node is dead must become
+    the new active node.
+
+    Regression test: the network client auto-selects only the very first node
+    it ever sees, and removal-failover needs a survivor. When the last node
+    vanishes (e.g. its process crashes) and a node is added afterwards,
+    ``act_id`` kept pointing at the dead node, the actonly subscriptions
+    (ACDATA/ROUTEDATA) never moved to the new node, and the data-flow timeout
+    tore down a live connection ~10s later."""
+
+    def test_node_added_with_stale_act_id_reactivates(self, proxy, fake_client):
+        dead_bytes = b"\x01\x02\x03\x04\x81"
+        new_bytes = b"\x01\x02\x03\x04\x82"
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        fake_client.act_id = dead_bytes  # removed node; not in client.nodes
+        fake_client.nodes = {new_bytes}
+
+        proxy.node_mgr._on_node_added(new_bytes)
+
+        assert fake_client.act_id == new_bytes
+
+    def test_node_added_with_live_act_id_keeps_it(self, proxy, fake_client):
+        active_bytes = b"\x01\x02\x03\x04\x81"
+        new_bytes = b"\x01\x02\x03\x04\x82"
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        proxy.tracked_nodes[active_bytes.hex()] = {"node_id": active_bytes}
+        fake_client.act_id = active_bytes
+        fake_client.nodes = {active_bytes, new_bytes}
+
+        proxy.node_mgr._on_node_added(new_bytes)
+
+        assert fake_client.act_id == active_bytes
+
+
 class TestNodeRemoval:
     def test_on_node_removed_deletes_tracked_node(self, proxy):
         node_bytes = b"\x01\x02\x03\x04\x81"

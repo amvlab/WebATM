@@ -2,6 +2,7 @@
 
 import threading
 import time
+import traceback
 
 from ...bluesky_client import safe_decode, seqid2idx, seqidx2id
 from ...logger import get_logger
@@ -65,8 +66,6 @@ class NodeManager:
             )
         except Exception as e:
             logger.error(f" Error emitting active node POLY/POLYLINE data: {e}")
-            import traceback
-
             traceback.print_exc()
 
     def _emit_shapes(self, active_node_id, data_by_node, event):
@@ -89,27 +88,26 @@ class NodeManager:
             logger.debug(f"Emitted empty {event} data to clear")
 
     def _on_node_added(self, node_id):
-        """Callback when a new node is discovered."""
+        """Callback when a new node is discovered.
+
+        Tracks the node (keyed by hex string, matching SIMINFO sender IDs),
+        flips the proxy to connected on the first node, and re-activates the
+        client when its recorded active node no longer exists.
+        """
         try:
-            # Hex string keys for consistency with SIMINFO
             node_id_str = id2str(node_id)
 
             if node_id_str not in self.proxy.tracked_nodes:
                 server_id = node_id[:-1] + seqidx2id(0)
-                if (
-                    server_id not in self.proxy.bluesky_client.servers
-                ):  # Check standalone proxy's known servers
+                if server_id not in self.proxy.bluesky_client.servers:
                     server_id = b"0"  # Ungrouped
                 if server_id not in self.proxy.tracked_servers:
                     self._on_server_added(server_id)
 
-                node_num = seqid2idx(node_id[-1])
-
-                # Store using hex string key for consistency with SIMINFO
                 self.proxy.tracked_nodes[node_id_str] = {
-                    "node_id": node_id,  # Keep original binary for internal use
-                    "node_id_str": node_id_str,  # Hex string for display
-                    "node_num": node_num,
+                    "node_id": node_id,  # original binary, for internal use
+                    "node_id_str": node_id_str,
+                    "node_num": seqid2idx(node_id[-1]),
                     "server_id": server_id,
                     "status": "init",
                     "time": "00:00:00",
@@ -119,36 +117,49 @@ class NodeManager:
                     f"Node {safe_decode(node_id)} added (total: {len(self.proxy.tracked_nodes)})"
                 )
 
-                # Update connection status immediately when nodes are detected
-                if not self.proxy.was_connected and len(self.proxy.tracked_nodes) > 0:
+                self._reactivate_if_active_node_gone(node_id)
+
+                if not self.proxy.was_connected:
                     self.proxy.was_connected = True
-                    # Start the data-flow timeout clock from "first node
-                    # appeared" (no data could arrive before a node existed).
-                    # This handler runs inside bluesky_client.update() and flips
-                    # was_connected first, so the network timer's own reset (only
-                    # runs while `not was_connected`) is skipped — reset here too,
-                    # else the stale start_client() timestamp times out at once.
+                    # Restart the data-flow timeout clock from "first node
+                    # appeared". This runs inside bluesky_client.update() and
+                    # flips was_connected before the network timer's own reset
+                    # (guarded on `not was_connected`) can run, so without this
+                    # a stale start_client() timestamp times out immediately.
                     self.proxy.last_successful_update = time.time()
                     logger.info(" Connection established")
                     self.proxy._emit_connection_status(True)
 
-                # The standalone proxy auto-selects the first node, so we don't need to do it manually here
-                # Emit updated node list to connected clients
                 if self.proxy.running:
                     self._emit_node_info()
         except Exception as e:
             logger.error(f" Error in _on_node_added: {e}")
-            import traceback
-
             traceback.print_exc()
+
+    def _reactivate_if_active_node_gone(self, node_id):
+        """Activate a newly discovered node if the client's active node is dead.
+
+        The network client auto-selects only the very first node it ever sees;
+        after that, ``_failover_active_node`` re-activates a survivor when the
+        active node is removed. But when the last node vanishes (e.g. its
+        process crashes) there is no survivor: ``act_id`` keeps pointing at the
+        dead node, and a node added afterwards would never be activated. The
+        actonly topics (ACDATA/ROUTEDATA) would stay subscribed to the dead
+        node, no traffic would flow, and the data-flow timeout would tear down
+        a live connection. Activating the newcomer here re-subscribes those
+        topics and resumes the data flow.
+        """
+        client = self.proxy.bluesky_client
+        if client.act_id is None or client.act_id not in client.nodes:
+            logger.info(
+                f"No live active node; activating new node {safe_decode(node_id)}"
+            )
+            client.actnode(node_id)
 
     def _on_server_added(self, server_id):
         """Callback when a server is discovered."""
         if server_id not in self.proxy.tracked_servers:
-            # Simple server tracking - just store the ID
             self.proxy.tracked_servers[server_id] = {"server_id": server_id}
-
-            # Emit updated server list to connected clients
             if self.proxy.running:
                 self._emit_node_info()
 
