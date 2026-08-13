@@ -119,10 +119,14 @@ export class SocketManager {
                 }
             },
             onSimInfo: (data: SimInfo) => {
+                if (connectionStatus.isInDisconnectGrace()) return;
                 this.stateManager.updateSimInfo(data);
                 connectionStatus.onSimInfoReceived();
             },
             onAircraftData: (data: AircraftData) => {
+                // In-flight frames arriving right after a deliberate
+                // disconnect would repaint the traffic that was just cleared.
+                if (connectionStatus.isInDisconnectGrace()) return;
                 this.stateManager.updateAircraftData(data);
                 connectionStatus.onAircraftDataReceived();
             },
@@ -161,8 +165,11 @@ export class SocketManager {
                 }
             },
             onServerDisconnected: () => {
+                // Also clears receivingData and the pending no-data timer;
+                // the grace window keeps in-flight data events from flipping
+                // the status straight back to connected.
+                connectionStatus.expectDisconnect();
                 connectionStatus.setBlueSkyConnected(false);
-                connectionStatus.setReceivingData(false);
             },
             onReset: () => {
                 // RESET clears simulation data only - we stay connected to BlueSky.

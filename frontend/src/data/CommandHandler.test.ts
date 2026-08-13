@@ -15,7 +15,7 @@ vi.mock('../ui/EchoManager', () => ({
 }));
 
 vi.mock('../core/ConnectionStatusService', () => ({
-    connectionStatus: { setBlueSkyConnected: vi.fn() },
+    connectionStatus: { setBlueSkyConnected: vi.fn(), expectDisconnect: vi.fn() },
 }));
 
 const addMessage = vi.mocked(echoManager.addMessage);
@@ -230,7 +230,9 @@ describe('CommandHandler', () => {
                 '/api/server/disconnect',
                 expect.objectContaining({ method: 'POST' }),
             );
-            // ...reflects it immediately in the shared connection status...
+            // ...reflects it immediately in the shared connection status,
+            // shielding it from data events already in flight...
+            expect(connectionStatus.expectDisconnect).toHaveBeenCalled();
             expect(setBlueSkyConnected).toHaveBeenCalledWith(false);
             // ...and crucially does NOT drop the browser↔WebATM socket.
             expect(mocks.socketManager.disconnect).not.toHaveBeenCalled();
