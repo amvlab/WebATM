@@ -113,17 +113,11 @@ export class App {
         }
     }
 
-    /**
-     * Initialize application state
-     */
     private initializeState(): void {
         this.setupConnectionStatusHandlers();
         this.setupSimulationDataHandlers();
     }
 
-    /**
-     * Set up handlers for connection status changes
-     */
     private setupConnectionStatusHandlers(): void {
         // ConnectionStatusService is the single source of truth for all
         // connection state.
@@ -141,9 +135,6 @@ export class App {
         // (handled in checkInitialConnectionStatus method).
     }
 
-    /**
-     * Set up handlers for simulation data changes
-     */
     private setupSimulationDataHandlers(): void {
         // Header shows simulation time, rate, etc.
         this.stateManager.subscribe('simInfo', (newSimInfo) => {
@@ -194,10 +185,6 @@ export class App {
         });
     }
 
-    /**
-     * Initialize UI components
-     * Sets up UI modules and their event handlers
-     */
     private initializeUI(): void {
         this.initializeHeader();
         this.initializeConsole();
@@ -232,9 +219,6 @@ export class App {
         });
     }
 
-    /**
-     * Initialize header component
-     */
     private initializeHeader(): void {
         this.header.init();
         this.header.setSocketManager(this.socketManager);
@@ -242,9 +226,6 @@ export class App {
         logger.debug('App', 'Header initialized');
     }
 
-    /**
-     * Initialize console component
-     */
     private initializeConsole(): void {
         this.console.setStateManager(this.stateManager);
         this.console.setCommandHandler(this.commandHandler);
@@ -254,9 +235,6 @@ export class App {
         logger.debug('App', 'Console component initialized');
     }
 
-    /**
-     * Initialize control panels
-     */
     private initializeControlPanels(): void {
         this.simulationNodesPanel.init();
         this.simulationNodesPanel.setSocketManager(this.socketManager);
@@ -305,9 +283,6 @@ export class App {
         return el;
     }
 
-    /**
-     * Initialize map display
-     */
     private initializeMapDisplay(): void {
         this.mapDisplay.initialize();
         this.mapDisplay.setupStyleSelector();
@@ -402,26 +377,18 @@ export class App {
         logger.debug('App', 'Map display and interaction managers initialized');
     }
 
-    /**
-     * Initialize modal dialogs
-     */
     private initializeModals(): void {
         modals.forceInitialize();
         logger.debug('App', 'Modal system initialized');
     }
 
-    /**
-     * Set up global event listeners
-     */
     private setupGlobalEventListeners(): void {
         const { signal } = this.globalListenerAbort;
 
-        // Handle before page unload
         window.addEventListener('beforeunload', () => {
             this.cleanup();
         }, { signal });
 
-        // Handle resize events
         window.addEventListener('resize', () => {
             this.handleResize();
         }, { signal });
@@ -479,9 +446,6 @@ export class App {
         });
     }
 
-    /**
-     * Handle window resize
-     */
     private handleResize(): void {
         if (this.mapDisplay && this.mapDisplay.isInitialized()) {
             this.mapDisplay.resize();
@@ -501,9 +465,6 @@ export class App {
         }
     }
 
-    /**
-     * Send command to simulation
-     */
     public sendCommand(command: string): Promise<boolean> {
         return this.socketManager.sendCommand(command);
     }
@@ -527,9 +488,6 @@ export class App {
         return this.aircraftInteractionManager;
     }
 
-    /**
-     * Set active simulation node
-     */
     public setActiveNode(nodeId: string): void {
         this.socketManager.setActiveNode(nodeId);
         this.stateManager.setActiveNode(nodeId);

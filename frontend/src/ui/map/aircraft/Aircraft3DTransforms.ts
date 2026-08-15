@@ -211,7 +211,6 @@ export class Aircraft3DTransforms {
         headingRad: number;
         finalScale: number;
     } {
-        // Altitude already in meters from BlueSky
         const altitudeMeters = data.alt;
         const headingRad = THREE.MathUtils.degToRad(data.hdg);
         const realScale = this.getMeshRealScale(mesh);
@@ -249,13 +248,9 @@ export class Aircraft3DTransforms {
         // Heading is a Y (vertical-axis) rotation: aviation 0°=N maps to
         // three.js +Z, minus π/2 for the model's default orientation.
         mesh.rotation.set(0, headingRad - Math.PI / 2, 0);
-
-        // Set scale
         mesh.scale.set(finalScale, finalScale, finalScale);
 
         this.disableFrustumCulling(mesh);
-
-        // Enable automatic matrix updates for this positioning approach
         mesh.matrixAutoUpdate = true;
     }
 
@@ -316,7 +311,7 @@ export class Aircraft3DTransforms {
 
         // Same heading convention as updateMeshTransform, folded into an
         // absolute mercator matrix instead of scene-relative position.
-        const transformMatrix = this.deps.createFallbackMatrix(
+        mesh.matrix = this.deps.createFallbackMatrix(
             data.lon,
             data.lat,
             altitudeMeters,
@@ -325,10 +320,7 @@ export class Aircraft3DTransforms {
             0, // roll
             finalScale
         );
-
-        // Apply the transform matrix directly
-        mesh.matrix = transformMatrix;
-        mesh.matrixAutoUpdate = false; // We're manually setting the matrix
+        mesh.matrixAutoUpdate = false;
 
         this.disableFrustumCulling(mesh);
     }
