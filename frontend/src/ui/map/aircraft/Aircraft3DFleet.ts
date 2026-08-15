@@ -243,6 +243,30 @@ export class Aircraft3DFleet {
     }
 
     /**
+     * Re-queue aircraft waiting on a model that failed to load. With a
+     * fallback path they are created with that model instead (queueing
+     * again if it isn't loaded yet); without one they are dropped and
+     * stay absent from the 3D scene.
+     */
+    redirectPending(fromPath: string, toPath: string | null): void {
+        const stranded: Array<{ id: string; data: AircraftMeshData }> = [];
+        this.pendingAircraft.forEach((entry, id) => {
+            if (entry.modelPath === fromPath) {
+                stranded.push({ id, data: entry.data });
+            }
+        });
+
+        for (const { id, data } of stranded) {
+            this.pendingAircraft.delete(id);
+            if (toPath) {
+                this.create(id, data, toPath);
+            } else {
+                logger.warn('Aircraft3DFleet', `No fallback model for aircraft ${id}; not rendered in 3D`);
+            }
+        }
+    }
+
+    /**
      * Re-apply the projection-appropriate transform to every aircraft mesh.
      */
     reapplyAllTransforms(): void {

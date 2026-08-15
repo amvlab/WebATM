@@ -117,6 +117,90 @@ describe('Aircraft3DFleet lifecycle', () => {
     });
 });
 
+describe('Aircraft3DFleet pending-model fallback', () => {
+    beforeEach(() => vi.restoreAllMocks());
+
+    /** Fleet whose model loader only has models for the given paths. */
+    function makeFleetWithModels(models: Record<string, THREE.Group>) {
+        const mercatorGroup = new THREE.Group();
+        const load = vi.fn();
+        const deps: Aircraft3DFleetDeps = {
+            modelLoader: {
+                get: (path: string) => models[path],
+                load,
+                rawMaxDim: () => 10,
+                animations: () => [],
+            } as unknown as Aircraft3DFleetDeps['modelLoader'],
+            transforms: {
+                updateMeshTransform: vi.fn(),
+                updateMeshTransformForGlobe: vi.fn(),
+            } as unknown as Aircraft3DFleetDeps['transforms'],
+            getMercatorGroup: () => mercatorGroup,
+            getGlobeGroup: () => null,
+            isGlobeProjection: () => false,
+        };
+        return { fleet: new Aircraft3DFleet(deps), mercatorGroup, load };
+    }
+
+    it('redirectPending creates queued aircraft with the fallback model', () => {
+        const { model } = multiMaterialModel();
+        const { fleet, mercatorGroup } = makeFleetWithModels({ 'A320.glb': model });
+
+        fleet.create('AC1', DATA, 'missing.glb'); // queued, model not available
+        expect(fleet.size).toBe(0);
+
+        fleet.redirectPending('missing.glb', 'A320.glb');
+
+        expect(fleet.size).toBe(1);
+        expect(fleet.get('AC1')?.modelPath).toBe('A320.glb');
+        expect(mercatorGroup.children.length).toBe(1);
+    });
+
+    it('redirectPending re-queues when the fallback model is not loaded yet', () => {
+        const models: Record<string, THREE.Group> = {};
+        const { fleet, load } = makeFleetWithModels(models);
+
+        fleet.create('AC1', DATA, 'missing.glb');
+        fleet.redirectPending('missing.glb', 'fallback.glb');
+
+        expect(fleet.size).toBe(0);
+        expect(load).toHaveBeenCalledWith('fallback.glb');
+
+        // The fallback finishes loading -> the aircraft is created with it.
+        models['fallback.glb'] = multiMaterialModel().model;
+        fleet.processPending('fallback.glb');
+
+        expect(fleet.get('AC1')?.modelPath).toBe('fallback.glb');
+    });
+
+    it('redirectPending without a fallback drops the queued aircraft', () => {
+        const { model } = multiMaterialModel();
+        const { fleet, mercatorGroup } = makeFleetWithModels({ 'A320.glb': model });
+
+        fleet.create('AC1', DATA, 'missing.glb');
+        fleet.redirectPending('missing.glb', null);
+
+        expect(fleet.size).toBe(0);
+        expect(mercatorGroup.children.length).toBe(0);
+    });
+
+    it('redirectPending leaves aircraft queued for other models alone', () => {
+        const models: Record<string, THREE.Group> = {};
+        const { fleet } = makeFleetWithModels(models);
+
+        fleet.create('AC1', DATA, 'missing.glb');
+        fleet.create('AC2', DATA, 'other.glb');
+        fleet.redirectPending('missing.glb', null);
+
+        // AC2 is still queued: when its model arrives it is created.
+        models['other.glb'] = multiMaterialModel().model;
+        fleet.processPending('other.glb');
+
+        expect(fleet.get('AC1')).toBeUndefined();
+        expect(fleet.get('AC2')?.modelPath).toBe('other.glb');
+    });
+});
+
 describe('Aircraft3DFleet GLB animation playback', () => {
     beforeEach(() => vi.restoreAllMocks());
 
