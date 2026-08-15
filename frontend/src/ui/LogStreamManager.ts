@@ -37,6 +37,13 @@ export class LogStreamManager {
     private maxLines: number = 1000;
     private pollIntervalMs: number = 2000;
     private isInitialized = false;
+    // Bumped on every stop/switch so responses of in-flight fetches from the
+    // previous stream are discarded instead of corrupting the new one.
+    private streamGeneration = 0;
+    // Trailing chunk fragment not yet terminated by a newline, and the
+    // element rendering it (extended in place by later chunks).
+    private partialLine: string = '';
+    private partialLineEl: HTMLElement | null = null;
 
     // Search state
     private searchMatches: HTMLElement[] = [];
@@ -98,6 +105,9 @@ export class LogStreamManager {
         if (this.clearStreamBtn) {
             this.clearStreamBtn.addEventListener('click', () => {
                 if (this.logStreamOutput) this.logStreamOutput.innerHTML = '';
+                // Keep the partial-line buffer (the line is still being
+                // written) but drop the now-detached element rendering it.
+                this.partialLineEl = null;
                 this.clearSearch();
             });
         }
@@ -137,7 +147,7 @@ export class LogStreamManager {
 
         // Ctrl+F to open search when streaming
         document.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
                 if (this.isStreaming && this.logStreamTabBtn?.classList.contains('active')) {
                     e.preventDefault();
                     this.openSearch();
@@ -156,6 +166,8 @@ export class LogStreamManager {
         if (this.logStreamOutput) {
             this.logStreamOutput.innerHTML = '';
         }
+        this.partialLine = '';
+        this.partialLineEl = null;
 
         this.showStreamView();
         this.updateControls();
@@ -170,6 +182,7 @@ export class LogStreamManager {
     }
 
     public stopStreaming(): void {
+        this.streamGeneration++;
         if (this.pollingInterval) {
             clearInterval(this.pollingInterval);
             this.pollingInterval = null;
@@ -184,6 +197,7 @@ export class LogStreamManager {
 
     private async fetchContent(isInitial: boolean): Promise<void> {
         if (!this.currentFilepath) return;
+        const generation = this.streamGeneration;
 
         try {
             const encodedPath = encodeURIComponent(this.currentFilepath);
@@ -198,10 +212,20 @@ export class LogStreamManager {
             const response = await fetch(url);
             const result: StreamContentResponse = await response.json();
 
+            // The stream was stopped or switched to another file while this
+            // request was in flight; its content and offset belong to the
+            // previous stream.
+            if (generation !== this.streamGeneration) return;
+
             if (result.success) {
+                // An offset moving backwards means the file was truncated or
+                // rewritten and the server restarted with a fresh tail, so
+                // replace the display instead of appending the new file's
+                // content below the old one.
+                const replace = isInitial || result.offset < this.currentOffset;
                 this.currentOffset = result.offset;
-                if (result.content) {
-                    this.appendContent(result.content, isInitial);
+                if (result.content || (replace && !isInitial)) {
+                    this.appendContent(result.content, replace);
                 }
             } else {
                 logger.warn('LogStreamManager', `Stream error: ${result.error}`);
@@ -219,21 +243,42 @@ export class LogStreamManager {
 
         if (replace) {
             this.logStreamOutput.innerHTML = '';
+            this.partialLine = '';
+            this.partialLineEl = null;
         }
 
-        const lines = text.split('\n');
-        const fragment = document.createDocumentFragment();
+        // The server returns raw bytes, so a chunk can end mid-line (the
+        // writer had only flushed part of it when the poll landed). Render
+        // complete lines as fixed elements and keep the trailing fragment in
+        // a single "partial" element that is replaced when later chunks
+        // extend or complete it, so one log line never renders as two.
+        const lines = (this.partialLine + text).split('\n');
+        this.partialLine = lines.pop() ?? '';
 
+        if (this.partialLineEl) {
+            this.partialLineEl.remove();
+            this.partialLineEl = null;
+        }
+
+        const fragment = document.createDocumentFragment();
         for (const line of lines) {
-            const lineEl = document.createElement('div');
-            lineEl.className = 'log-stream-line';
-            lineEl.textContent = line;
-            fragment.appendChild(lineEl);
+            fragment.appendChild(this.createLineElement(line));
+        }
+        if (this.partialLine) {
+            this.partialLineEl = this.createLineElement(this.partialLine);
+            fragment.appendChild(this.partialLineEl);
         }
 
         this.logStreamOutput.appendChild(fragment);
         this.limitLines();
         this.logStreamOutput.scrollTop = this.logStreamOutput.scrollHeight;
+    }
+
+    private createLineElement(text: string): HTMLElement {
+        const lineEl = document.createElement('div');
+        lineEl.className = 'log-stream-line';
+        lineEl.textContent = text;
+        return lineEl;
     }
 
     private limitLines(): void {

@@ -110,3 +110,109 @@ describe('LogStreamManager search highlighting', () => {
         expect((document.getElementById('log-search-input') as HTMLInputElement).value).toBe('');
     });
 });
+
+interface StreamResponse {
+    success: boolean;
+    content: string;
+    offset: number;
+    total_size: number;
+    filename: string;
+    error?: string;
+}
+
+function streamResponse(content: string, offset: number): StreamResponse {
+    return { success: true, content, offset, total_size: offset, filename: 't.log' };
+}
+
+function renderedLines(): string[] {
+    return Array.from(document.querySelectorAll('.log-stream-line'))
+        .map(el => el.textContent ?? '');
+}
+
+describe('LogStreamManager streaming line assembly', () => {
+    // Queue of pending responses; each fetch call consumes one.
+    let responses: Array<Promise<StreamResponse>>;
+
+    function queueResponse(response: StreamResponse): void {
+        responses.push(Promise.resolve(response));
+    }
+
+    beforeEach(() => {
+        vi.resetModules(); // fresh singleton per test
+        vi.useFakeTimers();
+        responses = [];
+        vi.stubGlobal('fetch', vi.fn(() => {
+            const next = responses.shift() ?? Promise.resolve(streamResponse('', 0));
+            return next.then(result => ({ json: async () => result }));
+        }));
+        buildDom([]);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+        document.body.innerHTML = '';
+        vi.restoreAllMocks();
+    });
+
+    it('holds a chunk\'s trailing mid-line fragment in one element and completes it in place', async () => {
+        const { logStreamManager } = await import('./LogStreamManager');
+
+        // Initial chunk ends mid-line: the writer had not finished "bravo".
+        queueResponse(streamResponse('alpha\nbra', 9));
+        await logStreamManager.startStreaming('t.log');
+        expect(renderedLines()).toEqual(['alpha', 'bra']);
+
+        // The next poll delivers the rest of the line plus a complete one.
+        queueResponse(streamResponse('vo\ncharlie\n', 20));
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(renderedLines()).toEqual(['alpha', 'bravo', 'charlie']);
+
+        logStreamManager.stopStreaming();
+    });
+
+    it('does not render phantom empty lines for newline-terminated chunks', async () => {
+        const { logStreamManager } = await import('./LogStreamManager');
+
+        queueResponse(streamResponse('one\ntwo\n', 8));
+        await logStreamManager.startStreaming('t.log');
+        expect(renderedLines()).toEqual(['one', 'two']);
+
+        queueResponse(streamResponse('three\n', 14));
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(renderedLines()).toEqual(['one', 'two', 'three']);
+
+        logStreamManager.stopStreaming();
+    });
+
+    it('discards a late response that arrives after the stream was stopped', async () => {
+        const { logStreamManager } = await import('./LogStreamManager');
+
+        let resolveLate: (r: StreamResponse) => void;
+        responses.push(new Promise<StreamResponse>(resolve => { resolveLate = resolve; }));
+
+        const started = logStreamManager.startStreaming('t.log');
+        logStreamManager.stopStreaming();
+
+        resolveLate!(streamResponse('stale\n', 6));
+        await started;
+
+        expect(renderedLines()).toEqual([]);
+    });
+
+    it('replaces the display when the server restarts a truncated file with a fresh tail', async () => {
+        const { logStreamManager } = await import('./LogStreamManager');
+
+        queueResponse(streamResponse('old1\nold2\n', 10));
+        await logStreamManager.startStreaming('t.log');
+        expect(renderedLines()).toEqual(['old1', 'old2']);
+
+        // The file shrank (re-run scenario logging to the same name): the
+        // server reset to tail mode and returned an offset below ours.
+        queueResponse(streamResponse('new\n', 4));
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(renderedLines()).toEqual(['new']);
+
+        logStreamManager.stopStreaming();
+    });
+});
