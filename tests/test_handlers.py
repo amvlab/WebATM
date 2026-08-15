@@ -175,16 +175,13 @@ class TestAcdataHandler:
         on_acdata_received({"id": ["AC1"]})
         assert proxy.traffic_data == {}
 
-    def test_reset_clears_aircraft(self, proxy, fake_client, fake_socketio):
+    def test_wire_action_does_not_clear_aircraft(self, proxy, fake_client):
+        # Reset clearing is the RESET topic's job (on_reset_received); a
+        # shared-state action on the ACDATA context must not wipe traffic.
         proxy.bluesky_client = fake_client
-        fake_client.context.action = fake_client.context.Reset
+        fake_client.context.action = "R"
         on_acdata_received({"id": ["AC1"]})
-        emitted = fake_socketio.last("acdata")
-        assert emitted["id"] == []
-        # Canonical empty payload shape (matches the disconnect clear path).
-        from WebATM.utils import empty_traffic_data
-
-        assert emitted == empty_traffic_data()
+        assert proxy.traffic_data["id"] == ["AC1"]
 
 
 class TestAcdataActiveNodeFiltering:
@@ -414,6 +411,30 @@ class TestResetHandler:
         assert sender_hex not in proxy.poly_data_by_node
         assert fake_socketio.count("reset") == 1
 
+    def test_clears_cached_aircraft_and_emits_empty_acdata(self, proxy, fake_socketio):
+        from WebATM.utils import empty_traffic_data
+
+        proxy.traffic_data = {"id": ["GHOST1", "GHOST2"], "lat": [1.0, 2.0]}
+        on_reset_received(sender_id=b"NODE1")
+        # Canonical empty payload shape (matches the disconnect clear path).
+        assert proxy.traffic_data == empty_traffic_data()
+        assert fake_socketio.last("acdata") == empty_traffic_data()
+
+    def test_clears_cached_aircraft_with_no_clients_connected(
+        self, proxy, fake_socketio
+    ):
+        # The initial_data snapshot serves proxy.traffic_data verbatim, and
+        # on_acdata_received only refreshes it while clients are attached — so
+        # a reset with nobody connected must still clear the cache, or the
+        # next page load renders the pre-reset aircraft (ghosts).
+        from WebATM.utils import empty_traffic_data
+
+        proxy.connected_clients = 0
+        proxy.traffic_data = {"id": ["GHOST1"], "lat": [1.0]}
+        on_reset_received(sender_id=b"NODE1")
+        assert proxy.traffic_data == empty_traffic_data()
+        assert fake_socketio.count("acdata") == 0  # nobody to emit to
+
     def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
         proxy.allow_reconnection = False
         on_reset_received()
@@ -449,6 +470,7 @@ class TestResetActiveNodeScoping:
             other_hex: {"polys": {"stale": {}}},
         }
         proxy.polyline_data_by_node = {active_hex: {"polys": {"keep": {}}}}
+        proxy.traffic_data = {"id": ["ACTIVE1"], "lat": [1.0]}
 
         on_reset_received(sender_id=other)
 
@@ -456,22 +478,30 @@ class TestResetActiveNodeScoping:
         assert other_hex not in proxy.poly_data_by_node
         assert proxy.poly_data_by_node[active_hex] == {"polys": {"keep": {}}}
         assert proxy.polyline_data_by_node[active_hex] == {"polys": {"keep": {}}}
+        # The active node's cached aircraft survive a background reset.
+        assert proxy.traffic_data == {"id": ["ACTIVE1"], "lat": [1.0]}
         # Nothing display-clearing reaches the browser.
         assert fake_socketio.count("reset") == 0
+        assert fake_socketio.count("acdata") == 0
         assert fake_socketio.count("poly") == 0
         assert fake_socketio.count("polyline") == 0
 
     def test_active_node_reset_clears_and_emits(
         self, proxy, fake_client, fake_socketio
     ):
+        from WebATM.utils import empty_traffic_data
+
         active = b"\xaa\xaa\xaa\xaa\x81"
         active_hex = self._activate(proxy, fake_client, active)
         proxy.poly_data_by_node = {active_hex: {"polys": {"stale": {}}}}
+        proxy.traffic_data = {"id": ["OLD1"], "lat": [1.0]}
 
         on_reset_received(sender_id=active)
 
         assert active_hex not in proxy.poly_data_by_node
+        assert proxy.traffic_data == empty_traffic_data()
         assert fake_socketio.count("reset") == 1
+        assert fake_socketio.last("acdata") == empty_traffic_data()
         assert fake_socketio.last("poly") == {"polys": {}}
         assert fake_socketio.last("polyline") == {"polys": {}}
 

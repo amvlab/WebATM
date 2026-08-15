@@ -347,6 +347,20 @@ class TestDataMessageDispatch:
         assert client.context.sender_id == b"NODE\x82"
         assert client.context.action == client.context.Reset
 
+    def test_acdata_shared_state_unwraps_and_keeps_wire_action(self):
+        # ACDATA arrives as [action, data]; the handler gets the unwrapped
+        # dict and the context records the raw wire action and header sender.
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe("ACDATA", lambda data: received.append(data))
+
+        traffic = {"id": ["AC1"], "lat": [52.0]}
+        client._process_data_message(self._frame("ACDATA", [b"R", traffic]))
+
+        assert received == [traffic]
+        assert client.context.action == b"R"
+        assert client.context.sender_id == b"NODE\x81"
+
     def test_generic_topic_still_dispatches(self):
         client = BlueSkyClient()
         received = []

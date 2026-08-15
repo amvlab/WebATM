@@ -305,6 +305,51 @@ class TestEmitActiveNodePolyData:
         assert fake_socketio.count("polyline") == 0
 
 
+class TestActnodeChangedTrafficClear:
+    """Switching the active node drops the previous node's cached aircraft:
+    the cache would otherwise be re-served (initial_data snapshot, backup
+    emit) until the new node's ACDATA stream produces its first frame."""
+
+    def test_switch_clears_cached_traffic_and_emits_empty_acdata(
+        self, proxy, fake_client, fake_socketio
+    ):
+        from WebATM.utils import empty_traffic_data
+
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.traffic_data = {"id": ["OLDNODE1"], "lat": [1.0]}
+
+        proxy.node_mgr._on_actnode_changed(b"\x01\x02\x03\x04\x81")
+
+        assert proxy.traffic_data == empty_traffic_data()
+        assert fake_socketio.last("acdata") == empty_traffic_data()
+
+    def test_switch_clears_cache_even_without_clients(
+        self, proxy, fake_client, fake_socketio
+    ):
+        from WebATM.utils import empty_traffic_data
+
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.connected_clients = 0
+        proxy.traffic_data = {"id": ["OLDNODE1"], "lat": [1.0]}
+
+        proxy.node_mgr._on_actnode_changed(b"\x01\x02\x03\x04\x81")
+
+        assert proxy.traffic_data == empty_traffic_data()
+        assert fake_socketio.count("acdata") == 0
+
+    def test_not_running_is_a_noop(self, proxy, fake_client, fake_socketio):
+        proxy.bluesky_client = fake_client
+        proxy.running = False
+        proxy.traffic_data = {"id": ["KEEP"], "lat": [1.0]}
+
+        proxy.node_mgr._on_actnode_changed(b"\x01\x02\x03\x04\x81")
+
+        assert proxy.traffic_data == {"id": ["KEEP"], "lat": [1.0]}
+        assert fake_socketio.count("acdata") == 0
+
+
 class TestDelegationToNetworkClient:
     def test_actnode_raises_without_client(self, proxy):
         proxy.bluesky_client = None

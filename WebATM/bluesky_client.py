@@ -699,26 +699,15 @@ class BlueSkyClient:
                     # Pass sender_id as additional parameter to our custom handler
                     self.subscriber.emit(topic, *data, sender_id=sender_id)
                 elif topic in ("ACDATA", "ROUTEDATA"):
-                    # ACDATA and ROUTEDATA - handle BlueSky shared state format
+                    # ACDATA and ROUTEDATA use the BlueSky shared-state format
+                    # [action_type, data_dict]; record the wire action ('R',
+                    # 'U', ...) and sender on the context, then pass handlers
+                    # the unwrapped data dict.
                     if isinstance(data, (list, tuple)) and len(data) == 2:
-                        # BlueSky shared state format: [action_type, data_dict]
                         action_type, actual_data = data
-
-                        # Set context action for BlueSky compatibility
                         self.context.action = action_type
                         self.context.sender_id = sender_id
-
-                        # Handle different action types like BlueSky does
-                        if action_type in ("RESET", "ACTCHANGE"):
-                            self.context.action = (
-                                self.context.Reset
-                                if action_type == "RESET"
-                                else self.context.ActChange
-                            )
-
-                        self.subscriber.emit(
-                            topic, actual_data
-                        )  # Pass the actual data dict, not the action wrapper
+                        self.subscriber.emit(topic, actual_data)
                     else:
                         self.subscriber.emit(topic, data)  # Pass as single argument
                 elif topic == "ECHO":

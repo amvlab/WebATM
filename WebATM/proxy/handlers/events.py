@@ -3,7 +3,7 @@
 import time
 
 from ...logger import get_logger
-from ...utils import id2str
+from ...utils import empty_traffic_data, id2str
 from ._base import active_proxy
 
 logger = get_logger()
@@ -13,12 +13,13 @@ def on_reset_received(data=None, *args, sender_id=None, **kwargs):
     """Handle RESET events from the BlueSky server.
 
     Clears the stored polygon/polyline shapes for the node that sent the
-    reset. Browsers display the active node only, so the map-clearing ``poly``
-    and ``polyline`` payloads and the ``reset`` event are emitted solely when
-    the resetting node is the active one — a background node's reset must not
-    wipe the active node's display. When the sender or active node can't be
-    resolved, the reset is accepted so a single-node display still works
-    (same fallback as the SIMINFO/ACDATA active-node filter).
+    reset. Browsers display the active node only, so when the resetting node
+    is the active one this also clears the cached aircraft and emits the
+    map-clearing ``acdata``/``poly``/``polyline`` payloads plus the ``reset``
+    event — while a background node's reset must not wipe the active node's
+    display. When the sender or active node can't be resolved, the reset is
+    accepted so a single-node display still works (same fallback as the
+    SIMINFO/ACDATA active-node filter).
 
     Args:
         data (Any): Optional RESET payload (unused).
@@ -26,8 +27,7 @@ def on_reset_received(data=None, *args, sender_id=None, **kwargs):
         sender_id (bytes | str | None): Node that reset, from the message
             header; bytes are converted to a hex string. The shared network
             context is deliberately not consulted — it holds the sender of the
-            last shared-state message (usually the active node), not of this
-            RESET.
+            last shared-state message, not of this RESET.
         **kwargs (Any): Additional keyword payload items (unused).
     """
     proxy = active_proxy()
@@ -49,7 +49,18 @@ def on_reset_received(data=None, *args, sender_id=None, **kwargs):
         is_active_node = (
             active_node_id is None or sender_id is None or sender_id == active_node_id
         )
-        if is_active_node and proxy.socketio and proxy.connected_clients > 0:
+        if not is_active_node:
+            return
+
+        # The active node's cached aircraft are gone too. Clear even with no
+        # browser connected: on_acdata_received only refreshes this cache
+        # while clients are attached, so a stale cache would otherwise be
+        # served verbatim in the next initial_data snapshot (ghost aircraft).
+        cleared = empty_traffic_data()
+        proxy.traffic_data = cleared
+
+        if proxy.socketio and proxy.connected_clients > 0:
+            proxy.socketio.emit("acdata", cleared)
             proxy.socketio.emit("poly", {"polys": {}})
             proxy.socketio.emit("polyline", {"polys": {}})
             proxy.socketio.emit(
