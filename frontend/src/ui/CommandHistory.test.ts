@@ -26,6 +26,11 @@ describe('CommandHistory', () => {
         expect(history.entries).toEqual(['b', 'c', 'd']);
     });
 
+    it('skips consecutive duplicates but keeps non-consecutive ones', () => {
+        ['OP', 'OP', 'HOLD', 'OP'].forEach(cmd => history.add(cmd));
+        expect(history.entries).toEqual(['OP', 'HOLD', 'OP']);
+    });
+
     it('persists across instances via storage', () => {
         history.add('CRE KL123');
 
@@ -71,6 +76,30 @@ describe('CommandHistory', () => {
         it('previous() on an empty history returns null', () => {
             const empty = new CommandHistory('empty-history');
             expect(empty.previous()).toBeNull();
+        });
+
+        it('restores the draft passed to previous() when next() steps past the newest', () => {
+            expect(history.previous('CRE KL204 B7')).toBe('third');
+            expect(history.previous()).toBe('second');
+            expect(history.next()).toBe('third');
+            expect(history.next()).toBe('CRE KL204 B7'); // draft back on the fresh line
+            expect(history.next()).toBeNull();
+        });
+
+        it('only stashes the draft when leaving the fresh line, not mid-navigation', () => {
+            history.previous('my draft'); // third
+            history.previous('not a draft'); // second - already navigating
+            history.next(); // third
+            expect(history.next()).toBe('my draft');
+        });
+
+        it('add() during navigation resets it so previous() starts at the newest entry', () => {
+            history.previous('draft'); // third
+            history.previous(); // second
+            history.add('fourth'); // e.g. a map-drawn aircraft via displaySentCommand
+            expect(history.previous()).toBe('fourth');
+            history.resetNavigation();
+            expect(history.next()).toBeNull(); // draft was discarded too
         });
     });
 });
