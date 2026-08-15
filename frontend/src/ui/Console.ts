@@ -88,9 +88,6 @@ export class Console {
         inputContainer.parentElement.insertBefore(this.argHint, inputContainer);
     }
 
-    /**
-     * Set state manager reference to access command dictionary
-     */
     public setStateManager(stateManager: StateManager): void {
         this.stateManager = stateManager;
     }
@@ -105,9 +102,6 @@ export class Console {
         return getEffectiveDict(this.stateManager?.getCommandDict() ?? null);
     }
 
-    /**
-     * Set command handler reference for processing local commands
-     */
     public setCommandHandler(commandHandler: CommandHandler): void {
         this.commandHandler = commandHandler;
     }
@@ -120,9 +114,6 @@ export class Console {
         this.mapPicker = new ConsoleMapPicker(mapDisplay, this, navaidSnapper);
     }
 
-    /**
-     * Create suggestion overlay element
-     */
     private createSuggestionOverlay(): void {
         const inputContainer = document.querySelector('.console-input-container');
         if (!inputContainer) {
@@ -153,15 +144,9 @@ export class Console {
 
             switch (e.key) {
                 case 'ArrowUp':
-                    e.preventDefault();
-                    this.showPreviousCommand();
-                    this.updateSuggestion();
-                    this.updateArgHint();
-                    this.updateMapPicker();
-                    break;
                 case 'ArrowDown':
                     e.preventDefault();
-                    this.showNextCommand();
+                    this.navigateHistory(e.key === 'ArrowUp' ? 'previous' : 'next');
                     this.updateSuggestion();
                     this.updateArgHint();
                     this.updateMapPicker();
@@ -335,21 +320,18 @@ export class Console {
         }
     }
 
-    private showPreviousCommand(): void {
+    /**
+     * Arrow-key history walk. previous() gets the current input so an
+     * unsubmitted draft survives an ArrowUp/ArrowDown round trip.
+     */
+    private navigateHistory(direction: 'previous' | 'next'): void {
         const input = document.getElementById('console-input') as HTMLInputElement;
         if (!input) return;
 
-        const command = this.history.previous();
-        if (command !== null) {
-            input.value = command;
-        }
-    }
-
-    private showNextCommand(): void {
-        const input = document.getElementById('console-input') as HTMLInputElement;
-        if (!input) return;
-
-        const command = this.history.next();
+        const command =
+            direction === 'previous'
+                ? this.history.previous(input.value)
+                : this.history.next();
         if (command !== null) {
             input.value = command;
         }
@@ -452,7 +434,7 @@ export class Console {
         const prompt = document.querySelector('.console-prompt') as HTMLElement;
 
         if (input && prompt) {
-            // Calculate position based on input text width
+            // Measure the typed text so the overlay starts just past it.
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
             if (context) {
@@ -460,24 +442,16 @@ export class Console {
                 context.font = computedStyle.font;
                 const textWidth = context.measureText(currentInput).width;
 
-                // Account for prompt width and input padding/border
                 const promptWidth = prompt.offsetWidth;
                 const inputPadding = parseInt(computedStyle.paddingLeft || '0');
                 const inputBorder = parseInt(computedStyle.borderLeftWidth || '0');
-
-                // Add spacing between typed text and suggestion (in pixels)
                 const suggestionSpacing = 20;
 
-                // Position suggestion overlay after the input text with spacing
-                // Add prompt width, input padding/border, the text width, and extra spacing
                 this.suggestionOverlay.style.left = `${promptWidth + inputPadding + inputBorder + textWidth + suggestionSpacing}px`;
             }
         }
     }
 
-    /**
-     * Hide suggestion overlay
-     */
     private hideSuggestion(): void {
         if (this.suggestionOverlay) {
             this.suggestionOverlay.style.display = 'none';
@@ -596,9 +570,6 @@ export class Console {
         this.argHint.style.display = 'flex';
     }
 
-    /**
-     * Hide the argument-signature hint row.
-     */
     private hideArgHint(): void {
         if (this.argHint) {
             this.argHint.style.display = 'none';

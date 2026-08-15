@@ -10,7 +10,7 @@ on the proxy and forward it to connected browsers over Socket.IO as the
 import time
 
 from ...logger import get_logger
-from ...utils import empty_traffic_data, id2str, make_json_serializable, tim2txt
+from ...utils import id2str, make_json_serializable, tim2txt
 from ..perf import data_path_perf
 from ._base import active_proxy, get_bluesky_proxy
 
@@ -107,15 +107,15 @@ def on_siminfo_received(
 def on_acdata_received(data):
     """Process a BlueSky ACDATA traffic frame and emit ``acdata`` to web clients.
 
-    On a simulation reset or active-node change (detected via the BlueSky
-    network context), clears the cached traffic data and immediately emits an
-    empty ``acdata`` payload so browsers drop stale aircraft.
-
     Hot path: the network timer delivers ACDATA at up to 50 Hz, but it is only
     emitted to browsers at ``acdata_interval`` (10 Hz) and only for the active
     node. ``make_json_serializable`` is the dominant per-frame cost, so it is
     deferred until after the active-node filter and the emit throttle decide the
     frame is actually sent. Set WEBATM_PERF=1 (WebATM.proxy.perf) to measure it.
+
+    Aircraft clearing on a simulation reset is NOT handled here: BlueSky
+    signals a reset on the dedicated RESET topic (events.on_reset_received),
+    never via an ACDATA action.
 
     Args:
         data (dict): Aircraft state arrays keyed by field (``id``, ``lat``,
@@ -133,30 +133,13 @@ def on_acdata_received(data):
             logger.debug("on_acdata_received ignored - reconnection not allowed")
             return
 
-        # Check context action like BlueSky web client does, and resolve which
-        # node sent this frame (set on the shared context just before this
-        # synchronous dispatch) for the active-node filter below.
+        # Resolve which node sent this frame (set on the shared context just
+        # before this synchronous dispatch) for the active-node filter below.
         sender_id_str = None
         if proxy.bluesky_client and hasattr(proxy.bluesky_client, "context"):
-            ctx = proxy.bluesky_client.context
-            if ctx.action == ctx.Reset or ctx.action == ctx.ActChange:
-                # Simulation reset or active-node change: clear all aircraft.
-                logger.info("ACDATA reset/actchange detected - clearing aircraft data")
-                cleared = empty_traffic_data()
-                proxy.traffic_data = cleared
-
-                # Emit cleared data immediately
-                if proxy.socketio and proxy.connected_clients > 0:
-                    try:
-                        proxy.socketio.emit("acdata", cleared)
-                        logger.debug(
-                            f"Emitted cleared ACDATA to {proxy.connected_clients} web clients"
-                        )
-                    except Exception as e:
-                        logger.error(f"Error emitting cleared ACDATA: {e}")
-                return
-
-            sender_id_str = id2str(getattr(ctx, "sender_id", None))
+            sender_id_str = id2str(
+                getattr(proxy.bluesky_client.context, "sender_id", None)
+            )
 
         # Any ACDATA from any node proves the link to BlueSky is alive: update
         # liveness before filtering so a background node's traffic still counts.

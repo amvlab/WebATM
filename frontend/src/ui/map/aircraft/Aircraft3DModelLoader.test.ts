@@ -6,14 +6,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as THREE from 'three';
 
-// Capture the GLTFLoader onLoad callback so tests can drive a "loaded" model
-// through the loader without touching the network.
+// Capture the GLTFLoader callbacks so tests can drive a load to success or
+// failure without touching the network, and count the requests issued.
 type MockGltf = { scene: THREE.Group; animations?: THREE.AnimationClip[] };
-const captured: { onLoad?: (gltf: MockGltf) => void } = {};
+const captured: {
+    onLoad?: (gltf: MockGltf) => void;
+    onError?: (error: unknown) => void;
+    loadCalls: string[];
+} = { loadCalls: [] };
 vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
     GLTFLoader: class {
-        load(_path: string, onLoad: (gltf: MockGltf) => void) {
+        load(
+            path: string,
+            onLoad: (gltf: MockGltf) => void,
+            _onProgress?: unknown,
+            onError?: (error: unknown) => void
+        ) {
+            captured.loadCalls.push(path);
             captured.onLoad = onLoad;
+            captured.onError = onError;
         }
     },
 }));
@@ -166,5 +177,69 @@ describe('Aircraft3DModelLoader animation clips', () => {
         loader.clearCache();
 
         expect(loader.animations('prop.glb')).toEqual([]);
+    });
+});
+
+describe('Aircraft3DModelLoader load failures', () => {
+    beforeEach(() => {
+        vi.restoreAllMocks();
+        captured.onLoad = undefined;
+        captured.onError = undefined;
+        captured.loadCalls = [];
+    });
+
+    function makeFailureLoader() {
+        const onModelFailed = vi.fn();
+        const loader = new Aircraft3DModelLoader({
+            getMaxAnisotropy: () => 1,
+            onModelLoaded: vi.fn(),
+            onModelFailed,
+        });
+        return { loader, onModelFailed };
+    }
+
+    it('records a failed load and notifies onModelFailed', () => {
+        const { loader, onModelFailed } = makeFailureLoader();
+
+        loader.load('missing.glb');
+        captured.onError?.(new Error('404'));
+
+        expect(loader.hasFailed('missing.glb')).toBe(true);
+        expect(onModelFailed).toHaveBeenCalledWith('missing.glb');
+    });
+
+    it('does not re-request a path that already failed', () => {
+        const { loader } = makeFailureLoader();
+
+        loader.load('missing.glb');
+        captured.onError?.(new Error('404'));
+        loader.load('missing.glb');
+        loader.load('missing.glb');
+
+        expect(captured.loadCalls).toEqual(['missing.glb']);
+    });
+
+    it('clearCache() forgets failures so a reload retries the path', () => {
+        const { loader } = makeFailureLoader();
+
+        loader.load('missing.glb');
+        captured.onError?.(new Error('404'));
+        loader.clearCache();
+        loader.load('missing.glb');
+
+        expect(loader.hasFailed('missing.glb')).toBe(false);
+        expect(captured.loadCalls).toEqual(['missing.glb', 'missing.glb']);
+    });
+
+    it('ignores a failure that arrives after clearAll()', () => {
+        const { loader, onModelFailed } = makeFailureLoader();
+
+        loader.load('missing.glb');
+        loader.clearAll(); // teardown while the load is in flight
+
+        captured.onError?.(new Error('404'));
+
+        expect(loader.hasFailed('missing.glb')).toBe(false);
+        expect(onModelFailed).not.toHaveBeenCalled();
     });
 });

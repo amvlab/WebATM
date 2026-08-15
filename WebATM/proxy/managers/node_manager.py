@@ -6,7 +6,7 @@ import traceback
 
 from ...bluesky_client import safe_decode, seqid2idx, seqidx2id
 from ...logger import get_logger
-from ...utils import id2str
+from ...utils import empty_traffic_data, id2str
 
 logger = get_logger()
 
@@ -49,7 +49,14 @@ class NodeManager:
     def _on_actnode_changed(self, node_id):
         """Callback when active node changes."""
         if self.proxy.running:
-            # Emit immediately to update web interface
+            # The cached traffic belongs to the previous node; drop it (and
+            # clear browsers) so it can't be re-served while the new node's
+            # ACDATA stream spins up. Same idea as the shape clear below.
+            cleared = empty_traffic_data()
+            self.proxy.traffic_data = cleared
+            if self.proxy.socketio and self.proxy.connected_clients > 0:
+                self.proxy.socketio.emit("acdata", cleared)
+
             self._emit_node_info()
 
             # Emit POLY data for the newly active node

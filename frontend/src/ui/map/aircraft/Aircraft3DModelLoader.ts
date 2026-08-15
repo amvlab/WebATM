@@ -24,12 +24,18 @@ export class Aircraft3DModelLoader {
     // its own AnimationMixer.
     private readonly animationClips = new Map<string, THREE.AnimationClip[]>();
     private readonly loadingModels = new Set<string>();
+    // Paths whose load failed (404, parse error, ...). load() skips these so
+    // a broken model isn't re-requested on every data tick; cleared together
+    // with the cache so a model reload retries them.
+    private readonly failedModels = new Set<string>();
 
     constructor(private readonly opts: {
         /** Renderer texture-anisotropy limit, queried at normalize time. */
         getMaxAnisotropy: () => number;
         /** Called after a model finishes loading and is cached. */
         onModelLoaded: (path: string) => void;
+        /** Called when a model load fails, so queued aircraft can fall back. */
+        onModelFailed?: (path: string) => void;
     }) {}
 
     /** Cached model for a path, when loaded. */
@@ -47,13 +53,18 @@ export class Aircraft3DModelLoader {
         return this.animationClips.get(path) ?? [];
     }
 
+    /** Whether a previous load of this path failed (and wasn't retried). */
+    public hasFailed(path: string): boolean {
+        return this.failedModels.has(path);
+    }
+
     /**
      * Load a GLTF/GLB model by URL, caching it for future clones.
-     * Idempotent: returns immediately if the model is already loaded
-     * or currently loading.
+     * Idempotent: returns immediately if the model is already loaded,
+     * currently loading, or known to fail.
      */
     public load(path: string): void {
-        if (this.loadedModels.has(path) || this.loadingModels.has(path)) {
+        if (this.loadedModels.has(path) || this.loadingModels.has(path) || this.failedModels.has(path)) {
             return;
         }
 
@@ -87,8 +98,14 @@ export class Aircraft3DModelLoader {
                 }
             },
             (error) => {
-                this.loadingModels.delete(path);
                 logger.error('Aircraft3DModelLoader', `Failed to load aircraft model ${path}: ${error}`);
+                // Same teardown guard as the success callback: after
+                // clearAll() the owner is gone, so don't record the failure
+                // or notify — a fresh owner starts with a clean slate.
+                if (!this.loadingModels.has(path)) return;
+                this.loadingModels.delete(path);
+                this.failedModels.add(path);
+                this.opts.onModelFailed?.(path);
             }
         );
     }
@@ -103,6 +120,7 @@ export class Aircraft3DModelLoader {
         this.loadedModels.clear();
         this.rawMaxDims.clear();
         this.animationClips.clear();
+        this.failedModels.clear();
     }
 
     /**

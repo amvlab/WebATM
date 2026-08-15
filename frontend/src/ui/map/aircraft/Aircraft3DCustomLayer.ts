@@ -32,7 +32,8 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
     // Default/fallback model path — used when aircraft type is unknown or missing.
     private modelPath: string = `${MODEL_DIR}${DEFAULT_FALLBACK_MODEL}`;
     private pendingAircraftData: AircraftData | null = null;
-    private lastProjectionMode: boolean | null = null; // Track projection mode changes for debug logging
+    // Last seen projection mode, to detect globe/mercator switches.
+    private lastProjectionMode: boolean | null = null;
     // Wall-clock delta source for GLB animation playback (engines, rotors).
     private readonly animationClock = new THREE.Clock();
 
@@ -52,7 +53,11 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
         this.stateManager = stateManager;
         this.modelLoader = new Aircraft3DModelLoader({
             getMaxAnisotropy: () => this.renderer?.capabilities?.getMaxAnisotropy?.() || 16,
-            onModelLoaded: (path) => this.fleet.processPending(path)
+            onModelLoaded: (path) => this.fleet.processPending(path),
+            onModelFailed: (path) => {
+                const fallback = this.usableModelPath(path);
+                this.fleet.redirectPending(path, fallback !== path ? fallback : null);
+            },
         });
         this.transforms = new Aircraft3DTransforms({
             getMap: () => this.map ?? null,
@@ -140,7 +145,12 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
 
             const actype = aircraftData.actype?.[i] ?? '';
             const override = this.stateManager?.getAircraftModelOverride(id) ?? null;
-            const modelPath = resolveAircraftModelPath(selectedModel, actype, override);
+            // Substitute the fallback model when the resolved one is known to
+            // fail. Doing it here (not just in the failure callback) keeps
+            // the path stable across ticks, so the mesh isn't rebuilt.
+            const modelPath = this.usableModelPath(
+                resolveAircraftModelPath(selectedModel, actype, override)
+            );
 
             const data: AircraftMeshData = {
                 lat: aircraftData.lat[i],
@@ -179,8 +189,18 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
             }
         });
 
-        // Also remove from pending aircraft if they no longer exist
         this.fleet.prunePending(activeIds);
+    }
+
+    /**
+     * The given model path if it is expected to load, otherwise the default
+     * fallback model — unless that failed too, in which case the original
+     * path is returned and the aircraft stays queued (the loader won't
+     * re-request a failed path, so this stays cheap).
+     */
+    private usableModelPath(path: string): string {
+        if (!this.modelLoader.hasFailed(path)) return path;
+        return this.modelLoader.hasFailed(this.modelPath) ? path : this.modelPath;
     }
 
     /**
@@ -204,11 +224,11 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
             if (!existing) return;
 
             const overrideFile = newOverrides[id];
-            const resolvedPath = resolveAircraftModelPath(
+            const resolvedPath = this.usableModelPath(resolveAircraftModelPath(
                 this.displayOptions.selectedAircraftModel,
                 existing.data.actype,
                 overrideFile,
-            );
+            ));
 
             if (resolvedPath === existing.modelPath) return;
 
@@ -235,15 +255,11 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
         // repaint after every render, so playback is continuous.
         this.fleet.advanceAnimations(this.animationClock.getDelta());
 
-        // Check if we're in globe projection mode
         const isGlobe = this.isGlobeProjection();
 
-        // Debug log projection mode changes and handle mesh group transitions
         if (this.lastProjectionMode !== isGlobe) {
             logger.info('Aircraft3DCustomLayer', `[PROJECTION] Switched to ${isGlobe ? 'GLOBE' : 'MERCATOR'} mode`);
             this.lastProjectionMode = isGlobe;
-
-            // Move all aircraft to the appropriate group for the new projection mode
             this.fleet.switchGroups(isGlobe);
 
             // Re-aim the shared directional lights for the active group's
@@ -251,7 +267,6 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
             this.updateLightsForProjection(isGlobe);
         }
 
-        // Toggle visibility of groups based on projection mode
         if (this.globeGroup) this.globeGroup.visible = isGlobe;
         if (this.mercatorGroup) this.mercatorGroup.visible = !isGlobe;
 
@@ -259,11 +274,8 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
             if (args) {
                 this.transforms.applyGlobeCamera(args);
             }
-
-            // Update all aircraft transforms for globe positioning
             this.fleet.applyGlobeTransforms();
         } else if (args && this.transforms.applyMercatorCamera(args)) {
-            // Make sure all aircraft use relative positioning (matrixAutoUpdate = true)
             this.fleet.enableMatrixAutoUpdate();
         }
     }
@@ -320,13 +332,10 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
 
         logger.info('Aircraft3DCustomLayer', `Default aircraft model changed to: ${this.modelPath}`);
 
-        // Remove all existing meshes
         this.fleet.removeAllForReload();
-
-        // Drop cached models so the new fallback (and any stale asset) reloads fresh
+        // Drop cached models (and recorded load failures) so the new
+        // fallback and any stale asset reload fresh.
         this.modelLoader.clearCache();
-
-        // Preload the new default
         this.modelLoader.load(this.modelPath);
     }
 
