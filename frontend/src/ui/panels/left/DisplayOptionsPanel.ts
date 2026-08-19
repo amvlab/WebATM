@@ -208,6 +208,7 @@ export class DisplayOptionsPanel extends BasePanel {
         }
         update.show3DOverlay = show3DOverlay;
         this.setChecked('show-3d-overlay', show3DOverlay);
+        this.apply3DControlsVisibility(show3DOverlay);
 
         const aircraft3DScale = this.loadStored('aircraft-3d-scale', defaults.aircraft3DScale);
         update.aircraft3DScale = aircraft3DScale;
@@ -324,37 +325,38 @@ export class DisplayOptionsPanel extends BasePanel {
     private setupRenderModeControl(): void {
         this.bindCheckbox('show-3d-overlay', async (checked) => {
             storage.set('show-3d-overlay', checked);
+            this.stateManager?.updateDisplayOptions({ show3DOverlay: checked });
 
-            if (this.stateManager) {
-                this.stateManager.updateDisplayOptions({ show3DOverlay: checked });
-            }
-
-            if (this.app) {
-                const mapOverlay = this.app.getMapOverlay();
-                if (mapOverlay) {
-                    try {
-                        logger.info('DisplayOptionsPanel', `${checked ? 'Enabling' : 'Disabling'} 3D overlay...`);
-                        await mapOverlay.updateDisplayOptions({ show3DOverlay: checked });
-                        logger.info('DisplayOptionsPanel', `3D overlay ${checked ? 'enabled' : 'disabled'} successfully`);
-                    } catch (error) {
-                        // Roll the checkbox and state back so UI matches reality
-                        logger.error('DisplayOptionsPanel', `Failed to toggle 3D overlay: ${error}`);
-                        this.setChecked('show-3d-overlay', !checked);
-                        if (this.stateManager) {
-                            this.stateManager.updateDisplayOptions({ show3DOverlay: !checked });
-                        }
-                    }
+            const mapOverlay = this.app?.getMapOverlay();
+            if (mapOverlay) {
+                try {
+                    logger.info('DisplayOptionsPanel', `${checked ? 'Enabling' : 'Disabling'} 3D overlay...`);
+                    await mapOverlay.updateDisplayOptions({ show3DOverlay: checked });
+                } catch (error) {
+                    // Roll the checkbox, storage and state back so the UI and
+                    // the next page load both match reality
+                    logger.error('DisplayOptionsPanel', `Failed to toggle 3D overlay: ${error}`);
+                    this.setChecked('show-3d-overlay', !checked);
+                    storage.set('show-3d-overlay', !checked);
+                    this.stateManager?.updateDisplayOptions({ show3DOverlay: !checked });
+                    this.apply3DControlsVisibility(!checked);
+                    return;
                 }
             }
 
-            // Reveal the 3D controls section when the overlay turns on
-            if (checked) {
-                const threeDControls = document.getElementById('threeD-controls');
-                if (threeDControls && threeDControls.style.display === 'none') {
-                    this.toggleCollapsibleSection('threeD-controls', 'threeD-visible');
-                }
-            }
+            this.apply3DControlsVisibility(checked);
         });
+    }
+
+    /**
+     * Show the global 3D scale and model controls only while the overlay
+     * is on. Clearing the inline style falls back to their CSS flex layout.
+     */
+    private apply3DControlsVisibility(visible: boolean): void {
+        for (const id of ['aircraft-3d-scale-container', 'aircraft-model-container']) {
+            const container = document.getElementById(id);
+            if (container) container.style.display = visible ? '' : 'none';
+        }
     }
 
     private setup3DScaleControl(): void {
