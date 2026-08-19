@@ -173,6 +173,25 @@ describe('ShapeDrawingManager create validation and finish', () => {
         expect(manager.isDrawing()).toBe(false);
     });
 
+    it('rejects a non-numeric altitude instead of sending NaN to BlueSky', () => {
+        fillModal('TMA1');
+        (document.getElementById('polygon-top-input') as HTMLInputElement).value = 'abc';
+        (document.getElementById('polygon-bottom-input') as HTMLInputElement).value = '2000';
+        clickCreate();
+
+        expect(alertMock).toHaveBeenCalledWith('Altitudes must be numbers (in feet)');
+        expect(manager.isDrawing()).toBe(false);
+    });
+
+    it('rejects a half-filled altitude pair instead of silently dropping it', () => {
+        fillModal('TMA2');
+        (document.getElementById('polygon-top-input') as HTMLInputElement).value = '10000';
+        clickCreate();
+
+        expect(alertMock).toHaveBeenCalledWith('Enter both top and bottom altitudes, or leave both empty');
+        expect(manager.isDrawing()).toBe(false);
+    });
+
     it('draws and sends exactly one command on finish', async () => {
         fillModal('AREA1');
         clickCreate();

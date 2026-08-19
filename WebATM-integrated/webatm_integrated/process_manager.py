@@ -32,6 +32,14 @@ def _default_spawn(target: Callable, *args) -> threading.Thread:
     return thread
 
 
+def _signal_group(pgid: int, sig: int) -> None:
+    """Signal a process group, tolerating one that has already exited."""
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        pass
+
+
 class BlueSkyProcessManager:
     """Thread-safe lifecycle manager for the ``bluesky --headless`` process tree.
 
@@ -189,50 +197,63 @@ class BlueSkyProcessManager:
                     "message": "BlueSky server is not running",
                 }
             self._state = "stopping"
-            try:
-                pgid = os.getpgid(proc.pid)
-            except ProcessLookupError:
-                self._state = "stopped"
-                return {
-                    "success": True,
-                    "status": "stopped",
-                    "message": "BlueSky server already exited",
-                }
+
+        try:
+            return self._terminate(proc, sig, escalate_after)
+        except BaseException:
+            # Never leave the state stranded at "stopping": start() waits out a
+            # shutdown in that state, so it would block for 15s and then refuse
+            # to start, with no control surface able to clear it.
+            self._settle(proc)
+            raise
+
+    def _terminate(
+        self, proc: subprocess.Popen, sig: int, escalate_after: float
+    ) -> dict:
+        """Signal ``proc``'s group, escalating to SIGKILL, and settle the state."""
+        try:
+            pgid = os.getpgid(proc.pid)
+        except ProcessLookupError:
+            self._settle(proc)
+            return {
+                "success": True,
+                "status": "stopped",
+                "message": "BlueSky server already exited",
+            }
 
         # Signal the whole group (server + all node children) outside the lock.
-        try:
-            os.killpg(pgid, sig)
-        except ProcessLookupError:
-            pass
-
+        _signal_group(pgid, sig)
         try:
             proc.wait(timeout=escalate_after)
         except subprocess.TimeoutExpired:
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            _signal_group(pgid, signal.SIGKILL)
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 logger.error("BlueSky process group %s survived SIGKILL", pgid)
-                with self._lock:
-                    if self._proc is proc:
-                        self._state = "running"
+                self._settle(proc)
                 return {
                     "success": False,
                     "status": "error",
                     "message": "BlueSky server did not exit after SIGKILL",
                 }
 
-        with self._lock:
-            if self._proc is proc:
-                self._state = "stopped"
+        self._settle(proc)
         return {
             "success": True,
             "status": "stopped",
             "message": "BlueSky server stopped",
         }
+
+    def _settle(self, proc: subprocess.Popen) -> None:
+        """Re-derive the state from whether ``proc`` is actually still alive.
+
+        Skipped if a restart already installed a different process, whose own
+        state must not be clobbered by this one's teardown.
+        """
+        with self._lock:
+            if self._proc is proc:
+                self._state = "running" if proc.poll() is None else "stopped"
 
     def kill(self) -> dict:
         """Force-kill the whole process group immediately (no graceful wait).
@@ -240,8 +261,13 @@ class BlueSkyProcessManager:
         Returns:
             dict: Result with ``success``, ``status`` and ``message``.
         """
+        with self._lock:
+            proc = self._proc
+            was_running = proc is not None and proc.poll() is None
         result = self.stop(sig=signal.SIGKILL, escalate_after=2.0)
-        if result.get("success") and result.get("status") == "stopped":
+        # Only claim a kill if there was actually a live process to kill --
+        # otherwise keep stop()'s "is not running", which the UI shows verbatim.
+        if was_running and result.get("success") and result.get("status") == "stopped":
             result["message"] = "BlueSky server killed"
         return result
 

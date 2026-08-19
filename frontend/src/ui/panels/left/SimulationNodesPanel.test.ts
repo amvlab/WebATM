@@ -202,4 +202,66 @@ describe('SimulationNodesPanel', () => {
             expect(emitted).toEqual([['set_active_node', { node_id: 'b' }]]);
         });
     });
+
+    describe('socket wiring', () => {
+        type Listener = (data: NodeInfo) => void;
+
+        // Fake with socket.io off() semantics: off(event) drops every
+        // listener for the event, off(event, fn) drops only fn.
+        const makeFakeSocket = () => {
+            const listeners = new Map<string, Set<Listener>>();
+            const socket = {
+                connected: true,
+                on: (event: string, handler: Listener) => {
+                    if (!listeners.has(event)) listeners.set(event, new Set());
+                    listeners.get(event)!.add(handler);
+                },
+                off: (event: string, handler?: Listener) => {
+                    if (handler) listeners.get(event)?.delete(handler);
+                    else listeners.delete(event);
+                },
+                emit: vi.fn(),
+            };
+            return { socket, listeners };
+        };
+
+        const asManager = (socket: unknown): SocketManager =>
+            ({ getSocket: () => socket }) as unknown as SocketManager;
+
+        it('destroy() removes only its own node_info listener', () => {
+            const { socket, listeners } = makeFakeSocket();
+            // Stands in for SocketManager's own forward listener, which
+            // shares the socket and must survive the panel's teardown.
+            const outsider = vi.fn();
+            socket.on('node_info', outsider);
+            panel.setSocketManager(asManager(socket));
+            expect(listeners.get('node_info')!.size).toBe(2);
+
+            panel.destroy();
+
+            const remaining = listeners.get('node_info');
+            expect(remaining && [...remaining]).toEqual([outsider]);
+        });
+
+        it('re-setting the socket manager does not double-subscribe', () => {
+            const { socket, listeners } = makeFakeSocket();
+            const manager = asManager(socket);
+
+            panel.setSocketManager(manager);
+            panel.setSocketManager(manager);
+
+            expect(listeners.get('node_info')!.size).toBe(1);
+        });
+
+        it('switching sockets unsubscribes from the old one', () => {
+            const first = makeFakeSocket();
+            const second = makeFakeSocket();
+
+            panel.setSocketManager(asManager(first.socket));
+            panel.setSocketManager(asManager(second.socket));
+
+            expect(first.listeners.get('node_info')?.size ?? 0).toBe(0);
+            expect(second.listeners.get('node_info')!.size).toBe(1);
+        });
+    });
 });

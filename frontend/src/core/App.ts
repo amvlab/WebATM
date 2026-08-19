@@ -488,11 +488,6 @@ export class App {
         return this.aircraftInteractionManager;
     }
 
-    public setActiveNode(nodeId: string): void {
-        this.socketManager.setActiveNode(nodeId);
-        this.stateManager.setActiveNode(nodeId);
-    }
-
     public getState(): AppState {
         return this.stateManager.getState();
     }

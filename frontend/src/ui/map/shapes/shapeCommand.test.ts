@@ -1,5 +1,41 @@
 import { describe, it, expect } from 'vitest';
-import { buildShapeCommand } from './shapeCommand';
+import { buildShapeCommand, parseAltitudeInputs } from './shapeCommand';
+
+describe('parseAltitudeInputs', () => {
+    it('accepts both fields empty (no vertical extent)', () => {
+        expect(parseAltitudeInputs('', '')).toEqual({ ok: true, top: null, bottom: null });
+        expect(parseAltitudeInputs('  ', ' ')).toEqual({ ok: true, top: null, bottom: null });
+    });
+
+    it('accepts a valid top/bottom pair, trimming whitespace', () => {
+        expect(parseAltitudeInputs(' 10000 ', '2000')).toEqual({ ok: true, top: 10000, bottom: 2000 });
+    });
+
+    it('rejects a half-filled pair instead of silently dropping it', () => {
+        expect(parseAltitudeInputs('10000', '')).toEqual({
+            ok: false,
+            error: 'Enter both top and bottom altitudes, or leave both empty'
+        });
+        expect(parseAltitudeInputs('', '2000')).toMatchObject({ ok: false });
+    });
+
+    it('rejects non-numeric values instead of passing NaN through', () => {
+        expect(parseAltitudeInputs('abc', '2000')).toEqual({
+            ok: false,
+            error: 'Altitudes must be numbers (in feet)'
+        });
+        expect(parseAltitudeInputs('10000', '20oo')).toMatchObject({ ok: false });
+        expect(parseAltitudeInputs('Infinity', '2000')).toMatchObject({ ok: false });
+    });
+
+    it('rejects top at or below bottom', () => {
+        expect(parseAltitudeInputs('2000', '10000')).toEqual({
+            ok: false,
+            error: 'Top altitude must be greater than bottom altitude'
+        });
+        expect(parseAltitudeInputs('2000', '2000')).toMatchObject({ ok: false });
+    });
+});
 
 describe('buildShapeCommand', () => {
     const points = [

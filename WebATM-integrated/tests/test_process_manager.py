@@ -18,6 +18,8 @@ import sys
 import threading
 import time
 
+import pytest
+import webatm_integrated.process_manager as pm
 from webatm_integrated.process_manager import BlueSkyProcessManager
 
 
@@ -145,6 +147,57 @@ def test_reader_keeps_draining_when_on_line_raises():
         assert _wait_for(lambda: exit_codes == [0])
     finally:
         manager.kill()
+
+
+def test_a_failing_signal_does_not_strand_the_state_at_stopping(monkeypatch):
+    """If killpg raises anything but ProcessLookupError, stop() must still leave
+    a usable state: a stranded "stopping" makes every later start() wait 15s and
+    then refuse, with no control surface able to clear it."""
+    manager = BlueSkyProcessManager(
+        cmd=[sys.executable, "-c", "import time; time.sleep(60)"]
+    )
+    try:
+        assert manager.start()["success"] is True
+
+        def denied(pgid, sig):
+            raise PermissionError("operation not permitted")
+
+        monkeypatch.setattr(pm.os, "killpg", denied)
+        with pytest.raises(PermissionError):
+            manager.stop()
+
+        # The process really is still up, so that is what status must report --
+        # and a retry must be able to proceed rather than hit the stop-wait.
+        assert manager.status()["status"] == "running"
+        monkeypatch.undo()
+        assert manager.stop()["success"] is True
+        assert manager.status()["running"] is False
+    finally:
+        manager.kill()
+
+
+def test_kill_on_a_stopped_server_does_not_claim_it_killed_something():
+    """The UI renders this message verbatim, so Kill on an already-stopped
+    server must say so rather than report a kill that never happened."""
+    manager = BlueSkyProcessManager(cmd=[sys.executable, "-c", "pass"])
+
+    result = manager.kill()
+
+    assert result["success"] is True
+    assert result["status"] == "stopped"
+    assert result["message"] == "BlueSky server is not running"
+
+
+def test_kill_reports_a_kill_when_a_process_was_actually_running():
+    manager = BlueSkyProcessManager(
+        cmd=[sys.executable, "-c", "import time; time.sleep(60)"]
+    )
+    assert manager.start()["success"] is True
+
+    result = manager.kill()
+
+    assert result["success"] is True
+    assert result["message"] == "BlueSky server killed"
 
 
 def test_restart_propagates_stop_failure_instead_of_claiming_success():

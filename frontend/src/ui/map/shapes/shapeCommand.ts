@@ -14,6 +14,38 @@ export interface ShapePoint {
 /** The shape kinds offered by the draw modal. */
 export type ShapeType = 'area' | 'line' | 'circle' | 'box';
 
+export type AltitudeParseResult =
+    | { ok: true; top: number | null; bottom: number | null }
+    | { ok: false; error: string };
+
+/**
+ * Parse the draw modal's optional top/bottom altitude inputs. Both empty
+ * means no vertical extent; anything else needs two finite numbers with top
+ * above bottom, so a non-numeric value can't leak into the generated command
+ * as NaN and a half-filled pair isn't silently dropped.
+ */
+export function parseAltitudeInputs(topRaw: string, bottomRaw: string): AltitudeParseResult {
+    const top = topRaw.trim();
+    const bottom = bottomRaw.trim();
+
+    if (!top && !bottom) {
+        return { ok: true, top: null, bottom: null };
+    }
+    if (!top || !bottom) {
+        return { ok: false, error: 'Enter both top and bottom altitudes, or leave both empty' };
+    }
+
+    const topNum = Number(top);
+    const bottomNum = Number(bottom);
+    if (!Number.isFinite(topNum) || !Number.isFinite(bottomNum)) {
+        return { ok: false, error: 'Altitudes must be numbers (in feet)' };
+    }
+    if (topNum <= bottomNum) {
+        return { ok: false, error: 'Top altitude must be greater than bottom altitude' };
+    }
+    return { ok: true, top: topNum, bottom: bottomNum };
+}
+
 export interface ShapeCommandSpec {
     name: string;
     type: ShapeType;

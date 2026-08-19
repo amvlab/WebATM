@@ -41,18 +41,14 @@ export class MapStyleManager {
     private currentStyle: string = '';
 
     // How long the first-load reachability probe waits for the remote style
-    // document before declaring it unreachable. Generous enough that a slow
-    // but working connection never trips it (the style document is a few KB),
-    // short enough that an air-gapped first load recovers in seconds instead
-    // of hanging on the browser's connect timeout (which can be minutes).
+    // document (a few KB) before declaring it unreachable — generous for a
+    // slow link, but far shorter than the browser's connect timeout.
     private readonly FIRST_LOAD_PROBE_TIMEOUT_MS = 5000;
 
     constructor(
         private readonly getMap: () => Map | null,
-        // Invoked synchronously right before every map.setStyle() call, from
-        // every trigger (user selection, first-load probe, network-error
-        // fallback) - lets other renderers tear down layers they attached to
-        // the outgoing style's sources before MapLibre's diff runs.
+        // Invoked synchronously right before every map.setStyle() call, so
+        // other renderers can tear down layers on the outgoing style first.
         private readonly onBeforeStyleChange?: () => void
     ) {}
 
@@ -115,19 +111,13 @@ export class MapStyleManager {
      * Make the first-load offline fallback deterministic. Call once right
      * after the map is constructed, when the initial style may be remote.
      *
-     * The 'error'-event fallback in handleMapError only helps when the failed
-     * style fetch actually *rejects*. On an air-gapped network the request to
-     * the basemap CDN often just hangs (dropped packets, DNS blackhole, proxy
-     * sink) — no error event ever fires, the map never gets a style, and the
-     * user stares at a blank basemap until the OS connect timeout (minutes)
-     * finally rejects the fetch. Only then does the fallback fire and persist
-     * the offline style, which is why a later reload "fixed" it.
-     *
-     * So probe the same style document the map is fetching, with our own
-     * timeout. If the probe fails (network error, timeout, or HTTP error)
-     * while the map still has no loaded style, swap to the bundled offline
-     * basemap immediately. If the map's style loads first — or the user picks
-     * a different style meanwhile — the probe result is ignored.
+     * The 'error'-event fallback in handleMapError only fires if the style
+     * fetch rejects; on an air-gapped network it often just hangs for
+     * minutes, leaving a blank basemap. So probe the same style document
+     * with our own timeout, and if the probe fails while the map still has
+     * no loaded style, swap to the bundled offline basemap immediately. If
+     * the style loads first — or the user picks another style meanwhile —
+     * the probe result is ignored.
      */
     public armFirstLoadFallback(): void {
         const map = this.getMap();
@@ -212,25 +202,14 @@ export class MapStyleManager {
 
     /**
      * Decide whether a MapLibre error warrants swapping to the offline style.
+     * Only once, and only when the current style is a remote URL — a local
+     * style failing usually means a config mistake, not missing internet.
      *
-     * MapLibre surfaces a few shapes for network failures: AJAXError objects
-     * with a `status` field (0 when the browser couldn't reach the host at
-     * all), and generic `TypeError: Failed to fetch` for cross-origin / DNS
-     * problems. We only fall back once, and only if the current style is a
-     * remote URL — local styles failing usually mean a config mistake, not
-     * missing internet.
-     *
-     * Crucially we do NOT fall back on individual *tile* fetch failures (errors
-     * that carry a `tile`). Those are common and transient — a single dropped
-     * or CORS-blocked vector tile while panning should not swap the entire
-     * basemap to offline. Swapping the style mid-session reloads every layer:
-     * the basemap visibly flickers, and (with the 3D overlay on) rebuilding the
-     * Three.js custom layer disrupts the viewport and snaps the camera back to
-     * the default view. The map degrades gracefully on a missing tile (the
-     * tile is simply blank until it succeeds), so a tile error is never reason
-     * enough to nuke the user's chosen basemap. A genuinely-offline boot still
-     * triggers the fallback because the *style document* fetch fails, and that
-     * error carries no `tile`.
+     * Individual *tile* failures (errors carrying `tile`) never trigger the
+     * fallback: they are common and transient, and swapping the whole basemap
+     * mid-session reloads every layer and disrupts the 3D overlay's camera. A
+     * genuinely-offline boot still falls back, because there the *style
+     * document* fetch fails and that error carries no `tile`.
      */
     private shouldFallBackToOffline(e: MapErrorEvent): boolean {
         if (this.hasFallenBackToOffline) return false;
@@ -289,35 +268,18 @@ export class MapStyleManager {
             deleteSavedStyleBtn.style.display = isSaved ? 'block' : 'none';
         };
 
-        // Handle style select change - only toggle custom input visibility
-        styleSelect.addEventListener('change', (e) => {
-            const target = e.target as HTMLSelectElement;
-
-            if (target.value === 'custom') {
-                // Show custom style input
-                if (customStyleControl) {
-                    customStyleControl.style.display = 'block';
-                }
-                // Hide apply button for predefined styles
-                if (applyMapStyleBtn) {
-                    applyMapStyleBtn.style.display = 'none';
-                }
-            } else if (target.value === '') {
-                // User selected "Select a map style..." placeholder
-                if (customStyleControl) {
-                    customStyleControl.style.display = 'none';
-                }
-            } else {
-                // User selected a predefined style - just hide custom input
-                if (customStyleControl) {
-                    customStyleControl.style.display = 'none';
-                }
-                // Show apply button for predefined styles
-                if (applyMapStyleBtn) {
-                    applyMapStyleBtn.style.display = 'block';
-                }
+        // Match the controls to the selection: "custom" shows the custom-URL
+        // input, the placeholder shows neither, and any concrete style shows
+        // the Apply button.
+        styleSelect.addEventListener('change', () => {
+            const value = styleSelect.value;
+            if (customStyleControl) {
+                customStyleControl.style.display = value === 'custom' ? 'block' : 'none';
             }
-
+            if (applyMapStyleBtn) {
+                applyMapStyleBtn.style.display =
+                    value === 'custom' || value === '' ? 'none' : 'block';
+            }
             updateDeleteButton();
         });
 
@@ -385,7 +347,7 @@ export class MapStyleManager {
                 this.renderSavedStyles(styleSelect);
 
                 // Select and apply the newly-saved style; clear the name field.
-                styleSelect.value = url;
+                this.selectSavedStyle(styleSelect, url);
                 if (customStyleNameInput) customStyleNameInput.value = '';
                 this.changeStyle(url);
                 styleSelect.dispatchEvent(new Event('change'));
@@ -437,6 +399,24 @@ export class MapStyleManager {
         }
 
         logger.debug('MapStyleManager', 'Map style selector initialized');
+    }
+
+    /**
+     * Select the just-saved option inside the "Saved Styles" optgroup. A plain
+     * `select.value = url` would land on the first option with that value —
+     * which, when the URL duplicates a predefined option's, is the predefined
+     * one, leaving the saved entry unselectable and hiding its Delete button.
+     */
+    private selectSavedStyle(select: HTMLSelectElement, url: string): void {
+        const group = select.querySelector<HTMLOptGroupElement>(`#${this.SAVED_GROUP_ID}`);
+        const option = group
+            ? Array.from(group.querySelectorAll('option')).find(o => o.value === url)
+            : undefined;
+        if (option) {
+            option.selected = true;
+        } else {
+            select.value = url;
+        }
     }
 
     /**

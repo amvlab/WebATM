@@ -66,15 +66,32 @@ class LogStreamer:
                     raise
 
     def _flush_after_delay(self) -> None:
-        # Cooperative sleep via SocketIO so it matches the active async mode.
-        self._sio.sleep(self._batch_ms / 1000.0)
-        with self._lock:
-            batch = self._pending
-            self._pending = []
-            self._flush_scheduled = False
-        for start in range(0, len(batch), self._batch_max):
-            chunk = batch[start : start + self._batch_max]
-            self._sio.emit(EVENT, {"lines": chunk})
+        # Drain until empty rather than flushing once, so only one flush task is
+        # ever live: clearing the flag before emitting would let a second task
+        # emit concurrently, interleaving newer lines among the older chunks.
+        try:
+            while True:
+                # Cooperative sleep via SocketIO to match the active async mode.
+                self._sio.sleep(self._batch_ms / 1000.0)
+                with self._lock:
+                    batch = self._pending
+                    self._pending = []
+                    if not batch:
+                        # Cleared under the lock feed_line appends under, so a
+                        # line arriving now always gets a flush task scheduled
+                        # for it -- it can never be stranded unflushed.
+                        self._flush_scheduled = False
+                        return
+                for start in range(0, len(batch), self._batch_max):
+                    chunk = batch[start : start + self._batch_max]
+                    self._sio.emit(EVENT, {"lines": chunk})
+        except BaseException:
+            # A raising emit/sleep must not leave the flag stuck True: feed_line
+            # only schedules while it is False, so the stream would go silent
+            # for good. Clearing it lets the next line start a fresh flush.
+            with self._lock:
+                self._flush_scheduled = False
+            raise
 
     def history(self) -> list[dict]:
         """Return a snapshot of buffered lines for late-joining clients.

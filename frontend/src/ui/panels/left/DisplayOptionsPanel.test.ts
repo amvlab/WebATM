@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DisplayOptionsPanel } from './DisplayOptionsPanel';
 import { StateManager } from '../../../core/StateManager';
 import { storage } from '../../../utils/StorageManager';
+import { DisplayOptions } from '../../../data/types';
+import type { App } from '../../../core/App';
 
 // loadAvailableAircraftModels fetches the model catalog during setup;
 // let it fail fast and resolve to [].
@@ -38,9 +40,25 @@ function buildDom(): void {
                 <label id="show-route-points-container">
                     <input type="checkbox" id="show-route-points" checked>
                 </label>
+                <button id="threeD-toggle" class="section-toggle">3D</button>
+                <div class="collapsible-section" id="threeD-controls">
+                    <div id="aircraft-3d-scale-container" style="display: none;">
+                        <input type="text" id="aircraft-3d-scale" value="2.0">
+                    </div>
+                    <div id="aircraft-model-container" style="display: none;">
+                        <select id="aircraft-model-select"></select>
+                    </div>
+                </div>
             </div>
         </div>
     `;
+}
+
+/** Minimal App stand-in exposing a MapOverlay with the given toggle result. */
+function fakeApp(updateDisplayOptions: (options: Partial<DisplayOptions>) => Promise<void>): App {
+    return {
+        getMapOverlay: () => ({ updateDisplayOptions }),
+    } as unknown as App;
 }
 
 function createPanel(): { panel: DisplayOptionsPanel; stateManager: StateManager } {
@@ -214,6 +232,80 @@ describe('DisplayOptionsPanel', () => {
         it('returns null for a non-boolean display option', () => {
             const { panel } = createPanel();
             expect(panel.setBooleanOption('aircraftIconColor')).toBe(null);
+        });
+    });
+
+    describe('3D overlay toggle', () => {
+        function containerVisible(id: string): boolean {
+            return (document.getElementById(id) as HTMLElement).style.display !== 'none';
+        }
+
+        function toggleOverlay(checked: boolean): void {
+            const box = checkbox('show-3d-overlay');
+            box.checked = checked;
+            box.dispatchEvent(new Event('change'));
+        }
+
+        it('enabling the overlay reveals the 3D scale and model controls', async () => {
+            const { stateManager } = createPanel();
+            // Regression: nothing drove these containers' visibility (a CSS
+            // !important rule kept them shown even with the overlay off), so
+            // the controls ignored the overlay state entirely.
+            expect(containerVisible('aircraft-3d-scale-container')).toBe(false);
+            expect(containerVisible('aircraft-model-container')).toBe(false);
+
+            toggleOverlay(true);
+
+            await vi.waitFor(() => expect(containerVisible('aircraft-3d-scale-container')).toBe(true));
+            expect(containerVisible('aircraft-model-container')).toBe(true);
+            expect(storage.get<boolean>('show-3d-overlay')).toBe(true);
+            expect(stateManager.getDisplayOptions().show3DOverlay).toBe(true);
+        });
+
+        it('disabling the overlay hides the 3D controls again', async () => {
+            createPanel();
+            toggleOverlay(true);
+            await vi.waitFor(() => expect(containerVisible('aircraft-3d-scale-container')).toBe(true));
+
+            toggleOverlay(false);
+
+            await vi.waitFor(() => expect(containerVisible('aircraft-3d-scale-container')).toBe(false));
+            expect(containerVisible('aircraft-model-container')).toBe(false);
+        });
+
+        it('a stored overlay=true reveals the 3D controls on load', () => {
+            storage.set('show-3d-overlay', true);
+
+            const { stateManager } = createPanel();
+
+            expect(stateManager.getDisplayOptions().show3DOverlay).toBe(true);
+            expect(containerVisible('aircraft-3d-scale-container')).toBe(true);
+            expect(containerVisible('aircraft-model-container')).toBe(true);
+        });
+
+        it('passes the new overlay value to the MapOverlay', async () => {
+            const update = vi.fn().mockResolvedValue(undefined);
+            const { panel } = createPanel();
+            panel.setApp(fakeApp(update));
+
+            toggleOverlay(true);
+
+            await vi.waitFor(() => expect(update).toHaveBeenCalledWith({ show3DOverlay: true }));
+        });
+
+        it('a failed overlay toggle rolls back checkbox, storage, state and controls', async () => {
+            const { panel, stateManager } = createPanel();
+            panel.setApp(fakeApp(() => Promise.reject(new Error('WebGL unavailable'))));
+
+            toggleOverlay(true);
+
+            await vi.waitFor(() => expect(checkbox('show-3d-overlay').checked).toBe(false));
+            // Regression: storage used to keep true here, resurrecting the
+            // failed overlay on the next page load.
+            expect(storage.get<boolean>('show-3d-overlay')).toBe(false);
+            expect(stateManager.getDisplayOptions().show3DOverlay).toBe(false);
+            expect(containerVisible('aircraft-3d-scale-container')).toBe(false);
+            expect(containerVisible('aircraft-model-container')).toBe(false);
         });
     });
 });

@@ -957,20 +957,6 @@ html.wa-open-threeD-controls #threeD-controls {
     min-width: 80px;
 }
 
-/* Aircraft model dropdown - ensure proper right alignment */
-#aircraft-model-container {
-    display: flex !important;
-    justify-content: space-between !important;
-    align-items: center !important;
-}
-
-/* Aircraft 3D scale input - ensure proper right alignment */
-#aircraft-3d-scale-container {
-    display: flex !important;
-    justify-content: space-between !important;
-    align-items: center !important;
-}
-
 /* Aircraft appearance controls group */
 .aircraft-appearance-controls {
     margin-top: 8px;
