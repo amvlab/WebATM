@@ -359,12 +359,18 @@ export class SettingsModal {
 
                 // Direct match, or a MapTiler style where the saved value has
                 // ?key=ABC123 and the option value ends with a bare ?key=
-                if (
-                    option.value === savedStyle ||
-                    (option.value.endsWith('?key=') && savedStyle.startsWith(option.value))
-                ) {
+                const isKeyedMatch =
+                    option.value.endsWith('?key=') && savedStyle.startsWith(option.value);
+                if (option.value === savedStyle || isKeyedMatch) {
                     this.elements.mapStyleSelect.selectedIndex = i;
                     matchFound = true;
+
+                    // Restore the key embedded in the saved URL so Apply works
+                    // without re-entering it; keep any key the user has typed.
+                    const keyInput = this.elements.mapTilerApiKeyInput;
+                    if (isKeyedMatch && keyInput && !keyInput.value.trim()) {
+                        keyInput.value = savedStyle.slice(option.value.length);
+                    }
                     break;
                 }
             }

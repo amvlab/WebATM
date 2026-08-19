@@ -62,7 +62,12 @@ function buildSettingsDom(): void {
             <button id="disconnect-server">Disconnect</button>
             <button id="cancel-server-settings">Cancel</button>
             <button id="check-server-status">Check Status</button>
-            <select id="map-style-select-modal"><option value="default">Default</option></select>
+            <select id="map-style-select-modal">
+                <option value="">Select a map style...</option>
+                <option value="https://tiles.example/positron" selected>Positron</option>
+                <option value="https://api.maptiler.com/maps/streets/style.json?key=">MapTiler Streets</option>
+                <option value="custom">Custom Style JSON...</option>
+            </select>
             <input type="text" id="maptiler-api-key-input">
             <select id="log-level-select"><option value="1">Info</option></select>
             <input type="checkbox" id="log-timestamps">
@@ -205,6 +210,34 @@ describe('SettingsModal connect flow', () => {
         expect(connect.textContent).toBe('Connect');
         // Regression: the finally block used to re-enable unconditionally
         expect(connect.disabled).toBe(true);
+    });
+
+    it('restores the API key of a persisted MapTiler style on open', async () => {
+        const maptilerUrl = 'https://api.maptiler.com/maps/streets/style.json?key=ABC123';
+        // StorageManager namespaces with 'webatm-' and JSON-encodes values.
+        localStorage.setItem('webatm-webatm-map-style', JSON.stringify(maptilerUrl));
+
+        beforeOpenCallback?.('beforeOpen', 'settings-modal');
+        await flushAsync();
+
+        const select = document.getElementById('map-style-select-modal') as HTMLSelectElement;
+        const keyInput = document.getElementById('maptiler-api-key-input') as HTMLInputElement;
+        expect(select.value).toBe('https://api.maptiler.com/maps/streets/style.json?key=');
+        expect(keyInput.value).toBe('ABC123');
+    });
+
+    it('does not clobber a key the user already typed', async () => {
+        localStorage.setItem(
+            'webatm-webatm-map-style',
+            JSON.stringify('https://api.maptiler.com/maps/streets/style.json?key=OLD')
+        );
+        const keyInput = document.getElementById('maptiler-api-key-input') as HTMLInputElement;
+        keyInput.value = 'TYPED';
+
+        beforeOpenCallback?.('beforeOpen', 'settings-modal');
+        await flushAsync();
+
+        expect(keyInput.value).toBe('TYPED');
     });
 
     it('a failed connect re-enables Connect when the server is still up', async () => {
