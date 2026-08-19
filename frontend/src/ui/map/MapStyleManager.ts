@@ -9,11 +9,12 @@ import {
 } from './customStyles';
 
 /**
- * Shape of the MapLibre 'error' events this manager inspects. MapLibre's
- * AJAXError adds `status` to the error; source errors add `sourceId`/`tile`.
+ * Shape of the MapLibre 'error' events this manager inspects. MapLibre types
+ * the payload's `error` as an ErrorLike (`{ message }`), not a full Error;
+ * AJAXError adds `status` to it, and source errors add `sourceId`/`tile`.
  */
 interface MapErrorEvent {
-    error?: Error & { status?: number };
+    error?: { message?: string; status?: number };
     sourceId?: string;
     tile?: unknown;
     type?: string;
