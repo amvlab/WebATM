@@ -13,7 +13,7 @@ import {
     setLayerVisibility,
     updateSourceFeatures
 } from '../../../utils/maplibre';
-import { buildShapeCommand, ShapeType } from './shapeCommand';
+import { buildShapeCommand, parseAltitudeInputs, ShapeType } from './shapeCommand';
 import { boxCornerPoints, circleRingPoints, distanceNm } from './shapeGeometry';
 
 /** Modal title per shape type. */
@@ -151,32 +151,33 @@ export class ShapeDrawingManager extends BaseDrawingManager {
             return;
         }
 
-        this.currentShapeName = name;
-        this.currentShapeType = shapeType;
-
         // Altitudes apply to everything but lines; on an area both filled
         // makes a POLYALT, on a box/circle they become the trailing
         // [top,bottom] arguments.
+        let topAltitude: number | null = null;
+        let bottomAltitude: number | null = null;
         if (shapeType !== 'line') {
-            const topValue = topInput?.value;
-            const bottomValue = bottomInput?.value;
-
-            if (topValue && bottomValue) {
-                this.topAltitude = parseFloat(topValue);
-                this.bottomAltitude = parseFloat(bottomValue);
-
-                if (this.topAltitude <= this.bottomAltitude) {
-                    alert('Top altitude must be greater than bottom altitude');
-                    return;
-                }
-            } else {
-                this.topAltitude = null;
-                this.bottomAltitude = null;
+            // A number input showing unparseable text (e.g. "1e999") reads
+            // back as value '' - catch that as bad input, not as "empty".
+            if (topInput?.validity?.badInput || bottomInput?.validity?.badInput) {
+                alert('Altitudes must be numbers (in feet)');
+                topInput?.focus();
+                return;
             }
-        } else {
-            this.topAltitude = null;
-            this.bottomAltitude = null;
+            const parsed = parseAltitudeInputs(topInput?.value ?? '', bottomInput?.value ?? '');
+            if (!parsed.ok) {
+                alert(parsed.error);
+                topInput?.focus();
+                return;
+            }
+            topAltitude = parsed.top;
+            bottomAltitude = parsed.bottom;
         }
+
+        this.currentShapeName = name;
+        this.currentShapeType = shapeType;
+        this.topAltitude = topAltitude;
+        this.bottomAltitude = bottomAltitude;
 
         modalManager.close('polygon-name-modal');
         this.startDrawing();
@@ -219,24 +220,15 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         logger.info('ShapeDrawingManager', 'Stopped drawing');
     }
 
-    /**
-     * Set up temporary drawing layers when drawing starts.
-     */
     protected onDrawingEnabled(): void {
         this.setupTemporaryDrawingLayers();
     }
 
-    /**
-     * Clear and remove temporary drawing layers when drawing stops.
-     */
     protected onDrawingDisabled(): void {
         this.clearTemporaryDrawing();
         this.removeTemporaryDrawingLayers();
     }
 
-    /**
-     * Handle a placed point - update banner and preview.
-     */
     protected onPointAdded(point: DrawingPoint): void {
         this.drawingPoints.push(point);
 
@@ -258,9 +250,6 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         return this.currentShapeType === 'box' || this.currentShapeType === 'circle';
     }
 
-    /**
-     * Handle mouse move - update cursor preview
-     */
     protected onCursorMove(point: DrawingPoint): void {
         if (this.drawingPoints.length === 0) return;
         this.updateCursorPreview(point);
@@ -334,9 +323,6 @@ export class ShapeDrawingManager extends BaseDrawingManager {
         this.stopDrawing();
     }
 
-    /**
-     * Generate the BlueSky command string for the current shape.
-     */
     private generateCommand(): string {
         return buildShapeCommand({
             name: this.currentShapeName ?? '',
