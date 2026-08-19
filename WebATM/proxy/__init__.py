@@ -8,11 +8,19 @@ with the BlueSky network client. It includes:
 - Subscriber registration for network events
 """
 
+import threading
+
 from .core import BlueSkyProxy
 from .subscribers import register_subscribers
 
 # Global BlueSky proxy instance to be set by the app
 _bluesky_proxy = None
+
+# Serializes replacing and connecting the global proxy. Held by the manual
+# /api/server/config route and by the integrated auto-start's connect step, so
+# one of them can never revive a proxy the other has just replaced/closed
+# (which would leave a second, subscriber-less ZMQ client alive).
+connect_lock = threading.Lock()
 
 
 def get_bluesky_proxy():
@@ -41,4 +49,5 @@ __all__ = [
     "register_subscribers",
     "get_bluesky_proxy",
     "set_bluesky_proxy",
+    "connect_lock",
 ]
