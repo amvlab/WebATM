@@ -55,6 +55,25 @@ class TestRegisterSubscribers:
         finally:
             set_bluesky_proxy(None)
 
+    def test_explicit_proxy_overrides_global(self):
+        # Callers that just connected a specific proxy (the /api/server/config
+        # route, the integrated auto-start) pass it explicitly; subscribers must
+        # land on that proxy's client even when the global points elsewhere.
+        explicit = BlueSkyProxy()
+        explicit.bluesky_client = BlueSkyClient()
+        other = BlueSkyProxy()
+        other.bluesky_client = BlueSkyClient()
+        set_bluesky_proxy(other)
+        try:
+            register_subscribers(explicit)
+            explicit_subs = explicit.bluesky_client.subscriber.subscribers
+            other_subs = other.bluesky_client.subscriber.subscribers
+            for topic, _, _ in SUBSCRIPTIONS:
+                assert topic in explicit_subs
+                assert topic not in other_subs
+        finally:
+            set_bluesky_proxy(None)
+
     def test_no_proxy_is_safe(self):
         set_bluesky_proxy(None)
         # Should log an error and return without raising.

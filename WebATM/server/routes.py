@@ -264,30 +264,41 @@ def register_basic_routes(app, session_manager):
             server_ip = data.get("server_ip", "localhost").strip() or "localhost"
             logger.info(f"User requested connection to BlueSky server at {server_ip}")
 
-            from ..proxy import BlueSkyProxy, register_subscribers, set_bluesky_proxy
+            from ..proxy import (
+                BlueSkyProxy,
+                connect_lock,
+                register_subscribers,
+                set_bluesky_proxy,
+            )
 
             # Every (re)connect gets a completely fresh proxy: recreating the
             # ZMQ client is the reliable way to shed any half-dead connection
             # state. Only the Socket.IO wiring carries over. The old proxy is
             # replaced in place (never deleted) so concurrent requests always
-            # find a usable current_app.bluesky_proxy.
-            old_proxy = getattr(current_app, "bluesky_proxy", None)
-            if old_proxy is not None:
-                if old_proxy.running:
-                    old_proxy.stop_client()
-                    time.sleep(0.3)  # let ZMQ teardown settle before reconnecting
-                old_proxy.close()
+            # find a usable current_app.bluesky_proxy. The swap-and-connect
+            # runs under connect_lock so the integrated auto-start (or another
+            # concurrent connect request) can never revive the proxy this
+            # request is tearing down.
+            with connect_lock:
+                old_proxy = getattr(current_app, "bluesky_proxy", None)
+                if old_proxy is not None:
+                    if old_proxy.running:
+                        old_proxy.stop_client()
+                        time.sleep(0.3)  # let ZMQ teardown settle before reconnecting
+                    old_proxy.close()
 
-            proxy = BlueSkyProxy()
-            proxy.socketio = old_proxy.socketio if old_proxy else None
-            proxy.connected_clients = old_proxy.connected_clients if old_proxy else 0
-            current_app.bluesky_proxy = proxy
-            set_bluesky_proxy(proxy)  # update the global the subscribers use
+                proxy = BlueSkyProxy()
+                proxy.socketio = old_proxy.socketio if old_proxy else None
+                proxy.connected_clients = (
+                    old_proxy.connected_clients if old_proxy else 0
+                )
+                current_app.bluesky_proxy = proxy
+                set_bluesky_proxy(proxy)  # update the global the subscribers use
 
-            proxy.server_ip = server_ip
-            proxy.start_client(hostname=server_ip)
-            # Subscribers attach to the client start_client just created.
-            register_subscribers()
+                proxy.server_ip = server_ip
+                proxy.start_client(hostname=server_ip)
+                # Subscribers attach to the client start_client just created.
+                register_subscribers(proxy)
 
             # Confirm the server is real: wait for node detection.
             timeout = 10.0

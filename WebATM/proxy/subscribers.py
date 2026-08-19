@@ -47,22 +47,31 @@ SUBSCRIPTIONS = [
 ]
 
 
-def register_subscribers():
+def register_subscribers(proxy=None):
     """Register all handler callbacks with the proxy's BlueSky client.
 
     Iterates over ``SUBSCRIPTIONS`` and subscribes each (topic, callback,
-    actonly) triple on the global proxy's network client. Topics flagged
-    ``actonly`` only deliver data for the active node and are re-subscribed
-    when the active node changes.
+    actonly) triple on the proxy's network client. Topics flagged ``actonly``
+    only deliver data for the active node and are re-subscribed when the
+    active node changes.
 
-    Logs an error and returns early if no global proxy is set, or a warning
+    Logs an error and returns early if no proxy is available, or a warning
     if the proxy has no connected BlueSky client yet.
-    """
-    # Imported lazily: WebATM.proxy imports this module while it is still being
-    # initialised, so get_bluesky_proxy does not exist at module-load time yet.
-    from . import get_bluesky_proxy
 
-    proxy = get_bluesky_proxy()
+    Args:
+        proxy (BlueSkyProxy | None): Proxy whose client to attach to. Defaults
+            to the globally registered proxy. Callers that just connected a
+            specific proxy instance should pass it explicitly, so a concurrent
+            reconnect swapping the global can never leave the client they
+            started without subscribers.
+    """
+    if proxy is None:
+        # Imported lazily: WebATM.proxy imports this module while it is still
+        # being initialised, so get_bluesky_proxy does not exist at module-load
+        # time yet.
+        from . import get_bluesky_proxy
+
+        proxy = get_bluesky_proxy()
     if not proxy:
         logger.error("No proxy available for subscriber registration")
         return

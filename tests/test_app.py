@@ -150,9 +150,7 @@ class TestServerConfigConnect:
         created: list = []
         registered: list = []
         monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", _fake_proxy_class(created))
-        monkeypatch.setattr(
-            proxy_pkg, "register_subscribers", lambda: registered.append(True)
-        )
+        monkeypatch.setattr(proxy_pkg, "register_subscribers", registered.append)
         old_proxy = app.bluesky_proxy
         old_proxy.connected_clients = 3
 
@@ -172,7 +170,8 @@ class TestServerConfigConnect:
         assert new_proxy.server_ip == "10.0.0.5"
         assert new_proxy.socketio is old_proxy.socketio
         assert new_proxy.connected_clients == 3
-        assert registered == [True]
+        # Subscribers are registered on the freshly connected proxy explicitly.
+        assert registered == [new_proxy]
 
     def test_post_config_connect_failure_returns_500(self, app_and_client, monkeypatch):
         import WebATM.proxy as proxy_pkg
@@ -186,7 +185,7 @@ class TestServerConfigConnect:
         monkeypatch.setattr(
             proxy_pkg, "BlueSkyProxy", _fake_proxy_class(created, start_client=boom)
         )
-        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda: None)
+        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda proxy: None)
 
         resp = client.post("/api/server/config", json={"server_ip": "10.0.0.5"})
 
