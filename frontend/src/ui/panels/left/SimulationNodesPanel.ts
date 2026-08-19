@@ -32,6 +32,7 @@ export class SimulationNodesPanel extends BasePanel {
     private socketManager: SocketManager | null = null;
     private nodeData: NodeInfo | null = null;
     private nodeItems: Map<string, NodeItemRefs> = new Map();
+    private readonly nodeInfoHandler = (data: NodeInfo): void => this.handleNodeInfo(data);
 
     // DOM elements
     private totalNodesSpan: HTMLElement | null = null;
@@ -85,7 +86,7 @@ export class SimulationNodesPanel extends BasePanel {
         // Add node button
         if (this.addNodeButton) {
             this.addEventListener(this.addNodeButton, 'click', () => {
-                this.showAddNodeModal();
+                this.requestAddNode();
             });
         }
     }
@@ -94,15 +95,10 @@ export class SimulationNodesPanel extends BasePanel {
      * Set the socket manager for communication with backend
      */
     public setSocketManager(socketManager: SocketManager): void {
+        // Re-wiring must not leave a previous socket still calling our handler
+        this.socketManager?.getSocket()?.off('node_info', this.nodeInfoHandler);
         this.socketManager = socketManager;
-
-        // Subscribe to node_info events
-        const socket = socketManager.getSocket();
-        if (socket) {
-            socket.on('node_info', (data: NodeInfo) => {
-                this.handleNodeInfo(data);
-            });
-        }
+        socketManager.getSocket()?.on('node_info', this.nodeInfoHandler);
     }
 
     /**
@@ -335,9 +331,8 @@ export class SimulationNodesPanel extends BasePanel {
             return;
         }
 
-        // Get friendly node name for logging
         const nodeData = this.nodeData?.nodes[nodeId];
-        const friendlyName = nodeData ? `Node ${nodeData.node_num || 1}` : nodeId;
+        const friendlyName = nodeData ? this.getNodeAlias(nodeData) : nodeId;
 
         logger.info('SimulationNodesPanel', 'Switching to node:', friendlyName);
 
@@ -370,9 +365,9 @@ export class SimulationNodesPanel extends BasePanel {
     }
 
     /**
-     * Add a new node to the simulation
+     * Request a new simulation node from the backend
      */
-    private showAddNodeModal(): void {
+    private requestAddNode(): void {
         if (!this.socketManager) {
             logger.warn('SimulationNodesPanel', 'Cannot add node: SocketManager not set');
             return;
@@ -416,7 +411,7 @@ export class SimulationNodesPanel extends BasePanel {
         }
 
         const nodeData = this.nodeData?.nodes[nodeId];
-        const friendlyName = nodeData ? `Node ${nodeData.node_num || 1}` : nodeId;
+        const friendlyName = nodeData ? this.getNodeAlias(nodeData) : nodeId;
 
         if (!confirm(`Kill ${friendlyName}? Its running simulation will be lost.`)) {
             return;
@@ -445,30 +440,12 @@ export class SimulationNodesPanel extends BasePanel {
     }
 
     /**
-     * Get current node data
-     */
-    public getNodeData(): NodeInfo | null {
-        return this.nodeData;
-    }
-
-    /**
-     * Get active node ID
-     */
-    public getActiveNode(): string | null {
-        return this.nodeData?.active_node || null;
-    }
-
-    /**
      * Cleanup
      */
     protected override onDestroy(): void {
-        // Unsubscribe from socket events
-        if (this.socketManager) {
-            const socket = this.socketManager.getSocket();
-            if (socket) {
-                socket.off('node_info');
-            }
-        }
+        // Remove only this panel's listener; a bare off('node_info') would
+        // also detach SocketManager's forward listener for the same event
+        this.socketManager?.getSocket()?.off('node_info', this.nodeInfoHandler);
 
         this.nodeData = null;
         this.socketManager = null;

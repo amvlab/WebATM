@@ -351,22 +351,6 @@ export class SocketManager {
         return false;
     }
 
-    setActiveNode(nodeId: string): void {
-        if (this.isConnected() && this.socket) {
-            this.socket.emit('set_active_node', { node_id: nodeId });
-        } else {
-            logger.warn('SocketManager', 'Cannot set active node: not connected to WebATM');
-        }
-    }
-
-    requestNodes(): void {
-        if (this.isConnected() && this.socket) {
-            this.socket.emit('get_nodes');
-        } else {
-            logger.warn('SocketManager', 'Cannot request nodes: not connected to WebATM');
-        }
-    }
-
     destroy(): void {
         if (this.socket) {
             this.socket.removeAllListeners();
