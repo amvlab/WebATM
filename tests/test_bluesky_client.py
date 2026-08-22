@@ -383,6 +383,61 @@ class TestDataMessageDispatch:
         assert received == [(b"U", payload)]
         assert client.context.sender_id == b"NODE\x81"
 
+    def test_echo_list_payload_gets_sender_from_header(self):
+        # BlueSky sends ECHO as [text, flags]; the header sender must be
+        # appended so the handler knows which node answered.
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe(
+            "ECHO",
+            lambda text, flags, sender_id: received.append((text, flags, sender_id)),
+        )
+
+        client._process_data_message(self._frame("ECHO", ["Roger", 4]))
+
+        assert received == [("Roger", 4, b"NODE\x81")]
+
+    def test_echo_dict_payload_prefers_its_own_sender(self):
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe(
+            "ECHO",
+            lambda text, flags, sender_id: received.append((text, flags, sender_id)),
+        )
+
+        client._process_data_message(
+            self._frame("ECHO", {"text": "hi", "flags": 1, "sender_id": "n2"})
+        )
+
+        assert received == [("hi", 1, "n2")]
+
+    def test_echo_bare_string_payload_gets_defaults(self):
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe(
+            "ECHO",
+            lambda text, flags, sender_id: received.append((text, flags, sender_id)),
+        )
+
+        client._process_data_message(self._frame("ECHO", "plain"))
+
+        assert received == [("plain", 0, b"NODE\x81")]
+
+    def test_echo_oversized_payload_still_delivers(self):
+        # A payload with more than three items used to be splatted straight
+        # into the handler, raising TypeError inside the subscriber and
+        # silently dropping the echo. Extra items are now ignored.
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe(
+            "ECHO",
+            lambda text, flags, sender_id: received.append((text, flags, sender_id)),
+        )
+
+        client._process_data_message(self._frame("ECHO", ["msg", 2, "n3", "extra"]))
+
+        assert received == [("msg", 2, "n3")]
+
     def test_poly_collected_multi_action_dispatches_each_pair(self):
         # The POLY publisher collects actions between send ticks, so one
         # message can carry several (action, payload) pairs — e.g. an update
@@ -399,3 +454,43 @@ class TestDataMessageDispatch:
         client._process_data_message(self._frame("POLY", [b"U", update, b"D", delete]))
 
         assert received == [(b"U", update), (b"D", delete)]
+
+
+class TestNodeDiscovery:
+    """_process_subscription_message turns raw (un)subscribe frames into node
+    discovery, which triggers exactly one REQUEST for the shared states."""
+
+    @staticmethod
+    def _subscribe_frame(sender):
+        from WebATM.bluesky_client import MSG_SUBSCRIBE
+
+        return [bytes([MSG_SUBSCRIBE]) + sender]
+
+    def test_new_node_requests_shared_state_once(self, monkeypatch):
+        # Each REQUEST broadcast makes every node re-send its POLY shapes and
+        # the full STACKCMDS command dictionary, so a duplicate send doubles
+        # that traffic for no benefit.
+        client = BlueSkyClient()
+        sent = []
+        monkeypatch.setattr(
+            client,
+            "send",
+            lambda topic, data="", to_group="": sent.append((topic, data, to_group)),
+        )
+        node = b"S\x01\x02\x03\x81"
+
+        client._process_subscription_message(self._subscribe_frame(node))
+
+        assert node in client.nodes
+        assert sent == [("REQUEST", ["POLY", "STACKCMDS"], "")]
+
+    def test_rediscovered_node_is_not_reannounced(self, monkeypatch):
+        client = BlueSkyClient()
+        sent = []
+        monkeypatch.setattr(client, "send", lambda *a, **k: sent.append(a))
+        node = b"S\x01\x02\x03\x81"
+
+        client._process_subscription_message(self._subscribe_frame(node))
+        client._process_subscription_message(self._subscribe_frame(node))
+
+        assert len(sent) == 1
