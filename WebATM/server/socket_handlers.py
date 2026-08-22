@@ -15,6 +15,27 @@ from ..logger import get_logger
 logger = get_logger()
 
 
+def _tracked_binary_node_id(proxy, node_id):
+    """Map a frontend hex node ID to the tracked node's binary ID.
+
+    Args:
+        proxy (BlueSkyProxy): The current BlueSky proxy.
+        node_id (str): Hex-string node ID as sent by the frontend.
+
+    Returns:
+        bytes | None: The original binary node ID, or None when the node is
+            not tracked.
+    """
+    node_data = proxy.tracked_nodes.get(node_id)
+    if node_data is None:
+        logger.debug(
+            f"Could not find node ID for: {node_id} "
+            f"(available: {list(proxy.tracked_nodes.keys())})"
+        )
+        return None
+    return node_data.get("node_id")
+
+
 def register_socket_handlers(socketio, session_manager):
     """Register all Socket.IO event handlers.
 
@@ -29,8 +50,8 @@ def register_socket_handlers(socketio, session_manager):
         """Handle a new web client connection (``connect`` event).
 
         Creates and tracks a session, increments the connected-client
-        counter, and sends the ``initial_data`` snapshot and the active
-        node's shapes.
+        counter, and sends this client the ``initial_data`` snapshot and the
+        active node's shape envelopes.
 
         Args:
             auth: Socket.IO auth payload (unused).
@@ -52,11 +73,16 @@ def register_socket_handlers(socketio, session_manager):
         )
 
         try:
-            emit("initial_data", current_app.bluesky_proxy.get_current_data())
-            # Shapes created before this client connected. node_info is NOT
-            # sent here: it would show "Connected (No Data)" before the user
+            snapshot = current_app.bluesky_proxy.get_current_data()
+            emit("initial_data", snapshot)
+            # Complete shape envelopes for this client only. A reconnecting
+            # browser needs them to prune shapes deleted while it was away
+            # (initial_data only ever adds shapes); other clients are already
+            # in sync, so this must not broadcast. node_info is NOT sent
+            # here: it would show "Connected (No Data)" before the user
             # connects; it flows naturally once data arrives.
-            current_app.bluesky_proxy._emit_active_node_poly_data()
+            emit("poly", snapshot["poly_data"] or {"polys": {}})
+            emit("polyline", snapshot["polyline_data"] or {"polys": {}})
         except Exception as e:
             logger.info(f"Error sending initial data to {session_id}: {e}")
 
@@ -64,11 +90,9 @@ def register_socket_handlers(socketio, session_manager):
     def on_disconnect(reason):
         """Handle a web client disconnect (``disconnect`` event).
 
-        Removes the session from the session manager and decrements the
-        connected-client counter. The counter is only decremented for
-        connections whose session was actually tracked, keeping it
-        symmetric with ``on_connect`` (a connection rejected there never
-        incremented it).
+        Removes the session and decrements the connected-client counter —
+        but only for connections whose session was actually tracked, keeping
+        the counter symmetric with ``on_connect``.
 
         Args:
             reason: Disconnect reason supplied by Flask-SocketIO.
@@ -107,10 +131,6 @@ def register_socket_handlers(socketio, session_manager):
     def on_set_active_node(data):
         """Switch the active simulation node (``set_active_node`` event).
 
-        The frontend sends hex-string node IDs; the handler looks up the
-        original binary ID in the proxy's tracked nodes before delegating to
-        ``actnode``.
-
         Args:
             data (dict): Payload with the hex-string ``node_id``.
         """
@@ -118,15 +138,10 @@ def register_socket_handlers(socketio, session_manager):
         if not node_id:
             return
 
-        node_data = current_app.bluesky_proxy.tracked_nodes.get(node_id)
-        if node_data is None:
-            logger.debug(
-                f"Could not find node ID for: {node_id} "
-                f"(available: {list(current_app.bluesky_proxy.tracked_nodes.keys())})"
-            )
+        binary_node_id = _tracked_binary_node_id(current_app.bluesky_proxy, node_id)
+        if binary_node_id is None:
             return
 
-        binary_node_id = node_data.get("node_id")
         logger.info(f"Setting active node to: {node_id} (binary: {binary_node_id})")
         try:
             current_app.bluesky_proxy.actnode(binary_node_id)
@@ -158,7 +173,7 @@ def register_socket_handlers(socketio, session_manager):
             if server_id and isinstance(server_id, str):
                 server_id = server_id.encode()
             current_app.bluesky_proxy.addnodes(count, server_id=server_id)
-            logger.info(f"Added {count} nodes to server {server_id}")
+            logger.info(f"Requested {count} new node(s) on server {server_id}")
         except Exception as e:
             logger.info(f"Error adding nodes: {e}")
 
@@ -166,11 +181,9 @@ def register_socket_handlers(socketio, session_manager):
     def on_del_node(data):
         """Terminate a single simulation node (``del_node`` event).
 
-        The frontend sends hex-string node IDs; the handler looks up the
-        original binary ID in the proxy's tracked nodes before delegating to
-        ``delnode``, which sends a DELNODE message to the owning server. The
-        node's removal flows back through the normal node-removed pipeline
-        (tracked-nodes cleanup, active-node failover, ``node_info`` emission).
+        Sends a DELNODE message to the owning server; the node's removal
+        flows back through the normal node-removed pipeline (tracked-nodes
+        cleanup, active-node failover, ``node_info`` emission).
 
         Args:
             data (dict): Payload with the hex-string ``node_id``.
@@ -179,15 +192,10 @@ def register_socket_handlers(socketio, session_manager):
         if not node_id:
             return
 
-        node_data = current_app.bluesky_proxy.tracked_nodes.get(node_id)
-        if node_data is None:
-            logger.debug(
-                f"Could not find node ID for: {node_id} "
-                f"(available: {list(current_app.bluesky_proxy.tracked_nodes.keys())})"
-            )
+        binary_node_id = _tracked_binary_node_id(current_app.bluesky_proxy, node_id)
+        if binary_node_id is None:
             return
 
-        binary_node_id = node_data.get("node_id")
         logger.info(
             f"Requesting node termination: {node_id} (binary: {binary_node_id})"
         )

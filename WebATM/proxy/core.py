@@ -196,10 +196,6 @@ class BlueSkyProxy:
         """Callback when active node changes."""
         return self.node_mgr._on_actnode_changed(node_id)
 
-    def _emit_active_node_poly_data(self):
-        """Emit POLY and POLYLINE data for the currently active node."""
-        return self.node_mgr._emit_active_node_poly_data()
-
     def _on_node_added(self, node_id):
         """Callback when a new node is discovered."""
         return self.node_mgr._on_node_added(node_id)
