@@ -21,8 +21,6 @@ export interface AircraftMeshData {
     lon: number;
     alt: number;
     hdg: number;
-    selected: boolean;
-    inconf: boolean;
     actype: string;
 }
 

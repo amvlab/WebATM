@@ -335,7 +335,9 @@ def on_poly_received(data, *args, **kwargs):
         # sets (not just this message's shapes).
         active_node_id = proxy._get_safe_active_node()
         if sender_id and active_node_id and sender_id == active_node_id:
-            if proxy.socketio:
+            # Same guard as every other emit site; a client connecting later
+            # gets the stored sets from its initial_data/connect envelopes.
+            if proxy.socketio and proxy.connected_clients > 0:
                 proxy.socketio.emit(
                     "poly", proxy.poly_data_by_node.get(sender_id, {"polys": {}})
                 )

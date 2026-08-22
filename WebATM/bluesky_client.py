@@ -17,6 +17,7 @@ Key adaptations from BlueSky's networking components:
 """
 
 import threading
+import traceback
 from collections import defaultdict, deque
 from collections.abc import Callable
 
@@ -147,10 +148,10 @@ def seqidx2id(seqidx):
 def safe_decode(data):
     """Decode bytes to a readable string without raising.
 
-    Attempts UTF-8 decoding first and returns the result only if it consists
-    entirely of printable ASCII characters; otherwise falls back to ASCII
-    decoding, and finally to an uppercase hexadecimal representation. Non-bytes
-    input is converted with ``str()``.
+    Attempts UTF-8 decoding and returns the result only if it consists
+    entirely of printable ASCII characters; otherwise falls back to an
+    uppercase hexadecimal representation. Non-bytes input is converted with
+    ``str()``.
 
     Args:
         data (bytes | object): Value to decode or stringify.
@@ -160,22 +161,12 @@ def safe_decode(data):
     """
     if isinstance(data, bytes):
         try:
-            # First try utf-8 decoding
             decoded = data.decode("utf-8")
-            # Check if the decoded string contains only printable ASCII characters
-            if all(32 <= ord(c) <= 126 for c in decoded):
-                return decoded
-            else:
-                # Contains non-printable characters, use hex representation
-                return data.hex().upper()
         except UnicodeDecodeError:
-            try:
-                # Try ASCII decoding
-                decoded = data.decode("ascii")
-                return decoded
-            except UnicodeDecodeError:
-                # Unable to decode as text, use hex representation
-                return data.hex().upper()
+            return data.hex().upper()
+        if all(32 <= ord(c) <= 126 for c in decoded):
+            return decoded
+        return data.hex().upper()
     return str(data)
 
 
@@ -232,16 +223,11 @@ class BlueSkySignal:
             *args (Any): Positional arguments forwarded to each callback.
             **kwargs (Any): Keyword arguments forwarded to each callback.
         """
-        callbacks_snapshot = self.callbacks[
-            :
-        ]  # Make a copy to avoid concurrency issues
-        for callback in callbacks_snapshot:
+        for callback in self.callbacks[:]:
             try:
                 callback(*args, **kwargs)
             except Exception as e:
                 logger.warning(f"Signal {self.name}: Error in callback {callback}: {e}")
-                import traceback
-
                 traceback.print_exc()
 
 
@@ -289,11 +275,7 @@ class BlueSkySubscriber:
                 callback(*args, **kwargs)
             except Exception as e:
                 logger.warning(f"Subscriber {topic}: Error in callback {callback}: {e}")
-                logger.debug(f"Subscriber {topic}: Error type: {type(e).__name__}")
-                logger.debug(f"Subscriber {topic}: Args: {args}")
-                logger.debug(f"Subscriber {topic}: Kwargs: {kwargs}")
-                import traceback
-
+                logger.debug(f"Subscriber {topic}: Args: {args} Kwargs: {kwargs}")
                 traceback.print_exc()
 
 
@@ -711,31 +693,21 @@ class BlueSkyClient:
                     else:
                         self.subscriber.emit(topic, data)  # Pass as single argument
                 elif topic == "ECHO":
-                    # ECHO expects: text, flags, sender_id (can be called with varying args)
-                    # Always include sender_id from message header to identify which node sent the echo
-                    if isinstance(data, (list, tuple)):
-                        # Ensure we always pass sender_id from message header
-                        if len(data) >= 3:
-                            # Data already contains [text, flags, sender_id]
-                            self.subscriber.emit(topic, *data)
-                        elif len(data) == 2:
-                            # Data is [text, flags] - add sender_id from header
-                            self.subscriber.emit(topic, data[0], data[1], sender_id)
-                        elif len(data) == 1:
-                            # Data is [text] - add default flags and sender_id from header
-                            self.subscriber.emit(topic, data[0], 0, sender_id)
-                        else:
-                            # Empty list - send empty text with sender_id from header
-                            self.subscriber.emit(topic, "", 0, sender_id)
-                    elif isinstance(data, dict):
+                    # ECHO handlers expect (text, flags, sender_id). Normalize
+                    # the payload — [text], [text, flags], [text, flags,
+                    # sender_id], a dict, or a bare string — filling missing
+                    # flags with 0 and the sender from the message header.
+                    if isinstance(data, dict):
                         text = data.get("text", "")
                         flags = data.get("flags", 0)
-                        # Use sender_id from data if available, otherwise from message header
-                        data_sender_id = data.get("sender_id", sender_id)
-                        self.subscriber.emit(topic, text, flags, data_sender_id)
+                        echo_sender = data.get("sender_id", sender_id)
                     else:
-                        # Simple string or other data - add defaults and sender_id from header
-                        self.subscriber.emit(topic, str(data), 0, sender_id)
+                        if not isinstance(data, (list, tuple)):
+                            data = [str(data)]
+                        text = data[0] if len(data) > 0 else ""
+                        flags = data[1] if len(data) > 1 else 0
+                        echo_sender = data[2] if len(data) > 2 else sender_id
+                    self.subscriber.emit(topic, text, flags, echo_sender)
                 elif topic == "STATECHANGE":
                     # STATECHANGE follows BlueSky's shared-state format:
                     # [action_type, {"simstate": <int>, ...}]
@@ -973,20 +945,10 @@ class BlueSkyClient:
         return self.send("DELNODE", node_id, target_server)
 
     def on_node_added_request_data(self, node_id):
-        """When a new node is announced, request the initial/current state of all
-        subscribed shared states."""
-        logger.info("A new node has been added! request topics")
-
-        # TODO: fix request
-        # Request all BlueSky topics we want to receive add #STACK
-        # topics = ['RESET', 'REQUEST', 'PLOT', 'SHOWDIALOG', 'SIMINFO',
-        #          'SIMSETTINGS', 'TRAILS', 'ROUTEDATA', 'ACDATA', 'DEFWPT',
-        #          'POLY', 'STACKCMDS']
-
+        """When a new node is announced, request the current state of the
+        subscribed shared states (shapes and the command dictionary)."""
         topics = ["POLY", "STACKCMDS"]
-
-        logger.debug(
+        logger.info(
             f"Requesting topics {topics} from all nodes (triggered by new node {safe_decode(node_id)})"
         )
-        self.send("REQUEST", topics)
         self.send("REQUEST", topics)
