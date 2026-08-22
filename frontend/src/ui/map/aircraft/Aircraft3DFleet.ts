@@ -15,7 +15,6 @@ export interface Aircraft3DMesh {
     mesh: THREE.Object3D;
     data: AircraftMeshData;
     modelPath: string;
-    lastUpdate: number;
     currentGroup: 'mercator' | 'globe';
     /** Plays the GLB's baked animation clips; absent for static models. */
     mixer?: THREE.AnimationMixer;
@@ -124,7 +123,6 @@ export class Aircraft3DFleet {
             mesh,
             data,
             modelPath,
-            lastUpdate: Date.now(),
             currentGroup: isGlobe ? 'globe' : 'mercator',
             mixer,
         });
@@ -155,7 +153,6 @@ export class Aircraft3DFleet {
         this.applyTransform(aircraftMesh.mesh, data, aircraftMesh.currentGroup === 'globe');
 
         aircraftMesh.data = data;
-        aircraftMesh.lastUpdate = Date.now();
     }
 
     /**

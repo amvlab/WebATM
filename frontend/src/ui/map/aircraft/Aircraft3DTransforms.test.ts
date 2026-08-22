@@ -32,7 +32,7 @@ function acData(positions: Array<[number, number]>): AircraftData {
 }
 
 function meshData(lat: number, lon: number): AircraftMeshData {
-    return { lat, lon, alt: 3000, hdg: 90, selected: false, inconf: false, actype: 'A320' };
+    return { lat, lon, alt: 3000, hdg: 90, actype: 'A320' };
 }
 
 describe('Aircraft3DTransforms scene origin vs invalid coordinates', () => {

@@ -10,7 +10,7 @@ import { Aircraft3DFleet, type Aircraft3DFleetDeps } from './Aircraft3DFleet';
 import type { AircraftMeshData } from './Aircraft3DTransforms';
 
 const DATA: AircraftMeshData = {
-    lat: 52, lon: 4, alt: 1000, hdg: 90, selected: false, inconf: false, actype: 'A320',
+    lat: 52, lon: 4, alt: 1000, hdg: 90, actype: 'A320',
 };
 
 /** A model whose single mesh carries an array of materials. */

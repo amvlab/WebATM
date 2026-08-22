@@ -114,7 +114,10 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
             return;
         }
 
-        if (!aircraftData.id || aircraftData.id.length === 0) {
+        // An empty batch (last aircraft deleted) must still fall through to
+        // the removal loop below, or the deleted aircraft's mesh lingers as
+        // a ghost — only bail when the id array is missing entirely.
+        if (!aircraftData.id) {
             return;
         }
 
@@ -157,8 +160,6 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
                 lon: aircraftData.lon[i],
                 alt: aircraftData.alt[i],
                 hdg: aircraftData.trk[i],
-                selected: false,
-                inconf: aircraftData.inconf ? aircraftData.inconf[i] : false,
                 actype,
             };
 
