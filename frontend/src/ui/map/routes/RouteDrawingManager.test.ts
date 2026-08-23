@@ -110,6 +110,7 @@ describe('RouteDrawingManager finish hand-off to the constraints modal', () => {
             off(ev: string, fn: unknown) {
                 handlers.get(ev)?.delete(fn);
             },
+            doubleClickZoom: { enable: () => undefined, disable: () => undefined },
             getCanvas: () => ({ style: {} as CSSStyleDeclaration }),
             getSource: () => undefined,
             addSource: () => undefined,

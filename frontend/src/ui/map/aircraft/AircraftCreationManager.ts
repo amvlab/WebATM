@@ -76,10 +76,8 @@ export class AircraftCreationManager {
      * Invoked by AircraftCreationForm after the modal closes.
      */
     private startAircraftDrawing(data: AircraftCreationData): void {
-        // Restart cleanly if a previous draw is still active - otherwise the
-        // old map handlers stay attached (their references get overwritten
-        // below, so they could never be removed again) and a single click
-        // would fire twice, completing the draw instantly with heading 0.
+        // Restart cleanly if a previous draw is still active - stale handlers
+        // would double-fire each click and could never be removed again.
         if (this.aircraftDrawingMode) {
             this.stopAircraftDrawing();
         }
@@ -131,8 +129,11 @@ export class AircraftCreationManager {
         // the same map clicks.
         claimDrawing(this, () => this.stopAircraftDrawing());
 
-        // Match the crosshair cursor used by the console map picker and the
-        // shape/route drawing modes so every drawing mode looks the same.
+        // A double-click during the draw is two placement clicks, not a zoom
+        // request; restored in disableAircraftMapDrawing().
+        map.doubleClickZoom.disable();
+
+        // Crosshair cursor, matching the other drawing modes.
         map.getCanvas().style.cursor = DRAWING_CURSOR;
 
         this.aircraftMapClickHandler = (e: MapMouseEvent) => {
@@ -171,6 +172,7 @@ export class AircraftCreationManager {
         // listener and the drawing claim must be released regardless.
         const map = this.mapDisplay.getMap();
         if (map) {
+            map.doubleClickZoom.enable();
             // Restore MapLibre's default cursor when leaving drawing mode.
             map.getCanvas().style.cursor = '';
             if (this.aircraftMapClickHandler) map.off('click', this.aircraftMapClickHandler);
@@ -198,12 +200,27 @@ export class AircraftCreationManager {
     private handleAircraftMapClick(e: MapMouseEvent): void {
         if (!this.aircraftDrawingMode) return;
 
+        // The second click of a double-click is a repeat of the first, not a
+        // deliberate placement - without this, double-clicking the position
+        // would instantly create the aircraft with a meaningless heading.
+        if (e.originalEvent.detail > 1) return;
+
         // Snap both clicks to a nearby navaid when enabled: the first click sets
         // the spawn position, the second sets the heading/direction (aim at a
         // known navaid for a precise heading).
         let point: [number, number] = [e.lngLat.lng, e.lngLat.lat];
         const snapped = this.navaidSnapper.snap(e);
         if (snapped) point = [snapped.lng, snapped.lat];
+
+        // A heading click on the exact spawn position (e.g. both clicks
+        // snapped to the same navaid) has no direction; drop it and keep
+        // waiting, mirroring the circle tool's zero-radius guard.
+        const [position] = this.aircraftDrawingPoints;
+        if (position && position[0] === point[0] && position[1] === point[1]) {
+            this.updateDrawingBanner('Click a point away from the aircraft to set its heading');
+            return;
+        }
+
         this.aircraftDrawingPoints.push(point);
 
         if (this.aircraftDrawingPoints.length === 1) {

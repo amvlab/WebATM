@@ -102,6 +102,10 @@ export abstract class BaseDrawingManager {
         // aircraft placement) so two tools never consume the same clicks.
         claimDrawing(this, () => this.cancelDrawing());
 
+        // A double-click during a draw is two placement clicks, not a zoom
+        // request; restored in suspendMapInteraction().
+        map.doubleClickZoom.disable();
+
         map.getCanvas().style.cursor = DRAWING_CURSOR;
 
         this.onDrawingEnabled();
@@ -138,6 +142,7 @@ export abstract class BaseDrawingManager {
         // listener and the navaid highlight must be released regardless.
         const map = this.mapDisplay.getMap();
         if (map) {
+            map.doubleClickZoom.enable();
             map.getCanvas().style.cursor = '';
             if (this.mapClickHandler) map.off('click', this.mapClickHandler);
             if (this.mapRightClickHandler) map.off('contextmenu', this.mapRightClickHandler);
@@ -157,6 +162,11 @@ export abstract class BaseDrawingManager {
 
     private onMapClick(e: MapMouseEvent): void {
         if (!this.drawingMode) return;
+
+        // The second click of a double-click is a repeat of the first, not a
+        // deliberate placement: it would drop a duplicate vertex, or instantly
+        // finish a two-click shape (box/circle) with degenerate geometry.
+        if (e.originalEvent.detail > 1) return;
 
         // Snap to a nearby navaid when enabled, else use the raw click.
         const snapped = this.navaidSnapper.snap(e);
