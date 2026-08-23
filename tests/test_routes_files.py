@@ -314,6 +314,76 @@ class TestOutputContent:
         assert "second run" in body["content"]
         assert body["offset"] == log.stat().st_size
 
+    def test_crlf_log_caught_mid_line_does_not_duplicate_newline(self, client):
+        # A CRLF log polled between the \r and the \n used to deliver that
+        # line ending twice: text-mode reading translated the trailing \r to
+        # \n in one poll, then the next poll delivered the real \n again —
+        # injecting a spurious blank line into the stream viewer.
+        output_dir = client.base_path / "output"
+        output_dir.mkdir(exist_ok=True)
+        log = output_dir / "run.log"
+        log.write_bytes(b"line one\r\nline two\r")
+
+        initial = client.get("/api/bluesky/output/content/run.log").get_json()
+        assert initial["offset"] == log.stat().st_size
+        assert "line one\nline two" in initial["content"]
+
+        # The writer completes the \r\n and adds another line.
+        with log.open("ab") as f:
+            f.write(b"\nline three\r\n")
+        resp = client.get(
+            f"/api/bluesky/output/content/run.log?offset={initial['offset']}"
+        ).get_json()
+        assert "line three" in resp["content"]
+        assert resp["offset"] == log.stat().st_size
+
+        # What the client renders across both polls holds no blank line.
+        combined = initial["content"] + resp["content"]
+        assert "\n\n" not in combined
+        assert combined.replace("\r", "") == "line one\nline two\nline three\n"
+
+    def test_multibyte_char_split_across_polls_is_held_back(self, client):
+        # A UTF-8 character split by the poll must be re-read whole on the
+        # next poll, not rendered as two replacement characters.
+        output_dir = client.base_path / "output"
+        output_dir.mkdir(exist_ok=True)
+        log = output_dir / "run.log"
+        payload = "altitude café".encode()
+        log.write_bytes(payload[:-2])  # cut inside the 2-byte "é"
+
+        initial = client.get("/api/bluesky/output/content/run.log").get_json()
+        assert initial["content"] == "altitude caf"
+        assert "�" not in initial["content"]
+
+        with log.open("ab") as f:
+            f.write(payload[-2:] + b"\n")
+        resp = client.get(
+            f"/api/bluesky/output/content/run.log?offset={initial['offset']}"
+        ).get_json()
+        assert resp["content"] == "é\n"
+
+    def test_lines_zero_skips_history(self, client):
+        # lines=0 used to return the entire file ([-0:] slices everything);
+        # it now means "no history — stream from the current end".
+        output_dir = client.base_path / "output"
+        output_dir.mkdir(exist_ok=True)
+        log = output_dir / "run.log"
+        log.write_text("a\nb\nc\n")
+
+        body = client.get("/api/bluesky/output/content/run.log?lines=0").get_json()
+        assert body["content"] == ""
+        assert body["offset"] == log.stat().st_size
+
+    def test_lines_limits_initial_tail(self, client):
+        output_dir = client.base_path / "output"
+        output_dir.mkdir(exist_ok=True)
+        log = output_dir / "run.log"
+        log.write_text("a\nb\nc\n")
+
+        body = client.get("/api/bluesky/output/content/run.log?lines=2").get_json()
+        assert body["content"] == "b\nc\n"
+        assert body["offset"] == log.stat().st_size
+
 
 class TestFileStatusConfigured:
     def test_filestatus_after_configuration(self, client):

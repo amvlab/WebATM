@@ -65,6 +65,18 @@ export function resetAircraftModelsCache(): void {
 }
 
 /**
+ * Whether `selected` is a valid model choice against the given catalog:
+ * either the Auto sentinel or a model file present in the catalog.
+ */
+export function isKnownModelSelection(
+    models: AircraftModelOption[],
+    selected: string
+): boolean {
+    return selected === AUTO_MODEL_SENTINEL
+        || models.some(m => m.filename === selected);
+}
+
+/**
  * Rebuild a model <select> as the "Auto" sentinel plus every known
  * model, then select `selected` — falling back to Auto when it is
  * neither the sentinel nor a known model file.
@@ -88,7 +100,5 @@ export function populateModelSelect(
         select.appendChild(option);
     }
 
-    const hasSelected = selected === AUTO_MODEL_SENTINEL
-        || models.some(m => m.filename === selected);
-    select.value = hasSelected ? selected : AUTO_MODEL_SENTINEL;
+    select.value = isKnownModelSelection(models, selected) ? selected : AUTO_MODEL_SENTINEL;
 }

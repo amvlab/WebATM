@@ -122,6 +122,23 @@ export class DataProcessor {
     }
 
     /**
+     * Altitude unit suffix for labels (e.g. "ft", "FL").
+     */
+    static altitudeUnitLabel(unit: AltitudeUnit): string {
+        switch (unit) {
+            case 'm':
+                return 'm';
+            case 'km':
+                return 'km';
+            case 'fl':
+                return 'FL';
+            case 'ft':
+            default:
+                return 'ft';
+        }
+    }
+
+    /**
      * Unit suffix used in compact map labels (e.g. "250kt").
      */
     static speedUnitLabel(unit: SpeedUnit): string {

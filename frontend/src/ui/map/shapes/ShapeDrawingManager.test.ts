@@ -103,6 +103,7 @@ class FakeMap {
     removeLayer(id: string): void {
         this.layers.delete(id);
     }
+    doubleClickZoom = { enable: (): void => {}, disable: (): void => {} };
     getCanvas(): { style: { cursor: string } } {
         return { style: { cursor: '' } };
     }
@@ -158,7 +159,7 @@ describe('ShapeDrawingManager create validation and finish', () => {
     }
 
     function mapClick(lat: number, lng: number): void {
-        fakeMap.handlers.get('click')?.({ lngLat: { lat, lng } } as MapMouseEvent);
+        fakeMap.handlers.get('click')?.({ lngLat: { lat, lng }, originalEvent: { detail: 1 } } as MapMouseEvent);
     }
 
     function mapRightClick(): void {

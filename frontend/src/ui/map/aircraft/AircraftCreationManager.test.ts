@@ -23,6 +23,7 @@ function createFakeMap() {
     const layers: Record<string, unknown> = {};
     return {
         handlers,
+        doubleClickZoom: { enable: vi.fn(), disable: vi.fn() },
         getCanvas: () => ({ style: { cursor: '' } }),
         on: vi.fn((event: string, handler: (e: unknown) => void) => {
             (handlers[event] ??= []).push(handler);
@@ -50,8 +51,8 @@ function createFakeMap() {
     };
 }
 
-function clickEvent(lat: number, lng: number): MapMouseEvent {
-    return { lngLat: { lat, lng } } as unknown as MapMouseEvent;
+function clickEvent(lat: number, lng: number, detail = 1): MapMouseEvent {
+    return { lngLat: { lat, lng }, originalEvent: { detail } } as unknown as MapMouseEvent;
 }
 
 function creationData(id: string): AircraftCreationData {
@@ -149,6 +150,43 @@ describe('AircraftCreationManager map drawing', () => {
         map.fire('click', clickEvent(52, 4));
         map.fire('click', clickEvent(53, 4));
         expect(app.sendCommand).not.toHaveBeenCalled();
+    });
+
+    it('a double-click places the position once instead of completing the draw', () => {
+        draw.startAircraftDrawing(creationData('AC1'));
+        // A double-click delivers two click events; the second carries
+        // detail=2 and must not be treated as the heading click.
+        map.fire('click', clickEvent(52, 4));
+        map.fire('click', clickEvent(52, 4, 2));
+
+        expect(app.sendCommand).not.toHaveBeenCalled();
+        expect(bannerVisible()).toBe(true);
+
+        // The draw is still live: a real heading click completes it.
+        map.fire('click', clickEvent(53, 4));
+        expect(app.sendCommand).toHaveBeenCalledWith('CRE AC1,B738,52,4,0,10000,250');
+    });
+
+    it('ignores a heading click on the exact spawn position', () => {
+        draw.startAircraftDrawing(creationData('AC1'));
+        // Both clicks snapping to the same navaid yields identical points,
+        // whose bearing is meaningless.
+        map.fire('click', clickEvent(52, 4));
+        map.fire('click', clickEvent(52, 4));
+
+        expect(app.sendCommand).not.toHaveBeenCalled();
+
+        map.fire('click', clickEvent(53, 4));
+        expect(app.sendCommand).toHaveBeenCalledWith('CRE AC1,B738,52,4,0,10000,250');
+    });
+
+    it('suspends double-click zoom while drawing and restores it after', () => {
+        draw.startAircraftDrawing(creationData('AC1'));
+        expect(map.doubleClickZoom.disable).toHaveBeenCalledTimes(1);
+        expect(map.doubleClickZoom.enable).not.toHaveBeenCalled();
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        expect(map.doubleClickZoom.enable).toHaveBeenCalledTimes(1);
     });
 
     it('Escape also cancels after the position click', () => {

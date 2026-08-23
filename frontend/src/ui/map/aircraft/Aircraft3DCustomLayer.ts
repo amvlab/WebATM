@@ -194,14 +194,19 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
     }
 
     /**
-     * The given model path if it is expected to load, otherwise the default
-     * fallback model — unless that failed too, in which case the original
-     * path is returned and the aircraft stays queued (the loader won't
-     * re-request a failed path, so this stays cheap).
+     * The given model path if it is expected to load, otherwise the first
+     * usable fallback: the configured fallback path, then the default model.
+     * The default tier matters when a model is forced globally — modelPath
+     * then IS the forced (failed) path and can't serve as the fallback.
+     * If everything failed, the original path is returned and the aircraft
+     * stays queued (the loader won't re-request a failed path, so this
+     * stays cheap).
      */
     private usableModelPath(path: string): string {
         if (!this.modelLoader.hasFailed(path)) return path;
-        return this.modelLoader.hasFailed(this.modelPath) ? path : this.modelPath;
+        if (!this.modelLoader.hasFailed(this.modelPath)) return this.modelPath;
+        const defaultPath = `${MODEL_DIR}${DEFAULT_FALLBACK_MODEL}`;
+        return this.modelLoader.hasFailed(defaultPath) ? path : defaultPath;
     }
 
     /**

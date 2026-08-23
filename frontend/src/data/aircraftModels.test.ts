@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
     fetchAircraftModels,
+    isKnownModelSelection,
     populateModelSelect,
     resetAircraftModelsCache,
 } from './aircraftModels';
@@ -90,5 +91,21 @@ describe('populateModelSelect', () => {
     it('falls back to Auto for an unknown saved model', () => {
         populateModelSelect(select, MODELS, 'GONE.glb');
         expect(select.value).toBe(AUTO_MODEL_SENTINEL);
+    });
+});
+
+describe('isKnownModelSelection', () => {
+    it('accepts the Auto sentinel regardless of catalog', () => {
+        expect(isKnownModelSelection([], AUTO_MODEL_SENTINEL)).toBe(true);
+        expect(isKnownModelSelection(MODELS, AUTO_MODEL_SENTINEL)).toBe(true);
+    });
+
+    it('accepts a model present in the catalog', () => {
+        expect(isKnownModelSelection(MODELS, 'B747.glb')).toBe(true);
+    });
+
+    it('rejects a model missing from the catalog', () => {
+        expect(isKnownModelSelection(MODELS, 'GONE.glb')).toBe(false);
+        expect(isKnownModelSelection([], 'A320.glb')).toBe(false);
     });
 });

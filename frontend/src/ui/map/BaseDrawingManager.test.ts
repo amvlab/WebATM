@@ -16,6 +16,7 @@ function createFakeMap() {
     return {
         handlers,
         canvas,
+        doubleClickZoom: { enable: vi.fn(), disable: vi.fn() },
         on: vi.fn((event: string, handler: (e: unknown) => void) => {
             (handlers[event] ??= []).push(handler);
         }),
@@ -69,8 +70,8 @@ describe('BaseDrawingManager', () => {
     let snapper: { snap: ReturnType<typeof vi.fn>; highlight: ReturnType<typeof vi.fn>; clearHighlight: ReturnType<typeof vi.fn> };
     let manager: TestDrawingManager;
 
-    const clickEvent = (lat: number, lng: number) =>
-        ({ lngLat: { lat, lng }, preventDefault: vi.fn() }) as unknown as MapMouseEvent;
+    const clickEvent = (lat: number, lng: number, detail = 1) =>
+        ({ lngLat: { lat, lng }, originalEvent: { detail }, preventDefault: vi.fn() }) as unknown as MapMouseEvent;
 
     function createManager(
         finishOnEnter = false,
@@ -116,6 +117,22 @@ describe('BaseDrawingManager', () => {
         snapper.snap.mockReturnValue({ lat: 50, lng: 5 });
         map.fire('click', clickEvent(52.3, 4.8));
         expect(manager.points).toEqual([{ lat: 50, lng: 5 }]);
+    });
+
+    it('ignores the second click of a double-click', () => {
+        manager.start();
+        map.fire('click', clickEvent(52, 4));
+        map.fire('click', clickEvent(52, 4, 2));
+        expect(manager.points).toEqual([{ lat: 52, lng: 4 }]);
+    });
+
+    it('suspends double-click zoom while drawing and restores it after', () => {
+        manager.start();
+        expect(map.doubleClickZoom.disable).toHaveBeenCalledTimes(1);
+        expect(map.doubleClickZoom.enable).not.toHaveBeenCalled();
+
+        manager.stop();
+        expect(map.doubleClickZoom.enable).toHaveBeenCalledTimes(1);
     });
 
     it('mousemove highlights navaids and reports the cursor position', () => {

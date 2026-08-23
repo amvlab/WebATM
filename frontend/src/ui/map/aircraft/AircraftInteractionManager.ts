@@ -47,7 +47,7 @@ export class AircraftInteractionManager {
     // Document-level listeners and state subscriptions, released in destroy()
     // (map listeners die with the map, but these would outlive it).
     private documentListeners = new ListenerRegistry();
-    private unsubscribeAircraftData: (() => void) | null = null;
+    private stateUnsubscribers: (() => void)[] = [];
 
     constructor(
         mapDisplay: MapDisplay,
@@ -103,33 +103,29 @@ export class AircraftInteractionManager {
             }
         });
 
-        // Click on empty map - unselect aircraft
+        // Click on empty map - unselect aircraft. The aircraft layer handlers
+        // fire in this same synchronous dispatch, so the hit test must be
+        // synchronous too: deferring it (the old 50ms setTimeout) let the
+        // select-triggered flyTo or a data update move the aircraft off the
+        // clicked point, misreading an aircraft click as an empty-map click
+        // and instantly unselecting the aircraft that was just clicked.
         this.map.on('click', (e: MapMouseEvent) => {
-            // Small delay to let aircraft-specific click handlers run first
-            setTimeout(() => {
-                if (!this.map) return;
+            // With a drawing tool active, an empty-map click is a point
+            // placement, not a request to unselect the aircraft.
+            if (this.isDrawingToolActive && this.isDrawingToolActive()) {
+                return;
+            }
 
-                // If a drawing tool is active, an empty-map click is a point
-                // placement, not a request to unselect the aircraft.
-                if (this.isDrawingToolActive && this.isDrawingToolActive()) {
-                    return;
-                }
+            if (this.queryAircraftAt(e.point).length > 0) return;
 
-                const features = this.queryAircraftAt(e.point);
-                const clickedOnAircraft = features.length > 0;
-
-                // If click was not on an aircraft, unselect and stop following
-                if (!clickedOnAircraft) {
-                    logger.debug('AircraftInteractionManager', 'Empty map click - unselecting aircraft');
-                    const currentSelection = this.stateManager.getState().selectedAircraft;
-                    if (currentSelection) {
-                        // Send POS command to toggle route visibility off
-                        this.requestRouteData(currentSelection);
-                    }
-                    this.stopFollowing();
-                    this.stateManager.setSelectedAircraft(null);
-                }
-            }, 50);
+            logger.debug('AircraftInteractionManager', 'Empty map click - unselecting aircraft');
+            const currentSelection = this.stateManager.getState().selectedAircraft;
+            if (currentSelection) {
+                // Send POS command to toggle route visibility off
+                this.requestRouteData(currentSelection);
+            }
+            this.stopFollowing();
+            this.stateManager.setSelectedAircraft(null);
         });
 
         // Stop following on user drag
@@ -160,27 +156,16 @@ export class AircraftInteractionManager {
     private setup2DLayerHandlers(): void {
         if (!this.map) return;
 
-        // Single click on aircraft - select and zoom
-        this.map.on('click', 'aircraft-points', (e) => {
-            if (!e.features || e.features.length === 0) return;
-
-            const aircraftId = e.features[0].properties?.entity_id || e.features[0].properties?.callsign;
-            if (aircraftId) {
-                logger.debug('AircraftInteractionManager', 'MAP 2D SINGLE CLICK:', aircraftId);
-                this.handleMapAircraftClick(aircraftId, false);
-            }
-        });
-
-        // Double click on aircraft - select, zoom, and follow
-        this.map.on('dblclick', 'aircraft-points', (e) => {
-            if (!e.features || e.features.length === 0) return;
-
-            const aircraftId = e.features[0].properties?.entity_id || e.features[0].properties?.callsign;
-            if (aircraftId) {
-                logger.debug('AircraftInteractionManager', 'MAP 2D DOUBLE CLICK:', aircraftId);
-                this.handleMapAircraftClick(aircraftId, true);
-            }
-        });
+        for (const [event, isDoubleClick] of [['click', false], ['dblclick', true]] as const) {
+            this.map.on(event, 'aircraft-points', (e) => {
+                const properties = e.features?.[0]?.properties;
+                const aircraftId = properties?.entity_id || properties?.callsign;
+                if (aircraftId) {
+                    logger.debug('AircraftInteractionManager', `MAP 2D ${isDoubleClick ? 'DOUBLE' : 'SINGLE'} CLICK:`, aircraftId);
+                    this.handleMapAircraftClick(aircraftId, isDoubleClick);
+                }
+            });
+        }
 
         logger.debug('AircraftInteractionManager', '2D layer click handlers set up');
     }
@@ -226,11 +211,22 @@ export class AircraftInteractionManager {
      */
     private setupStateSubscriptions(): void {
         // Follow mode tracks each aircraft data update
-        this.unsubscribeAircraftData = this.stateManager.subscribe('aircraftData', (newData) => {
+        this.stateUnsubscribers.push(this.stateManager.subscribe('aircraftData', (newData) => {
             if (newData) {
                 this.updateFollowing(newData);
             }
-        });
+        }));
+
+        // When selection switches directly from one aircraft to another
+        // (map or panel click - no unselect step in between), toggle the
+        // old aircraft's route broadcast off. Otherwise it keeps streaming
+        // ROUTEDATA, which wastes bandwidth and used to get re-interpreted
+        // as an "implicit selection" that stole the new selection back.
+        this.stateUnsubscribers.push(this.stateManager.subscribe('selectedAircraft', (newAircraft, oldAircraft) => {
+            if (oldAircraft && newAircraft && oldAircraft !== newAircraft) {
+                this.requestRouteData(oldAircraft);
+            }
+        }));
 
         logger.debug('AircraftInteractionManager', 'State subscriptions set up');
     }
@@ -469,16 +465,6 @@ export class AircraftInteractionManager {
     }
 
     /**
-     * Public wrapper around requestRouteData() used by other subsystems
-     * (e.g. RouteDrawingManager) that need BlueSky to re-broadcast ROUTEDATA
-     * for an aircraft. Marks the POS as explicit so the resulting ROUTEDATA
-     * is processed on the normal (non-unsolicited) path in App.onRouteData.
-     */
-    public sendExplicitPos(aircraftId: string): void {
-        this.requestRouteData(aircraftId);
-    }
-
-    /**
      * Register a predicate that reports whether any interactive drawing tool
      * (route, shape, aircraft placement) is in progress. When true, empty-map
      * clicks are suppressed from the "unselect aircraft" path so they can be
@@ -509,8 +495,8 @@ export class AircraftInteractionManager {
     public destroy(): void {
         this.stopFollowing();
         this.documentListeners.removeAll();
-        this.unsubscribeAircraftData?.();
-        this.unsubscribeAircraftData = null;
+        this.stateUnsubscribers.forEach(unsub => unsub());
+        this.stateUnsubscribers = [];
         logger.debug('AircraftInteractionManager', 'AircraftInteractionManager destroyed');
     }
 }
