@@ -7,6 +7,8 @@ configuration, health/status endpoints, and BlueSky file management
 
 import json
 import os
+import re
+import sqlite3
 import time
 from pathlib import Path
 
@@ -129,6 +131,32 @@ def _dir_entries(target_dir, extension):
     return sorted(folders, key=by_name) + sorted(files, key=by_name)
 
 
+def _split_incomplete_utf8(data):
+    """Split off an incomplete trailing UTF-8 sequence from ``data``.
+
+    A log poll can catch the writer mid-character; the held-back bytes are
+    re-read whole on the next poll instead of being decoded as replacement
+    characters twice.
+
+    Args:
+        data (bytes): Chunk read up to end-of-file.
+
+    Returns:
+        tuple[bytes, bytes]: ``(complete, held_back)``; ``held_back`` is empty
+            unless ``data`` ends inside a multi-byte character.
+    """
+    for i in range(1, min(3, len(data)) + 1):
+        byte = data[-i]
+        if byte >= 0xC0:  # lead byte of a 2-4 byte sequence
+            seq_len = 2 if byte < 0xE0 else 3 if byte < 0xF0 else 4
+            if seq_len > i:
+                return data[:-i], data[-i:]
+            break
+        if byte < 0x80:  # ASCII, nothing pending
+            break
+    return data, b""
+
+
 def get_webpack_assets():
     """Read the webpack manifest and build script tags in load order.
 
@@ -142,13 +170,11 @@ def get_webpack_assets():
         list[str]: HTML ``<script>`` tags for the webpack bundles.
     """
     try:
-        # Go up one level from server/ to WebATM/ to find static/
         manifest_path = (
             Path(__file__).parent.parent / "static" / "dist" / "manifest.json"
         )
 
         if not manifest_path.exists():
-            # Fallback to single bundle.js if manifest doesn't exist
             return ['<script src="/static/dist/bundle.js"></script>']
 
         with open(manifest_path) as f:
@@ -171,7 +197,6 @@ def get_webpack_assets():
 
     except Exception as e:
         logger.info(f"Error reading webpack manifest: {e}")
-        # Fallback to single bundle.js
         return ['<script src="/static/dist/bundle.js"></script>']
 
 
@@ -271,14 +296,12 @@ def register_basic_routes(app, session_manager):
                 set_bluesky_proxy,
             )
 
-            # Every (re)connect gets a completely fresh proxy: recreating the
-            # ZMQ client is the reliable way to shed any half-dead connection
-            # state. Only the Socket.IO wiring carries over. The old proxy is
-            # replaced in place (never deleted) so concurrent requests always
-            # find a usable current_app.bluesky_proxy. The swap-and-connect
+            # Every (re)connect gets a fresh proxy — recreating the ZMQ client
+            # is the reliable way to shed half-dead connection state; only the
+            # Socket.IO wiring carries over. The old proxy is replaced in place
+            # so concurrent requests always find a usable proxy, and the swap
             # runs under connect_lock so the integrated auto-start (or another
-            # concurrent connect request) can never revive the proxy this
-            # request is tearing down.
+            # connect request) can't revive the proxy being torn down.
             with connect_lock:
                 old_proxy = getattr(current_app, "bluesky_proxy", None)
                 if old_proxy is not None:
@@ -516,14 +539,10 @@ def register_basic_routes(app, session_manager):
             # (this also strips any FTS syntax the user might type) and turn
             # each into a prefix term so "heath" matches "Heathrow" and "kse"
             # matches "KSEA". Multiple tokens are implicitly AND-ed.
-            import re
-
             tokens = re.findall(r"[A-Za-z0-9]+", query)
             if not tokens:
                 return jsonify({"success": True, "results": []})
             match_expr = " ".join(f"{t}*" for t in tokens)
-
-            import sqlite3
 
             # Open read-only so a concurrent rebuild can't be corrupted.
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -609,38 +628,20 @@ def register_basic_routes(app, session_manager):
             sections, or 503 with the error on failure.
         """
         try:
-            hostname = getattr(current_app.bluesky_proxy, "server_ip", None)
-            listening, _ = probe_bluesky_ports(hostname)
-            port_11000_listening = 11000 in listening
-            port_11001_listening = 11001 in listening
-            bluesky_running = bool(listening)
-
-            # Additional check: if we have a proxy connection, see if it's receiving data
-            proxy_running = False
-            proxy_connected = False
-            has_active_nodes = False
-            if hasattr(current_app, "bluesky_proxy"):
-                proxy_running = getattr(current_app.bluesky_proxy, "running", False)
-                proxy_connected = getattr(
-                    current_app.bluesky_proxy, "is_connected", False
-                )
-                tracked_nodes = getattr(current_app.bluesky_proxy, "tracked_nodes", [])
-                has_active_nodes = len(tracked_nodes) > 0
-
-            # Get session information from session manager
-            session_info = session_manager.get_session_info()
+            proxy = getattr(current_app, "bluesky_proxy", None)
+            listening, _ = probe_bluesky_ports(getattr(proxy, "server_ip", None))
 
             response_data = {
                 "status": "healthy",
                 "bluesky_server": {
-                    "ports_accessible": bluesky_running,
-                    "port_11000": port_11000_listening,
-                    "port_11001": port_11001_listening,
-                    "proxy_running": proxy_running,
-                    "proxy_connected": proxy_connected,
-                    "has_active_nodes": has_active_nodes,
+                    "ports_accessible": bool(listening),
+                    "port_11000": 11000 in listening,
+                    "port_11001": 11001 in listening,
+                    "proxy_running": getattr(proxy, "running", False),
+                    "proxy_connected": getattr(proxy, "is_connected", False),
+                    "has_active_nodes": len(getattr(proxy, "tracked_nodes", [])) > 0,
                 },
-                "session_info": session_info,
+                "session_info": session_manager.get_session_info(),
                 "timestamp": time.time(),
             }
 
@@ -1000,23 +1001,24 @@ def register_basic_routes(app, session_manager):
     def get_output_file_content(filepath):
         """Read output-file content (GET /api/bluesky/output/content/<filepath>).
 
-        Supports log streaming: with ``offset`` > 0 the file is read
-        incrementally from that byte offset to the end; with offset 0 the
+        Supports log streaming with plain byte offsets: with ``offset`` > 0
+        the file is read from that byte offset to the end; with offset 0 the
         last ``lines`` lines are tailed for the initial load. If the file
         shrank below the offset (truncated/rewritten between polls), the
         stream restarts with a tail load instead of silently skipping the
         new content. Query parameters:
 
         - ``offset``: byte offset to read from (0 = tail mode).
-        - ``lines``: maximum lines for the initial tail load (default 200).
+        - ``lines``: maximum lines for the initial tail load (default 200);
+          0 or negative skips history and streams from the current end.
 
         Args:
             filepath (str): Path of the file relative to the output
                 directory; validated against traversal.
 
         Returns:
-            JSON with ``content``, the new ``offset``, ``total_size`` and
-            ``filename``, or a 400/403/404/500 error payload.
+            JSON with ``content``, the new byte ``offset``, ``total_size``
+            and ``filename``, or a 400/403/404/500 error payload.
         """
         try:
             resolved_path, error = _validate_output_path(filepath)
@@ -1028,22 +1030,30 @@ def register_basic_routes(app, session_manager):
             file_size = resolved_path.stat().st_size
 
             # A file smaller than the poller's offset was truncated or
-            # rewritten (e.g. a re-run scenario logging to the same name).
-            # The offset points into the old contents, so restart with a
-            # tail load instead of pinning the stream at end-of-file, which
-            # would silently skip everything the new file already holds.
+            # rewritten (e.g. a re-run scenario logging to the same name);
+            # restart with a tail load instead of pinning at end-of-file.
             if offset > file_size:
                 offset = 0
 
-            with open(resolved_path, errors="replace") as f:
+            # Read in binary so offsets are real byte positions. Text-mode
+            # tell() returns opaque cookies whose newline translation also
+            # delivered a trailing \r as \n twice when a CRLF log was caught
+            # mid-line (a spurious blank line in the stream viewer).
+            with open(resolved_path, "rb") as f:
                 if offset > 0:
-                    # Incremental read from offset to end.
                     f.seek(offset)
-                    content = f.read()
-                else:
+                    data = f.read()
+                elif max_lines > 0:
                     # Initial (or post-truncation) load: tail the last N lines.
-                    content = "".join(f.readlines()[-max_lines:])
+                    data = b"".join(f.readlines()[-max_lines:])
+                else:
+                    f.seek(0, os.SEEK_END)
+                    data = b""
                 new_offset = f.tell()
+
+            data, held_back = _split_incomplete_utf8(data)
+            new_offset -= len(held_back)
+            content = data.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
             return jsonify(
                 {
