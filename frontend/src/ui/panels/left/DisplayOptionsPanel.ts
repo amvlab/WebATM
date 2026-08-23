@@ -10,7 +10,7 @@ import { StateManager } from '../../../core/StateManager';
 import { storage } from '../../../utils/StorageManager';
 import { SpeedType, AircraftShapeType, DisplayOptions } from '../../../data/types';
 import { AUTO_MODEL_SENTINEL } from '../../../data/aircraftCategories';
-import { fetchAircraftModels, populateModelSelect } from '../../../data/aircraftModels';
+import { fetchAircraftModels, isKnownModelSelection, populateModelSelect } from '../../../data/aircraftModels';
 import { logger } from '../../../utils/Logger';
 import type { App } from '../../../core/App';
 
@@ -418,8 +418,18 @@ export class DisplayOptionsPanel extends BasePanel {
         const aircraftModelSelect = document.getElementById('aircraft-model-select') as HTMLSelectElement | null;
         if (!aircraftModelSelect) return;
 
-        // Selects the saved model, falling back to Auto when it's unknown
-        const savedModel = this.stateManager?.getDisplayOptions().selectedAircraftModel || AUTO_MODEL_SENTINEL;
+        // A saved model that is no longer in the catalog (file removed or
+        // renamed server-side) must be reset to Auto in storage and state,
+        // not just shown as Auto: otherwise the renderer keeps forcing the
+        // missing file, and re-picking Auto in the (already-Auto) select
+        // fires no change event to recover.
+        let savedModel = this.stateManager?.getDisplayOptions().selectedAircraftModel || AUTO_MODEL_SENTINEL;
+        if (!isKnownModelSelection(models, savedModel)) {
+            logger.warn('DisplayOptionsPanel', `Saved 3D model "${savedModel}" is not available; reverting to Auto`);
+            savedModel = AUTO_MODEL_SENTINEL;
+            storage.set('selected-aircraft-model', savedModel);
+            this.stateManager?.updateDisplayOptions({ selectedAircraftModel: savedModel });
+        }
         populateModelSelect(aircraftModelSelect, models, savedModel);
         logger.debug('DisplayOptionsPanel', `Loaded ${models.length} aircraft models`);
     }
