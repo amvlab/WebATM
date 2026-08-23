@@ -422,10 +422,12 @@ export class App {
                 // Check if we just sent an explicit POS command for this aircraft
                 const isExplicitPosResponse = this.aircraftInteractionManager?.wasLastExplicitPosFor(data.acid) ?? false;
 
-                // If receiving ROUTEDATA for an aircraft that is not currently selected,
-                // treat it as an implicit selection ONLY if it's not a response to our explicit POS
+                // Unsolicited ROUTEDATA (a route broadcast enabled outside this
+                // client) becomes an implicit selection, but only while nothing
+                // is selected: it must never steal an active selection (e.g. a
+                // still-streaming broadcast of a previously selected aircraft).
                 const currentSelection = this.stateManager.getState().selectedAircraft;
-                if (data.acid && data.acid !== currentSelection && !isExplicitPosResponse) {
+                if (data.acid && !currentSelection && !isExplicitPosResponse) {
                     logger.info('App', '🛰️ Unsolicited ROUTEDATA received for', data.acid, '- treating as implicit selection');
                     this.stateManager.setSelectedAircraft(data.acid);
                 }
