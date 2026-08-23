@@ -40,18 +40,26 @@ export class AircraftRoute3DRenderer {
             safeRemoveLayer(map, this.customLayer.id);
         }
 
-        if (map.isStyleLoaded()) {
-            this.addLayerToMap(map);
-        } else {
-            const waitForStyle = () => {
-                if (map.isStyleLoaded()) {
-                    this.addLayerToMap(map);
-                } else {
-                    requestAnimationFrame(waitForStyle);
-                }
-            };
-            requestAnimationFrame(waitForStyle);
-        }
+        this.whenStyleLoaded(map, () => this.addLayerToMap(map));
+    }
+
+    /**
+     * Run `callback` once the map style is loaded, polling with
+     * requestAnimationFrame (the style.load event may have already fired).
+     * Aborts if the renderer is destroyed or re-initialized on another map
+     * while waiting, so a stale wait can't re-add the layer to a map this
+     * renderer no longer manages.
+     */
+    private whenStyleLoaded(map: MapLibreMap, callback: () => void): void {
+        const poll = () => {
+            if (this.map !== map) return;
+            if (map.isStyleLoaded()) {
+                callback();
+            } else {
+                requestAnimationFrame(poll);
+            }
+        };
+        poll();
     }
 
     private addLayerToMap(map: MapLibreMap): void {
@@ -82,34 +90,24 @@ export class AircraftRoute3DRenderer {
     }
 
     onStyleChange(): void {
-        if (!this.map) return;
+        const map = this.map;
+        if (!map) return;
 
         const reinitializeLayer = () => {
-            if (!this.map) return;
             try {
-                safeRemoveLayer(this.map, this.customLayer.id);
+                safeRemoveLayer(map, this.customLayer.id);
                 const previousState = this.customLayer.exportState();
                 this.customLayer.cleanup();
                 this.customLayer = new AircraftRoute3DCustomLayer(this.displayOptions);
                 this.customLayer.importState(previousState);
-                this.addLayerToMap(this.map);
+                this.addLayerToMap(map);
             } catch (error) {
                 logger.error('AircraftRoute3DRenderer', `Failed to reinitialize 3D route layer: ${error}`);
             }
         };
 
-        if (this.map.isStyleLoaded()) {
-            requestAnimationFrame(reinitializeLayer);
-        } else {
-            const waitAndReinitialize = () => {
-                if (this.map && this.map.isStyleLoaded()) {
-                    reinitializeLayer();
-                } else if (this.map) {
-                    requestAnimationFrame(waitAndReinitialize);
-                }
-            };
-            requestAnimationFrame(waitAndReinitialize);
-        }
+        // Defer a frame so MapLibre finishes its own style bookkeeping first.
+        requestAnimationFrame(() => this.whenStyleLoaded(map, reinitializeLayer));
     }
 
     destroy(): void {
