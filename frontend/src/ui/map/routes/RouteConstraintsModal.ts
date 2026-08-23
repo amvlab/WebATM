@@ -19,13 +19,9 @@ interface ActiveRoute {
 }
 
 /**
- * RouteConstraintsModal - Owns the per-waypoint constraint modal and the
- * ADDWPT command build/send pipeline.
- *
- * The manager hands us a snapshot {acid, points, altUnit, spdUnit} when it
- * finishes drawing; we collect constraints from the user and send one
- * ADDWPT command per waypoint. We notify the manager via onComplete/onCancel
- * so it can drop its drawing state.
+ * RouteConstraintsModal - Per-waypoint constraint modal plus the ADDWPT
+ * command build/send pipeline. The drawing manager hands over a finished
+ * route snapshot and is notified back via onComplete/onCancel.
  */
 export class RouteConstraintsModal {
     private app: App;
@@ -34,9 +30,8 @@ export class RouteConstraintsModal {
 
     private active: ActiveRoute | null = null;
     private constraintRows: WaypointConstraint[] = [];
-    // True while submit() is sending its command sequence. Blocks re-entrant
-    // submits (a double-click would send every ADDWPT twice) and stops a
-    // mid-send modal close from reporting the route as cancelled.
+    // Blocks re-entrant submits (double-click) and stops a mid-send modal
+    // close from reporting the route as cancelled.
     private sending = false;
 
     constructor(app: App, onComplete: () => void, onCancel: () => void) {
@@ -57,11 +52,10 @@ export class RouteConstraintsModal {
             cancelBtn.addEventListener('click', () => modalManager.close(MODAL_ID));
         }
 
-        // ModalManager owns the other close paths (X button, backdrop click,
-        // Escape). Treat any close while a route is still pending as a
-        // cancel; submit() clears `active` before closing so a successful
-        // submission doesn't double-report, and a close while the commands
-        // are already being sent is not a cancel either.
+        // ModalManager owns the other close paths (X, backdrop, Escape).
+        // Any close while a route is still pending counts as a cancel;
+        // submit() clears `active` before closing so success doesn't
+        // double-report as a cancel.
         modalManager.on(MODAL_ID, (event) => {
             if (event === 'close' && this.active && !this.sending) {
                 this.active = null;
@@ -89,14 +83,13 @@ export class RouteConstraintsModal {
         const table = document.getElementById('route-constraints-table') as HTMLTableElement | null;
         if (!table) {
             logger.error('RouteConstraintsModal', 'route-constraints-table not found in DOM');
-            // If the table is missing we still fire-and-forget the submit so
-            // the user's clicks aren't silently dropped.
-            this.submit();
+            // Submit unconstrained so the drawn route isn't silently dropped.
+            void this.submit();
             return;
         }
 
-        const altUnitLabel = this.altUnitLabel(altUnit);
-        const spdUnitLabel = this.speedUnitLabel(spdUnit);
+        const altUnitLabel = DataProcessor.altitudeUnitLabel(altUnit);
+        const spdUnitLabel = DataProcessor.speedUnitLabel(spdUnit);
 
         const altHeader = document.getElementById('route-constraints-alt-header');
         if (altHeader) altHeader.textContent = `Altitude (${altUnitLabel})`;
@@ -208,10 +201,9 @@ export class RouteConstraintsModal {
     }
 
     /**
-     * Build and send the ADDWPT commands (one per waypoint) sequentially,
-     * with a small delay between them: sendCommand() resolves right after
-     * socket.emit(), and back-to-back sends race on the proxy's shared ZMQ
-     * socket, crashing BlueSky with msgpack "ExtraData" errors.
+     * Send the ADDWPT commands sequentially with a small delay between them:
+     * back-to-back sends race on the proxy's shared ZMQ socket and crash
+     * BlueSky with msgpack "ExtraData" errors.
      */
     private async submit(): Promise<void> {
         if (this.sending) return;
@@ -226,9 +218,8 @@ export class RouteConstraintsModal {
         const consoleInstance = this.app.getConsole();
         const acid = this.active.acid;
 
-        // Delay in ms between successive stack commands. 50 ms per waypoint
-        // stays snappy for small routes (10 wpts ~= 0.5 s) while still giving
-        // the proxy/ZMQ pipeline room to serialize sends cleanly.
+        // 50 ms stays snappy for small routes while giving the proxy/ZMQ
+        // pipeline room to serialize sends cleanly.
         const COMMAND_INTERVAL_MS = 50;
 
         logger.info(
@@ -257,9 +248,8 @@ export class RouteConstraintsModal {
                 }
             }
 
-            // No POS refresh needed afterwards: BlueSky auto-broadcasts
-            // ROUTEDATA after every ADDWPT, and an extra POS races with that
-            // broadcast and shows stale data.
+            // No POS refresh afterwards: BlueSky auto-broadcasts ROUTEDATA
+            // after every ADDWPT, and an extra POS races with it.
         } catch (err) {
             logger.error('RouteConstraintsModal', 'Error sending route commands:', err);
             alert('Error sending route commands: ' + (err as Error).message);
@@ -268,8 +258,7 @@ export class RouteConstraintsModal {
             if (submitBtn) submitBtn.disabled = false;
         }
 
-        // Clear `active` before closing so the close event isn't treated as
-        // a cancel of a still-pending route.
+        // Clear `active` before closing so the close event isn't a cancel.
         this.active = null;
         modalManager.close(MODAL_ID);
         this.onComplete();
@@ -280,81 +269,30 @@ export class RouteConstraintsModal {
     }
 
     /**
-     * Build one ADDWPT command per waypoint. BlueSky's ADDWPT takes optional
-     * alt/spd arguments, so omitting them cleanly represents "no constraint".
-     *
-     * Format:
-     *   ADDWPT <acid> <lat>,<lon>                    (no constraints)
-     *   ADDWPT <acid> <lat>,<lon>,<altFt>            (alt only)
-     *   ADDWPT <acid> <lat>,<lon>,<altFt>,<spdKts>   (alt + spd)
-     *
-     * If a speed is specified without an altitude, we still need an altitude
-     * placeholder in the positional args; we leave that combination out and
-     * warn so the user adds an altitude too.
+     * Build one ADDWPT command per waypoint:
+     *   ADDWPT <acid> <lat>,<lon>[,<altFt>][,<spdKts>]
+     * BlueSky resolves an empty positional arg to "no constraint", so a
+     * speed-only constraint keeps an empty altitude slot: <lat>,<lon>,,<spd>.
      */
     private generateCommands(): string[] {
         if (!this.active) return [];
         const { acid, points, altUnit, spdUnit } = this.active;
 
         return points.map((pt, i) => {
-            const row = this.constraintRows[i] || { alt: null, spd: null };
+            const { alt, spd } = this.constraintRows[i] ?? { alt: null, spd: null };
+            const hasAlt = alt !== null && !isNaN(alt);
+            const hasSpd = spd !== null && !isNaN(spd);
 
-            const hasAlt = row.alt !== null && !isNaN(row.alt);
-            const hasSpd = row.spd !== null && !isNaN(row.spd);
-
-            const latlon = `${pt.lat.toFixed(6)},${pt.lng.toFixed(6)}`;
-
-            if (!hasAlt && !hasSpd) {
-                return `ADDWPT ${acid} ${latlon}`;
+            const args = [`${pt.lat.toFixed(6)},${pt.lng.toFixed(6)}`];
+            if (hasAlt || hasSpd) {
+                args.push(hasAlt
+                    ? String(Math.round(DataProcessor.altitudeToFeet(alt, altUnit)))
+                    : '');
             }
-
-            const altFt = hasAlt
-                ? String(
-                      Math.round(
-                          DataProcessor.altitudeToFeet(row.alt as number, altUnit)
-                      )
-                  )
-                : '';
-
-            if (!hasSpd) {
-                return `ADDWPT ${acid} ${latlon},${altFt}`;
+            if (hasSpd) {
+                args.push(String(Math.round(DataProcessor.speedToKnots(spd, spdUnit))));
             }
-
-            const spdKts = String(
-                Math.round(DataProcessor.speedToKnots(row.spd as number, spdUnit))
-            );
-
-            if (!hasAlt) {
-                // BlueSky ADDWPT positional args require alt before spd; warn
-                // once and emit just the position (spd will be ignored).
-                logger.warn(
-                    'RouteConstraintsModal',
-                    `WP${i + 1}: speed provided without altitude; speed will be ignored`
-                );
-                return `ADDWPT ${acid} ${latlon}`;
-            }
-
-            return `ADDWPT ${acid} ${latlon},${altFt},${spdKts}`;
+            return `ADDWPT ${acid} ${args.join(',')}`;
         });
-    }
-
-    private altUnitLabel(u: AltitudeUnit): string {
-        switch (u) {
-            case 'm': return 'm';
-            case 'km': return 'km';
-            case 'fl': return 'FL';
-            case 'ft':
-            default: return 'ft';
-        }
-    }
-
-    private speedUnitLabel(u: SpeedUnit): string {
-        switch (u) {
-            case 'm/s': return 'm/s';
-            case 'km/h': return 'km/h';
-            case 'mph': return 'mph';
-            case 'knots':
-            default: return 'kt';
-        }
     }
 }

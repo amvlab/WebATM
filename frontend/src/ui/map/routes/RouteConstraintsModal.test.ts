@@ -143,4 +143,42 @@ describe('RouteConstraintsModal', () => {
         expect(sendCommand).toHaveBeenCalledWith('ADDWPT KL204 53.000000,5.000000,20000,300');
         expect(onCancel).not.toHaveBeenCalled();
     });
+
+    it('a speed-only constraint keeps an empty altitude slot instead of dropping the speed', async () => {
+        const modal = makeModal();
+        modal.show('KL204', [{ lat: 52, lng: 4 }], 'ft', 'knots');
+
+        (document.getElementById('route-constraints-bulk-spd') as HTMLInputElement).value = '300';
+
+        (document.getElementById('submit-route-constraints-btn') as HTMLButtonElement).click();
+        await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+
+        expect(sendCommand).toHaveBeenCalledWith('ADDWPT KL204 52.000000,4.000000,,300');
+    });
+
+    it('an altitude-only constraint omits the speed argument', async () => {
+        const modal = makeModal();
+        modal.show('KL204', [{ lat: 52, lng: 4 }], 'ft', 'knots');
+
+        (document.getElementById('route-constraints-bulk-alt') as HTMLInputElement).value = '20000';
+
+        (document.getElementById('submit-route-constraints-btn') as HTMLButtonElement).click();
+        await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+
+        expect(sendCommand).toHaveBeenCalledWith('ADDWPT KL204 52.000000,4.000000,20000');
+    });
+
+    it('converts constraints from the captured units to feet and knots', async () => {
+        const modal = makeModal();
+        modal.show('KL204', [{ lat: 52, lng: 4 }], 'fl', 'km/h');
+
+        (document.getElementById('route-constraints-bulk-alt') as HTMLInputElement).value = '100';
+        (document.getElementById('route-constraints-bulk-spd') as HTMLInputElement).value = '555.6';
+
+        (document.getElementById('submit-route-constraints-btn') as HTMLButtonElement).click();
+        await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+
+        // FL100 -> 10000 ft; 555.6 km/h -> 300 kt
+        expect(sendCommand).toHaveBeenCalledWith('ADDWPT KL204 52.000000,4.000000,10000,300');
+    });
 });

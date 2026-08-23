@@ -85,6 +85,13 @@ describe('DataProcessor compact map labels', () => {
         expect(DataProcessor.formatAltitudeLabel(304.8, 'ft')).toBe('1000ft');
         expect(DataProcessor.formatAltitudeLabel(3000.4, 'm')).toBe('3000m');
     });
+
+    it('altitudeUnitLabel returns the display suffix for each unit', () => {
+        expect(DataProcessor.altitudeUnitLabel('ft')).toBe('ft');
+        expect(DataProcessor.altitudeUnitLabel('m')).toBe('m');
+        expect(DataProcessor.altitudeUnitLabel('km')).toBe('km');
+        expect(DataProcessor.altitudeUnitLabel('fl')).toBe('FL');
+    });
 });
 
 describe('DataProcessor.convertVerticalSpeed', () => {
