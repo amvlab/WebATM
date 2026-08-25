@@ -131,10 +131,6 @@ class BlueSkyProxy:
         """
         return self.was_connected and self.running and len(self.tracked_nodes) > 0
 
-    def _ensure_clean_zmq_context(self):
-        """Ensure we have a clean environment for ZMQ connections."""
-        return self.connection_mgr._ensure_clean_zmq_context()
-
     def _connect_bluesky_client_signals(self):
         """Connect BlueSky client signals to our handlers."""
         return self.connection_mgr._connect_bluesky_client_signals()
@@ -175,10 +171,6 @@ class BlueSkyProxy:
     def _close_bluesky_client(self):
         """Close network client following ZMQ pattern: close sockets first, then context."""
         return self.connection_mgr._close_bluesky_client()
-
-    def reconnect(self, hostname=None):
-        """Reconnect to BlueSky server following ZMQ pattern."""
-        return self.connection_mgr.reconnect(hostname)
 
     def close(self):
         """Close all network connections and clear state like BlueSky's close() method."""

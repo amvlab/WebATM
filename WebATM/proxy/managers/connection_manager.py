@@ -1,6 +1,5 @@
 """Connection management for the BlueSky proxy."""
 
-import gc
 import threading
 import time
 
@@ -25,23 +24,6 @@ class ConnectionManager:
             proxy (BlueSkyProxy): Parent proxy instance.
         """
         self.proxy = proxy
-
-    def _ensure_clean_zmq_context(self):
-        """Ensure we have a clean environment for ZMQ connections."""
-        try:
-            logger.debug("Preparing clean environment for ZMQ connection...")
-
-            # Force garbage collection to clean up any lingering references
-            gc.collect()
-
-            # Small delay to ensure cleanup completes
-            time.sleep(0.2)
-
-            logger.info("Environment cleanup complete - ready for new FixedClient")
-
-        except Exception as e:
-            logger.warning(f" Warning during cleanup: {e}")
-            # Continue anyway - the FixedClient might still work
 
     def _connect_bluesky_client_signals(self):
         """Connect BlueSky client signals to our node-manager handlers."""
@@ -276,26 +258,12 @@ class ConnectionManager:
         # Don't try to reconnect - just stop running and close
         self.proxy.running = False
         self.proxy.allow_reconnection = False
-
-        # Reset connection failure counter
         self.proxy.connection_failures = 0
 
-        # Clear active node reference immediately to prevent showing corrupted data
-        if self.proxy.bluesky_client and hasattr(self.proxy.bluesky_client, "act_id"):
-            self.proxy.bluesky_client.act_id = None
+        # Clear the cached state BEFORE emitting below, so browsers receive
+        # the disconnected (empty) node/traffic picture, not the stale one.
+        self.proxy.data_mgr._reset_cached_state()
 
-        # Clear all tracked nodes and servers immediately
-        self.proxy.tracked_nodes.clear()
-        self.proxy.tracked_servers.clear()
-
-        # Clear all cached data
-        self.proxy.traffic_data = {}
-        self.proxy.sim_data = {}
-        self.proxy.echo_data = {}
-        self.proxy.poly_data_by_node.clear()
-        self.proxy.polyline_data_by_node.clear()
-
-        # Clear all screen data and emit updates to show disconnected state
         if self.proxy.socketio and self.proxy.connected_clients > 0:
             try:
                 # Emit cleared data to remove all aircraft and simulation info from screen
@@ -307,66 +275,33 @@ class ConnectionManager:
             except Exception as e:
                 logger.warning(f" Error sending disconnection updates: {e}")
 
-        # Close connections and clear state (we might reconnect with same client)
+        # Close the network client's sockets and clear remaining state
         self.close()
 
         logger.info("Disconnection cleanup complete - Ready for new connection")
         logger.info("Use web interface settings to reconnect to BlueSky server")
 
     def close(self):
-        """Close all network connections and clear cached proxy state.
+        """Close the network client's sockets and clear cached proxy state.
 
-        Mirrors BlueSky's own ``close()``: shuts the network client's sockets
-        (the ZMQ context is left to the client), resets connection monitoring,
-        and clears tracked nodes/servers, data caches, emission timestamps,
-        and the pending command dictionary.
+        The client instance itself is kept (only ``stop_client`` destroys it);
+        the app reconnects by creating a fresh ``BlueSkyProxy``, so this only
+        has to release the sockets and forget the cached server state.
         """
-        # Disable reconnection first
         self.proxy.allow_reconnection = False
 
-        # Just close the network client - don't destroy ZMQ context
-        # The app creates a completely new BlueSkyProxy instance for reconnection
-        try:
-            logger.debug(" Closing network client...")
-            if self.proxy.bluesky_client:
-                self.proxy.bluesky_client.close()
-            logger.info(" Network client closed successfully")
-        except Exception as e:
-            logger.error(f" Error closing network client: {e}")
+        client = self.proxy.bluesky_client
+        if client is not None:
+            try:
+                client.close()
+                logger.info(" Network client closed successfully")
+            except Exception as e:
+                logger.error(f" Error closing network client: {e}")
+            # Clear the active node so no stale data can be attributed to it.
+            if hasattr(client, "act_id"):
+                client.act_id = None
 
-        # We reuse the same network client instance - just close its sockets
-
-        # Reset connection monitoring
-        self.proxy.was_connected = False
-        self.proxy.last_successful_update = time.time()
-
-        # Clear all tracked state
-        self.proxy.tracked_nodes.clear()
-        self.proxy.tracked_servers.clear()
-
-        # Clear active node reference to prevent showing corrupted data
-        if hasattr(self.proxy.bluesky_client, "act_id"):
-            self.proxy.bluesky_client.act_id = None
-
-        # Clear data caches
-        self.proxy.traffic_data = {}
-        self.proxy.sim_data = {}
-        self.proxy.echo_data = {}
-
-        # Reset emission timestamps
-        self.proxy.last_siminfo_emit = 0
-        self.proxy.last_acdata_emit = 0
-        self.proxy.last_node_info_emit = 0
-
-        # Clear current map bounds
-        self.proxy.current_bbox = None
-
-        # Clear command dictionary
-        self.proxy.cmddict.clear()
-
-        # Following ZMQ pattern: clear client reference after closing
-        # (new client will be created when reconnecting)
-
+        self.proxy.data_mgr._reset_cached_state()
         logger.debug(" Client state cleared and connections closed")
 
     def stop_client(self, context="disconnect"):
@@ -439,35 +374,3 @@ class ConnectionManager:
                 # Following ZMQ pattern: destroy client instance after closing sockets
                 self.proxy.bluesky_client = None
                 logger.info("Network client instance destroyed")
-
-    def reconnect(self, hostname=None):
-        """Reconnect to the BlueSky server with fresh ZMQ resources.
-
-        Stops the current client, clears state, then starts a new connection
-        via ``start_client``.
-
-        Args:
-            hostname (str | None): BlueSky server hostname/IP to reconnect
-                to. When None, the previously configured host is reused.
-
-        Raises:
-            Exception: Propagated from ``start_client`` if reconnection fails.
-        """
-        logger.info("Reconnecting to BlueSky server...")
-
-        # Following ZMQ pattern: close sockets and destroy context first
-        self.stop_client("disconnect")
-
-        # Wait briefly for ZMQ cleanup to complete
-        time.sleep(0.2)
-
-        # Clear state and prepare for fresh connection
-        self.proxy.data_mgr._clear_state()
-
-        # Following ZMQ pattern: create fresh context and sockets
-        try:
-            self.start_client(hostname=hostname)
-            logger.info(" Reconnection successful with fresh ZMQ resources")
-        except Exception as e:
-            logger.error(f" Reconnection failed: {e}")
-            raise
