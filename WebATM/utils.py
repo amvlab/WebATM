@@ -33,54 +33,23 @@ def make_json_serializable(obj):
     elif isinstance(obj, np.floating):
         return float(obj)
     elif isinstance(obj, dict):
-        # Handle BlueSky's serialized numpy arrays
         if b"numpy" in obj and b"data" in obj and b"type" in obj and b"shape" in obj:
+            # BlueSky msgpack-encoded numpy array; decode it the same way as
+            # bluesky.network.npcodec.decode_ndarray, flattened for JSON.
             try:
-                # This is a BlueSky serialized numpy array - deserialize it
-                import struct
-
-                dtype = (
-                    obj[b"type"].decode()
-                    if isinstance(obj[b"type"], bytes)
-                    else obj[b"type"]
-                )
-                shape = obj[b"shape"]
-                data_bytes = obj[b"data"]
-
-                # Convert numpy dtype string to struct format
-                dtype_map = {
-                    "<f8": "d",  # double
-                    "<f4": "f",  # float
-                    "<i8": "q",  # long long
-                    "<i4": "i",  # int
-                    "|b1": "?",  # bool
-                }
-
-                if dtype in dtype_map:
-                    format_char = dtype_map[dtype]
-                    num_elements = 1
-                    for dim in shape:
-                        num_elements *= dim
-
-                    # Unpack the binary data
-                    values = list(
-                        struct.unpack(f"<{num_elements}{format_char}", data_bytes)
-                    )
-
-                    # Return as list for JSON serialization
-                    return values
-                else:
-                    logger.warning(
-                        f"Utils: Unknown numpy dtype {dtype}, returning raw data"
-                    )
-                    return obj[b"data"].hex()  # Return as hex string if we can't parse
-
+                dtype = obj[b"type"]
+                if isinstance(dtype, bytes):
+                    dtype = dtype.decode()
+                return np.frombuffer(obj[b"data"], dtype=np.dtype(dtype)).tolist()
             except Exception as e:
                 logger.warning(f"Utils: Error deserializing numpy array: {e}")
-                # Fall back to converting dict normally
-                pass
+                data_bytes = obj[b"data"]
+                return (
+                    data_bytes.hex()
+                    if isinstance(data_bytes, bytes)
+                    else str(data_bytes)
+                )
 
-        # Normal dict processing
         return {
             (key.decode() if isinstance(key, bytes) else key): make_json_serializable(
                 value

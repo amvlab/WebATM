@@ -68,6 +68,66 @@ class TestAppFactory:
             set_bluesky_proxy(None)
 
 
+class TestCreateConfiguredApp:
+    """The shared bootstrap used by start_WebATM and the wsgi entry points."""
+
+    def test_defaults_to_localhost(self, monkeypatch):
+        from WebATM.main import create_configured_app
+
+        monkeypatch.delenv("BLUESKY_SERVER_HOST", raising=False)
+        app, socketio = create_configured_app()
+        try:
+            assert app.bluesky_proxy.server_ip == "localhost"
+            assert socketio is not None
+        finally:
+            set_bluesky_proxy(None)
+
+    def test_env_var_sets_server_ip(self, monkeypatch):
+        from WebATM.main import create_configured_app
+
+        monkeypatch.setenv("BLUESKY_SERVER_HOST", "10.1.2.3")
+        app, _ = create_configured_app()
+        try:
+            assert app.bluesky_proxy.server_ip == "10.1.2.3"
+        finally:
+            set_bluesky_proxy(None)
+
+    def test_explicit_host_beats_env_var(self, monkeypatch):
+        from WebATM.main import create_configured_app
+
+        monkeypatch.setenv("BLUESKY_SERVER_HOST", "10.1.2.3")
+        app, _ = create_configured_app("192.168.0.9")
+        try:
+            assert app.bluesky_proxy.server_ip == "192.168.0.9"
+        finally:
+            set_bluesky_proxy(None)
+
+
+class TestWsgiEntryPoints:
+    """The gunicorn entry scripts must build a configured app on import."""
+
+    @pytest.mark.parametrize("script_name", ["wsgi.py", "wsgi_integrated.py"])
+    def test_script_builds_app(self, script_name, monkeypatch, tmp_path):
+        import importlib.util
+        from pathlib import Path
+
+        # Pin WEBATM_INTEGRATED to "0" (setdefault in wsgi_integrated.py then
+        # leaves it alone, and monkeypatch restores it afterwards) so neither
+        # script registers the integrated extensions during the test.
+        monkeypatch.setenv("WEBATM_INTEGRATED", "0")
+        monkeypatch.setenv("BLUESKY_SERVER_HOST", "wsgi.test.host")
+
+        script = Path(__file__).parent.parent / "script" / script_name
+        spec = importlib.util.spec_from_file_location(f"test_{script.stem}", script)
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+            assert module.app.bluesky_proxy.server_ip == "wsgi.test.host"
+            assert module.socketio is not None
+        finally:
+            set_bluesky_proxy(None)
+
+
 class TestHealthAndStatus:
     def test_health_returns_200(self, client):
         resp = client.get("/health")

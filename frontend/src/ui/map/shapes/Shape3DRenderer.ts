@@ -1,15 +1,16 @@
-import { GeoJSONSource } from 'maplibre-gl';
 import { PolygonShape, DisplayOptions } from '../../../data/types';
 import type { MapDisplay } from '../MapDisplay';
 import type { StateManager } from '../../../core/StateManager';
-import { featureCollection, polygonFeature, toLngLatCoords } from '../../../utils/geojson';
+import { polygonFeature, toLngLatCoords } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
+import { extrusionBounds } from './extrusion';
 import {
     ensureGeoJSONSource,
     ensureLayer,
     setLayerVisibility,
     safeRemoveLayer,
-    safeRemoveSource
+    safeRemoveSource,
+    updateSourceWithRecovery
 } from '../../../utils/maplibre';
 
 /**
@@ -72,47 +73,31 @@ export class Shape3DRenderer {
     }
 
     /**
-     * Render polygons as extruded 3D shapes.
-     * Polygons with altitude data use their actual top/bottom values.
-     * Polygons without altitude data get a default extrusion height.
+     * Render polygons with altitude data as extruded 3D volumes. Polygons
+     * without altitude data are skipped - they stay flat in the 2D layers,
+     * matching how BlueSky treats shapes with no vertical extent.
      */
     public renderExtrudedPolygons(polygons: PolygonShape[]): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
         const displayOptions = this.stateManager.getDisplayOptions();
-        const DEFAULT_EXTRUSION_HEIGHT = 1000; // meters - default height for polygons without altitude
 
-        const features = polygons.map(poly => {
-            const hasAltitude = poly.topAltitude !== undefined && poly.topAltitude !== null;
-            const topAlt = hasAltitude
-                ? (poly.topAltitude || 0)
-                : DEFAULT_EXTRUSION_HEIGHT;
-            const bottomAlt = hasAltitude
-                ? (poly.bottomAltitude || 0)
-                : 0;
-
-            return polygonFeature(toLngLatCoords(poly.coordinates), {
+        const features: GeoJSON.Feature[] = [];
+        for (const poly of polygons) {
+            const bounds = extrusionBounds(poly);
+            if (!bounds) continue;
+            features.push(polygonFeature(toLngLatCoords(poly.coordinates), {
                 name: poly.name,
                 fillColor: poly.fillColor || displayOptions.shapeFillColor || '#ff00ff',
-                extrusionHeight: topAlt,
-                extrusionBase: bottomAlt
-            });
-        });
-
-        // Re-create the layers once if the source is missing (initial load
-        // or a style change removed it), then retry.
-        let source = map.getSource(this.SOURCE_ID) as GeoJSONSource | undefined;
-        if (!source) {
-            logger.debug('Shape3DRenderer', 'Source not found, re-creating layers...');
-            this.setupMapLayers();
-            source = map.getSource(this.SOURCE_ID) as GeoJSONSource | undefined;
+                extrusionHeight: bounds.top,
+                extrusionBase: bounds.base
+            }));
         }
 
-        if (source) {
-            source.setData(featureCollection(features));
-        } else {
-            logger.warn('Shape3DRenderer', `Failed to create source - cannot render ${polygons.length} extruded polygons`);
+        const ok = updateSourceWithRecovery(map, this.SOURCE_ID, features, () => this.setupMapLayers());
+        if (!ok) {
+            logger.warn('Shape3DRenderer', `Failed to create source - cannot render ${features.length} extruded polygons`);
         }
     }
 
@@ -122,10 +107,12 @@ export class Shape3DRenderer {
         setLayerVisibility(map, this.LAYER_ID, displayOptions.show3DOverlay && displayOptions.showShapes);
     }
 
+    /**
+     * Mark the layers as lost after a map style change; the next
+     * initialize() (driven by ShapeRenderer) re-creates them.
+     */
     public onStyleChange(): void {
-        logger.debug('Shape3DRenderer', 'Map style changed - recreating layers');
         this.initialized = false;
-        this.initialize();
     }
 
     public destroy(): void {

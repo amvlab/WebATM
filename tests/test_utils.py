@@ -122,13 +122,53 @@ class TestMakeJsonSerializable:
         # The deserializer flattens to a single list of values.
         assert make_json_serializable(obj) == [1.0, 2.0, 3.0, 4.0]
 
-    def test_bluesky_serialized_unknown_dtype_falls_back_to_hex(self):
+    def test_bluesky_serialized_numpy_half_float_array(self):
+        arr = np.array([1.5, 2.5], dtype=np.float16)
+        obj = {
+            b"numpy": True,
+            b"data": arr.tobytes(),
+            b"type": arr.dtype.str,  # "<f2"
+            b"shape": [2],
+        }
+        assert make_json_serializable(obj) == [1.5, 2.5]
+
+    def test_bluesky_serialized_numpy_uint64_array(self):
+        arr = np.array([1, 2, 3], dtype=np.uint64)
+        obj = {
+            b"numpy": True,
+            b"data": arr.tobytes(),
+            b"type": arr.dtype.str,  # "<u8"
+            b"shape": [3],
+        }
+        assert make_json_serializable(obj) == [1, 2, 3]
+
+    def test_bluesky_serialized_numpy_string_array(self):
+        arr = np.array(["KL01", "KL02"])
+        obj = {
+            b"numpy": True,
+            b"data": arr.tobytes(),
+            b"type": arr.dtype.str,  # "<U4"
+            b"shape": [2],
+        }
+        assert make_json_serializable(obj) == ["KL01", "KL02"]
+
+    def test_bluesky_serialized_invalid_dtype_falls_back_to_hex(self):
         data_bytes = b"\x01\x02\x03\x04"
         obj = {
             b"numpy": True,
             b"data": data_bytes,
-            b"type": "<f2",  # not in the dtype map
+            b"type": "not-a-dtype",
             b"shape": [2],
+        }
+        assert make_json_serializable(obj) == data_bytes.hex()
+
+    def test_bluesky_serialized_truncated_buffer_falls_back_to_hex(self):
+        data_bytes = b"\x01\x02\x03"  # not a multiple of 8 bytes
+        obj = {
+            b"numpy": True,
+            b"data": data_bytes,
+            b"type": "<f8",
+            b"shape": [1],
         }
         assert make_json_serializable(obj) == data_bytes.hex()
 

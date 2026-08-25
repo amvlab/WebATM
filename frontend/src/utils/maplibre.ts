@@ -51,6 +51,27 @@ export function updateSourceFeatures(
     source.setData({ type: 'FeatureCollection', features });
 }
 
+/**
+ * Push features to a GeoJSON source, calling `recreate` once to rebuild the
+ * owning layers when the source is missing (initial load, or a style change
+ * removed it). Returns false when the source still doesn't exist afterwards.
+ */
+export function updateSourceWithRecovery(
+    map: MapLibreMap,
+    sourceId: string,
+    features: GeoJSON.Feature[],
+    recreate: () => void
+): boolean {
+    let source = map.getSource(sourceId) as GeoJSONSource | undefined;
+    if (!source) {
+        recreate();
+        source = map.getSource(sourceId) as GeoJSONSource | undefined;
+    }
+    if (!source) return false;
+    source.setData({ type: 'FeatureCollection', features });
+    return true;
+}
+
 export function setLayerVisibility(
     map: MapLibreMap,
     layerId: string,

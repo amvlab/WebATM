@@ -122,6 +122,34 @@ class DataManager:
         # Schedule next backup emission
         self.start_backup_timer()
 
+    def _reset_cached_state(self):
+        """Reset connection monitoring and drop all cached BlueSky state.
+
+        The single implementation of "forget everything we knew about the
+        server": tracked nodes/servers, data caches, emission throttles, map
+        bounds and the command dictionary. Shared by every teardown path
+        (``stop_client``, ``ConnectionManager.close`` and
+        ``_handle_disconnection``) so the paths cannot drift apart.
+        """
+        self.proxy.was_connected = False
+        self.proxy.last_successful_update = time.time()
+
+        self.proxy.tracked_nodes.clear()
+        self.proxy.tracked_servers.clear()
+
+        self.proxy.traffic_data = {}
+        self.proxy.sim_data = {}
+        self.proxy.echo_data = {}
+        self.proxy.poly_data_by_node.clear()
+        self.proxy.polyline_data_by_node.clear()
+
+        self.proxy.last_siminfo_emit = 0
+        self.proxy.last_acdata_emit = 0
+        self.proxy.last_node_info_emit = 0
+
+        self.proxy.current_bbox = None
+        self.proxy.cmddict.clear()
+
     def _clear_state(self, context="disconnect"):
         """Clear all cached client state after a stop or disconnect.
 
@@ -131,31 +159,7 @@ class DataManager:
                 ``"shutdown"`` for app termination. Only affects the final
                 log message.
         """
-        # Reset connection monitoring
-        self.proxy.was_connected = False
-        self.proxy.last_successful_update = time.time()
-
-        # Clear all tracked state
-        self.proxy.tracked_nodes.clear()
-        self.proxy.tracked_servers.clear()
-
-        # Clear data caches
-        self.proxy.traffic_data = {}
-        self.proxy.sim_data = {}
-        self.proxy.echo_data = {}
-        self.proxy.poly_data_by_node.clear()
-        self.proxy.polyline_data_by_node.clear()
-
-        # Reset emission timestamps
-        self.proxy.last_siminfo_emit = 0
-        self.proxy.last_acdata_emit = 0
-        self.proxy.last_node_info_emit = 0
-
-        # Clear current map bounds
-        self.proxy.current_bbox = None
-
-        # Clear command dictionary
-        self.proxy.cmddict.clear()
+        self._reset_cached_state()
 
         # Emit updated node info to show disconnection
         if self.proxy.socketio and self.proxy.connected_clients > 0:
