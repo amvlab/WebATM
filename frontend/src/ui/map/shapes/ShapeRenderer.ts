@@ -1,14 +1,14 @@
-import { GeoJSONSource } from 'maplibre-gl';
 import { Shape, PolygonShape, PolylineShape, DisplayOptions } from '../../../data/types';
 import type { MapDisplay } from '../MapDisplay';
 import type { StateManager } from '../../../core/StateManager';
 import { Shape3DRenderer } from './Shape3DRenderer';
-import { featureCollection, lineStringFeature, pointFeature, polygonFeature, toLngLatCoords } from '../../../utils/geojson';
+import { lineStringFeature, pointFeature, polygonFeature, toLngLatCoords } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
 import {
     ensureGeoJSONSource,
     ensureLayer,
-    setLayerVisibility
+    setLayerVisibility,
+    updateSourceWithRecovery
 } from '../../../utils/maplibre';
 
 /**
@@ -39,10 +39,8 @@ export class ShapeRenderer {
         this.stateManager = stateManager;
         this.shape3DRenderer = new Shape3DRenderer(mapDisplay, stateManager);
 
-        // Subscribe once for the renderer's lifetime. initialize() re-runs on
-        // every style change and source recovery, so subscriptions must not
-        // live there - each re-init would stack another listener and multiply
-        // the render work per update.
+        // Subscribe once for the renderer's lifetime; initialize() re-runs on
+        // every style change, so subscribing there would stack listeners.
         this.unsubscribers.push(
             this.stateManager.subscribeToShapes((shapes) => {
                 this.renderShapes(shapes);
@@ -189,16 +187,8 @@ export class ShapeRenderer {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        let source = map.getSource(sourceId) as GeoJSONSource | undefined;
-        if (!source) {
-            logger.debug('ShapeRenderer', `Source ${sourceId} not found, re-creating layers...`);
-            this.setupMapLayers();
-            source = map.getSource(sourceId) as GeoJSONSource | undefined;
-        }
-
-        if (source) {
-            source.setData(featureCollection(features));
-        } else {
+        const ok = updateSourceWithRecovery(map, sourceId, features, () => this.setupMapLayers());
+        if (!ok) {
             logger.warn('ShapeRenderer', `Failed to create source ${sourceId} - cannot render ${features.length} features`);
         }
     }
@@ -311,25 +301,14 @@ export class ShapeRenderer {
     }
 
     /**
-     * Handle map style changes - re-add layers and re-render.
+     * Handle map style changes: mark both renderers' layers as lost, then
+     * let initialize() rebuild them and re-render the stored shapes.
      */
     public onStyleChange(): void {
         logger.debug('ShapeRenderer', 'Map style changed - recreating layers');
         this.initialized = false;
-        this.initialize();
-
         this.shape3DRenderer.onStyleChange();
-
-        // Resize map after it settles from re-adding fill-extrusion layer
-        const map = this.mapDisplay.getMap();
-        if (map) {
-            map.once('idle', () => {
-                this.mapDisplay.resize();
-            });
-        }
-
-        const shapes = this.stateManager.getAllShapes();
-        this.renderShapes(shapes);
+        this.initialize();
     }
 
     public destroy(): void {
