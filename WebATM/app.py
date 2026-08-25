@@ -7,7 +7,7 @@ This module is separated into different focused modules in the server/ package:
 
 - server/session_manager.py: Session tracking
 - server/routes.py: Basic Flask routes (index, commands, config, health)
-- server/server_status.py: BlueSky server status
+- server/bluesky_server_status.py: BlueSky server status
 - server/socket_handlers.py: Socket.IO event handlers
 """
 
@@ -84,12 +84,9 @@ def create_app():
     bluesky_proxy.socketio = socketio
     set_bluesky_proxy(bluesky_proxy)  # Set it globally for the subscriber callbacks
 
-    # NB: subscribers are NOT registered here. The proxy creates its network
-    # client lazily on connect (ZMQ pattern), so at app-creation time
-    # bluesky_client is still None and there is nothing to attach to.
-    # register_subscribers() is therefore called on connect instead -- by the
-    # /api/server/config route (standalone) and by the auto-start hook
-    # (integrated), both right after start_client() builds the client.
+    # NB: subscribers are NOT registered here — the network client doesn't
+    # exist yet. register_subscribers() runs on connect instead (the
+    # /api/server/config route, or the integrated auto-start hook).
 
     # Store proxy reference in app for access in routes
     app.bluesky_proxy = bluesky_proxy
@@ -121,11 +118,9 @@ def create_app():
     # Harmless and unused in the default build.
     app.session_manager = session_manager
 
-    # Optional integrated extensions: BlueSky server lifecycle control and
-    # live log streaming. This is a no-op in the default build -- the
-    # WEBATM_INTEGRATED env var is unset and the webatm_integrated package is
-    # not installed, so the import is skipped or caught. The core package
-    # never imports webatm_integrated; the dependency points the other way.
+    # Optional integrated extensions (server lifecycle control, live log
+    # streaming). A no-op in the default build: the env var is unset and the
+    # webatm_integrated package is not installed.
     if os.environ.get("WEBATM_INTEGRATED") == "1":
         try:
             import webatm_integrated

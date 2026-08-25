@@ -8,6 +8,29 @@ from .logger import get_logger
 logger = get_logger()
 
 
+def create_configured_app(bluesky_host=None):
+    """Create the app with the default BlueSky server IP set on the proxy.
+
+    Shared bootstrap for every entry point: the dev server
+    (:func:`start_WebATM`) and the gunicorn WSGI scripts
+    (``script/wsgi.py``, ``script/wsgi_integrated.py``). The proxy is only
+    configured, not connected.
+
+    Args:
+        bluesky_host (str | None): BlueSky server hostname/IP. Falls back to
+            the ``BLUESKY_SERVER_HOST`` environment variable, then
+            ``"localhost"``.
+
+    Returns:
+        tuple: The ``(app, socketio)`` pair from :func:`WebATM.app.create_app`.
+    """
+    bluesky_host = bluesky_host or os.environ.get("BLUESKY_SERVER_HOST", "localhost")
+    app, socketio = create_app()
+    app.bluesky_proxy.server_ip = bluesky_host
+    logger.info(f"Default BlueSky server IP set to: {bluesky_host}")
+    return app, socketio
+
+
 def start_WebATM(hostname=None, port=8082, debug=False):
     """Start the WebATM web server.
 
@@ -26,18 +49,10 @@ def start_WebATM(hostname=None, port=8082, debug=False):
             set, takes precedence.
         debug (bool): Whether to run the Socket.IO server in debug mode.
     """
-    # Get BlueSky server hostname from environment variable or parameter
-    bluesky_host = hostname or os.environ.get("BLUESKY_SERVER_HOST", "localhost")
     web_port = int(os.environ.get("WEB_PORT", port))
     web_host = os.environ.get("WEB_HOST", "localhost")
 
-    # create the app
-    app, socketio = create_app()
-
-    # Set default server IP on the client but don't connect - wait for user to configure
-    app.bluesky_proxy.server_ip = bluesky_host
-    logger.info("BlueSky Proxy initialized (not connected to BlueSky server)")
-    logger.info(f"Default BlueSky server IP set to: {bluesky_host}")
+    app, socketio = create_configured_app(hostname)
     logger.info("Ready - Connect to BlueSky server via WebATM")
 
     try:

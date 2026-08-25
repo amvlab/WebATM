@@ -1,45 +1,29 @@
 #!/usr/bin/env python
 """WSGI entry point for the ``webatm-integrated`` build.
 
-Like ``wsgi.py``, this entry point uses plain threading (no monkey patching):
-the integrated build reads a blocking subprocess pipe in a background thread.
-Run it with a threaded worker, e.g.::
+Same threaded-worker setup as ``wsgi.py`` (no monkey patching; the
+integrated build reads a blocking subprocess pipe in a background thread):
 
     gunicorn --worker-class gthread --threads 4 -w 1 --bind 0.0.0.0:8082 wsgi_integrated:app
-
-The core SocketIO is created with ``async_mode="threading"``, which is correct
-under a gthread worker.
 """
 
 import os
 
-from WebATM.app import create_app
 from WebATM.logger import get_logger
+from WebATM.main import create_configured_app
 
 logger = get_logger()
 
-# Ensure the integrated hook in WebATM.app.create_app() fires even if the
-# orchestrator forgot to set it. create_app() reads this at call time (below),
-# so setting it here is sufficient.
+# create_configured_app() -> create_app() reads this at call time, so setting
+# it here ensures the integrated hook fires even if the orchestrator forgot.
 os.environ.setdefault("WEBATM_INTEGRATED", "1")
 
-# Get configuration from environment variables
-bluesky_host = os.environ.get("BLUESKY_SERVER_HOST", "localhost")
-web_port = int(os.environ.get("WEB_PORT", 8082))
-web_host = os.environ.get("WEB_HOST", "0.0.0.0")
-
-# Create the Flask app and SocketIO instance (integrated extensions register here)
-app, socketio = create_app()
-
-# Set the BlueSky host. The integrated build auto-starts the bundled BlueSky
-# server and connects the proxy on boot (see webatm_integrated.auto_start); set
-# WEBATM_AUTO_START=0 to instead start it manually from the web UI.
-app.bluesky_proxy.server_ip = bluesky_host
-logger.info("WebATM (integrated) initialized")
-logger.info(f"Default BlueSky server IP set to: {bluesky_host}")
+app, socketio = create_configured_app()
 logger.info("Ready - BlueSky server auto-starting (WEBATM_AUTO_START=0 to disable)")
 
 if __name__ == "__main__":
-    # Not used by gunicorn, but allows testing with `python wsgi_integrated.py`.
+    # Fallback for testing without gunicorn: python wsgi_integrated.py
+    web_host = os.environ.get("WEB_HOST", "0.0.0.0")
+    web_port = int(os.environ.get("WEB_PORT", 8082))
     logger.info(f"Starting WebATM (integrated) on http://{web_host}:{web_port}")
-    socketio.run(app, host=web_host, port=web_port)
+    socketio.run(app, host=web_host, port=web_port, allow_unsafe_werkzeug=True)
