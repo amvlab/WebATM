@@ -37,6 +37,16 @@ def test_configure_sets_base_path_and_creates_dirs(monkeypatch, tmp_path):
         assert (workdir / sub).is_dir(), f"expected {sub}/ to be created"
 
 
+def test_configure_locks_base_path(monkeypatch, tmp_path):
+    """The fixed path is locked so the manual configure route refuses changes."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    app = types.SimpleNamespace()
+
+    configure_file_management(app)
+
+    assert app.bluesky_base_path_locked is True
+
+
 def test_configure_is_idempotent(monkeypatch, tmp_path):
     """Re-running against already-existing directories must not raise."""
     monkeypatch.setenv("HOME", str(tmp_path))

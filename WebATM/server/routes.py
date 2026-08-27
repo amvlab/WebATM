@@ -667,12 +667,28 @@ def register_basic_routes(app, session_manager):
         subdirectories if needed (the same set the integrated build
         pre-creates), so browsing works before BlueSky's first start.
 
+        In the integrated build the base path is fixed to BlueSky's own
+        working directory (``bluesky_base_path_locked``); reconfiguring it
+        is refused with 403 so uploads can never be diverted away from
+        where the bundled server actually reads them.
+
         Returns:
             JSON with the accepted ``base_path`` and ``derived_paths``
-            (scenario, plugins, settings, output), or a 400/500 error
+            (scenario, plugins, settings, output), or a 400/403/500 error
             payload.
         """
         try:
+            if getattr(current_app, "bluesky_base_path_locked", False):
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            "Base path is fixed to BlueSky's working directory "
+                            "in this build and cannot be reconfigured"
+                        ),
+                    }
+                ), 403
+
             data = request.get_json(silent=True) or {}
             base_path = data.get("base_path", "").strip()
 

@@ -465,6 +465,24 @@ class TestConfigureBasePath:
         assert (tmp_path / "scenario").is_dir()
         assert (tmp_path / "plugins").is_dir()
 
+    def test_locked_base_path_refuses_reconfiguration(self, client, tmp_path):
+        # The integrated build fixes the base path to BlueSky's working
+        # directory and locks it; a manual reconfigure must not divert
+        # uploads away from where the bundled server reads them.
+        app = client.application
+        app.bluesky_base_path = str(tmp_path / "bluesky")
+        app.bluesky_base_path_locked = True
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        resp = client.post(
+            "/api/bluesky/configure-base-path", json={"base_path": str(elsewhere)}
+        )
+
+        assert resp.status_code == 403
+        assert resp.get_json()["success"] is False
+        assert app.bluesky_base_path == str(tmp_path / "bluesky")
+
 
 class TestErrorHandling:
     def test_unknown_route_returns_404(self, client):
