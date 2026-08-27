@@ -32,6 +32,10 @@ FILE_TYPES = {
 }
 WRITABLE_FILE_TYPES = ("scenario", "plugins", "settings")
 
+# Offline-built SQLite FTS index behind /api/navdata/search (see
+# script/navdata/). Module-level so tests can point it at a fixture DB.
+NAVDATA_DB = Path(__file__).parent.parent / "static" / "navdata" / "navdata.sqlite"
+
 
 def _clean_parts(subpath):
     """Split a requested subpath into components, dropping ``.``/``..`` parts.
@@ -521,9 +525,7 @@ def register_basic_routes(app, session_manager):
             limit = max(1, min(limit, 50))
             kind = request.args.get("kind")
 
-            db_path = (
-                Path(__file__).parent.parent / "static" / "navdata" / "navdata.sqlite"
-            )
+            db_path = NAVDATA_DB
             if not db_path.exists():
                 # Index hasn't been built yet - degrade gracefully so the UI
                 # can show "navdata not available" rather than erroring.
@@ -537,12 +539,15 @@ def register_basic_routes(app, session_manager):
 
             # Build a safe FTS5 prefix query: keep only alphanumeric tokens
             # (this also strips any FTS syntax the user might type) and turn
-            # each into a prefix term so "heath" matches "Heathrow" and "kse"
-            # matches "KSEA". Multiple tokens are implicitly AND-ed.
+            # each into a quoted prefix term so "heath" matches "Heathrow"
+            # and "kse" matches "KSEA". The quotes keep uppercase tokens like
+            # OR/AND/NOT literal — unquoted they are FTS5 operators, so e.g.
+            # typing "ORD" would error at the "OR" keystroke. Multiple tokens
+            # are implicitly AND-ed.
             tokens = re.findall(r"[A-Za-z0-9]+", query)
             if not tokens:
                 return jsonify({"success": True, "results": []})
-            match_expr = " ".join(f"{t}*" for t in tokens)
+            match_expr = " ".join(f'"{t}"*' for t in tokens)
 
             # Open read-only so a concurrent rebuild can't be corrupted.
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
