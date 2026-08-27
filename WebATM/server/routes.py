@@ -815,7 +815,10 @@ def register_basic_routes(app, session_manager):
                     )
                     target_path = target_dir / new_filename
                     counter += 1
-                filename = target_path.name
+
+            # Report the name the file was actually stored under — the
+            # auto-renamed one, or settings.cfg whatever the upload was named.
+            filename = target_path.name
 
             file.save(str(target_path))
 
