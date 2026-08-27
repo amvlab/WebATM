@@ -37,6 +37,23 @@ WRITABLE_FILE_TYPES = ("scenario", "plugins", "settings")
 NAVDATA_DB = Path(__file__).parent.parent / "static" / "navdata" / "navdata.sqlite"
 
 
+def _derived_paths(base_path):
+    """Return the managed paths under a configured base directory.
+
+    Args:
+        base_path (Path): Configured BlueSky base directory.
+
+    Returns:
+        dict[str, str]: Scenario/plugins/settings/output paths as strings.
+    """
+    return {
+        "scenario": str(base_path / "scenario"),
+        "plugins": str(base_path / "plugins"),
+        "settings": str(base_path / "settings.cfg"),
+        "output": str(base_path / "output"),
+    }
+
+
 def _clean_parts(subpath):
     """Split a requested subpath into components, dropping ``.``/``..`` parts.
 
@@ -173,35 +190,26 @@ def get_webpack_assets():
     Returns:
         list[str]: HTML ``<script>`` tags for the webpack bundles.
     """
+    fallback = ['<script src="/static/dist/bundle.js"></script>']
+    manifest_path = Path(__file__).parent.parent / "static" / "dist" / "manifest.json"
     try:
-        manifest_path = (
-            Path(__file__).parent.parent / "static" / "dist" / "manifest.json"
-        )
-
-        if not manifest_path.exists():
-            return ['<script src="/static/dist/bundle.js"></script>']
-
         with open(manifest_path) as f:
             manifest = json.load(f)
-
-        # Split production bundles must load in this order; a development
-        # manifest simply only contains main.js.
-        chunk_order = ("runtime.js", "vendor.js", "app.js", "main.js")
-        script_tags = [
-            f'<script src="/static/dist/{manifest[chunk]}"></script>'
-            for chunk in chunk_order
-            if chunk in manifest
-        ]
-
-        return (
-            script_tags
-            if script_tags
-            else ['<script src="/static/dist/bundle.js"></script>']
-        )
-
+    except FileNotFoundError:
+        return fallback
     except Exception as e:
         logger.info(f"Error reading webpack manifest: {e}")
-        return ['<script src="/static/dist/bundle.js"></script>']
+        return fallback
+
+    # Split production bundles must load in this order; a development
+    # manifest simply only contains main.js.
+    chunk_order = ("runtime.js", "vendor.js", "app.js", "main.js")
+    script_tags = [
+        f'<script src="/static/dist/{manifest[chunk]}"></script>'
+        for chunk in chunk_order
+        if chunk in manifest
+    ]
+    return script_tags or fallback
 
 
 def register_basic_routes(app, session_manager):
@@ -727,12 +735,7 @@ def register_basic_routes(app, session_manager):
                     {
                         "success": True,
                         "base_path": current_app.bluesky_base_path,
-                        "derived_paths": {
-                            "scenario": str(path_obj / "scenario"),
-                            "plugins": str(path_obj / "plugins"),
-                            "settings": str(path_obj / "settings.cfg"),
-                            "output": str(path_obj / "output"),
-                        },
+                        "derived_paths": _derived_paths(path_obj),
                     }
                 )
 
@@ -1053,16 +1056,13 @@ def register_basic_routes(app, session_manager):
             max_lines = request.args.get("lines", type=int, default=200)
             file_size = resolved_path.stat().st_size
 
-            # A file smaller than the poller's offset was truncated or
-            # rewritten (e.g. a re-run scenario logging to the same name);
-            # restart with a tail load instead of pinning at end-of-file.
+            # A file smaller than the offset was truncated or rewritten
+            # between polls; restart with a tail load instead of pinning at EOF.
             if offset > file_size:
                 offset = 0
 
-            # Read in binary so offsets are real byte positions. Text-mode
-            # tell() returns opaque cookies whose newline translation also
-            # delivered a trailing \r as \n twice when a CRLF log was caught
-            # mid-line (a spurious blank line in the stream viewer).
+            # Binary mode so offsets are real byte positions (text-mode tell()
+            # returns opaque cookies and garbles CRLF logs caught mid-line).
             with open(resolved_path, "rb") as f:
                 if offset > 0:
                     f.seek(offset)
@@ -1183,12 +1183,7 @@ def register_basic_routes(app, session_manager):
                 {
                     "configured": True,
                     "base_path": str(base_path),
-                    "derived_paths": {
-                        "scenario": str(base_path / "scenario"),
-                        "plugins": str(base_path / "plugins"),
-                        "settings": str(base_path / "settings.cfg"),
-                        "output": str(base_path / "output"),
-                    },
+                    "derived_paths": _derived_paths(base_path),
                     "path_exists": base_path.exists(),
                     "path_writable": os.access(str(base_path), os.W_OK)
                     if base_path.exists()
