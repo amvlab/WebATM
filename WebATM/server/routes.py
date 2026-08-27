@@ -32,6 +32,27 @@ FILE_TYPES = {
 }
 WRITABLE_FILE_TYPES = ("scenario", "plugins", "settings")
 
+# Offline-built SQLite FTS index behind /api/navdata/search (see
+# script/navdata/). Module-level so tests can point it at a fixture DB.
+NAVDATA_DB = Path(__file__).parent.parent / "static" / "navdata" / "navdata.sqlite"
+
+
+def _derived_paths(base_path):
+    """Return the managed paths under a configured base directory.
+
+    Args:
+        base_path (Path): Configured BlueSky base directory.
+
+    Returns:
+        dict[str, str]: Scenario/plugins/settings/output paths as strings.
+    """
+    return {
+        "scenario": str(base_path / "scenario"),
+        "plugins": str(base_path / "plugins"),
+        "settings": str(base_path / "settings.cfg"),
+        "output": str(base_path / "output"),
+    }
+
 
 def _clean_parts(subpath):
     """Split a requested subpath into components, dropping ``.``/``..`` parts.
@@ -169,35 +190,26 @@ def get_webpack_assets():
     Returns:
         list[str]: HTML ``<script>`` tags for the webpack bundles.
     """
+    fallback = ['<script src="/static/dist/bundle.js"></script>']
+    manifest_path = Path(__file__).parent.parent / "static" / "dist" / "manifest.json"
     try:
-        manifest_path = (
-            Path(__file__).parent.parent / "static" / "dist" / "manifest.json"
-        )
-
-        if not manifest_path.exists():
-            return ['<script src="/static/dist/bundle.js"></script>']
-
         with open(manifest_path) as f:
             manifest = json.load(f)
-
-        # Split production bundles must load in this order; a development
-        # manifest simply only contains main.js.
-        chunk_order = ("runtime.js", "vendor.js", "app.js", "main.js")
-        script_tags = [
-            f'<script src="/static/dist/{manifest[chunk]}"></script>'
-            for chunk in chunk_order
-            if chunk in manifest
-        ]
-
-        return (
-            script_tags
-            if script_tags
-            else ['<script src="/static/dist/bundle.js"></script>']
-        )
-
+    except FileNotFoundError:
+        return fallback
     except Exception as e:
         logger.info(f"Error reading webpack manifest: {e}")
-        return ['<script src="/static/dist/bundle.js"></script>']
+        return fallback
+
+    # Split production bundles must load in this order; a development
+    # manifest simply only contains main.js.
+    chunk_order = ("runtime.js", "vendor.js", "app.js", "main.js")
+    script_tags = [
+        f'<script src="/static/dist/{manifest[chunk]}"></script>'
+        for chunk in chunk_order
+        if chunk in manifest
+    ]
+    return script_tags or fallback
 
 
 def register_basic_routes(app, session_manager):
@@ -521,9 +533,7 @@ def register_basic_routes(app, session_manager):
             limit = max(1, min(limit, 50))
             kind = request.args.get("kind")
 
-            db_path = (
-                Path(__file__).parent.parent / "static" / "navdata" / "navdata.sqlite"
-            )
+            db_path = NAVDATA_DB
             if not db_path.exists():
                 # Index hasn't been built yet - degrade gracefully so the UI
                 # can show "navdata not available" rather than erroring.
@@ -537,12 +547,15 @@ def register_basic_routes(app, session_manager):
 
             # Build a safe FTS5 prefix query: keep only alphanumeric tokens
             # (this also strips any FTS syntax the user might type) and turn
-            # each into a prefix term so "heath" matches "Heathrow" and "kse"
-            # matches "KSEA". Multiple tokens are implicitly AND-ed.
+            # each into a quoted prefix term so "heath" matches "Heathrow"
+            # and "kse" matches "KSEA". The quotes keep uppercase tokens like
+            # OR/AND/NOT literal — unquoted they are FTS5 operators, so e.g.
+            # typing "ORD" would error at the "OR" keystroke. Multiple tokens
+            # are implicitly AND-ed.
             tokens = re.findall(r"[A-Za-z0-9]+", query)
             if not tokens:
                 return jsonify({"success": True, "results": []})
-            match_expr = " ".join(f"{t}*" for t in tokens)
+            match_expr = " ".join(f'"{t}"*' for t in tokens)
 
             # Open read-only so a concurrent rebuild can't be corrupted.
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -662,12 +675,28 @@ def register_basic_routes(app, session_manager):
         subdirectories if needed (the same set the integrated build
         pre-creates), so browsing works before BlueSky's first start.
 
+        In the integrated build the base path is fixed to BlueSky's own
+        working directory (``bluesky_base_path_locked``); reconfiguring it
+        is refused with 403 so uploads can never be diverted away from
+        where the bundled server actually reads them.
+
         Returns:
             JSON with the accepted ``base_path`` and ``derived_paths``
-            (scenario, plugins, settings, output), or a 400/500 error
+            (scenario, plugins, settings, output), or a 400/403/500 error
             payload.
         """
         try:
+            if getattr(current_app, "bluesky_base_path_locked", False):
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            "Base path is fixed to BlueSky's working directory "
+                            "in this build and cannot be reconfigured"
+                        ),
+                    }
+                ), 403
+
             data = request.get_json(silent=True) or {}
             base_path = data.get("base_path", "").strip()
 
@@ -706,12 +735,7 @@ def register_basic_routes(app, session_manager):
                     {
                         "success": True,
                         "base_path": current_app.bluesky_base_path,
-                        "derived_paths": {
-                            "scenario": str(path_obj / "scenario"),
-                            "plugins": str(path_obj / "plugins"),
-                            "settings": str(path_obj / "settings.cfg"),
-                            "output": str(path_obj / "output"),
-                        },
+                        "derived_paths": _derived_paths(path_obj),
                     }
                 )
 
@@ -810,7 +834,10 @@ def register_basic_routes(app, session_manager):
                     )
                     target_path = target_dir / new_filename
                     counter += 1
-                filename = target_path.name
+
+            # Report the name the file was actually stored under — the
+            # auto-renamed one, or settings.cfg whatever the upload was named.
+            filename = target_path.name
 
             file.save(str(target_path))
 
@@ -1029,16 +1056,13 @@ def register_basic_routes(app, session_manager):
             max_lines = request.args.get("lines", type=int, default=200)
             file_size = resolved_path.stat().st_size
 
-            # A file smaller than the poller's offset was truncated or
-            # rewritten (e.g. a re-run scenario logging to the same name);
-            # restart with a tail load instead of pinning at end-of-file.
+            # A file smaller than the offset was truncated or rewritten
+            # between polls; restart with a tail load instead of pinning at EOF.
             if offset > file_size:
                 offset = 0
 
-            # Read in binary so offsets are real byte positions. Text-mode
-            # tell() returns opaque cookies whose newline translation also
-            # delivered a trailing \r as \n twice when a CRLF log was caught
-            # mid-line (a spurious blank line in the stream viewer).
+            # Binary mode so offsets are real byte positions (text-mode tell()
+            # returns opaque cookies and garbles CRLF logs caught mid-line).
             with open(resolved_path, "rb") as f:
                 if offset > 0:
                     f.seek(offset)
@@ -1159,12 +1183,7 @@ def register_basic_routes(app, session_manager):
                 {
                     "configured": True,
                     "base_path": str(base_path),
-                    "derived_paths": {
-                        "scenario": str(base_path / "scenario"),
-                        "plugins": str(base_path / "plugins"),
-                        "settings": str(base_path / "settings.cfg"),
-                        "output": str(base_path / "output"),
-                    },
+                    "derived_paths": _derived_paths(base_path),
                     "path_exists": base_path.exists(),
                     "path_writable": os.access(str(base_path), os.W_OK)
                     if base_path.exists()

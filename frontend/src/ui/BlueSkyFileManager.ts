@@ -35,6 +35,14 @@ interface Breadcrumb {
     path: string;
 }
 
+interface UploadResponse {
+    success: boolean;
+    // Name the backend stored the file under — it can differ from the
+    // uploaded name (sanitization, auto-rename on conflict).
+    filename?: string;
+    error?: string;
+}
+
 /**
  * BlueSky File Manager
  * Handles file uploads for scenarios, plugins, and settings files
@@ -79,15 +87,12 @@ export class BlueSkyFileManager {
     }
 
     private setupEventHandlers(): void {
-        // Configure base path button (now in settings modal)
         const configureBtn = document.getElementById('configure-base-path-btn-settings');
         configureBtn?.addEventListener('click', () => this.configureBasePath());
 
-        // File type selector
         const fileTypeSelect = document.getElementById('file-type-select') as HTMLSelectElement;
         fileTypeSelect?.addEventListener('change', () => this.updateFileInputAccept());
 
-        // File input and drop zone
         const fileInput = document.getElementById('file-input') as HTMLInputElement;
         const dropZone = document.getElementById('file-drop-zone');
 
@@ -102,15 +107,12 @@ export class BlueSkyFileManager {
         dropZone?.addEventListener('dragend', () => this.clearDropHighlight());
         dropZone?.addEventListener('drop', (e) => this.handleDrop(e));
 
-        // Upload button
         const uploadBtn = document.getElementById('upload-file-btn');
         uploadBtn?.addEventListener('click', () => this.uploadFile());
 
-        // Upload and run scenario button
         const uploadAndRunBtn = document.getElementById('upload-and-run-scenario-btn');
         uploadAndRunBtn?.addEventListener('click', () => this.uploadAndRunScenario());
 
-        // File management
         const refreshBtn = document.getElementById('refresh-files-btn');
         const viewFileTypeSelect = document.getElementById('view-file-type-select') as HTMLSelectElement;
         
@@ -122,7 +124,6 @@ export class BlueSkyFileManager {
             this.refreshFileList();
         });
 
-        // Close button handlers
         const closeFooterBtn = document.getElementById('upload-files-close-footer');
         closeFooterBtn?.addEventListener('click', () => this.closeModal());
 
@@ -400,36 +401,29 @@ export class BlueSkyFileManager {
 
         const file = fileInput.files[0];
         const fileType = fileTypeSelect.value;
-        
-        // Ensure we're dealing with a scenario file
+
         if (fileType !== 'scenario') {
             this.showStatus('This function is only available for scenario files', 'error');
             return;
         }
-
-        // Validate file extension
-        const extension = this.fileExtensions[fileType];
-        if (!file.name.toLowerCase().endsWith(extension)) {
-            this.showStatus(`Invalid file type. Expected ${extension} file.`, 'error');
-            return;
-        }
-
-        // Extract scenario name (remove .scn extension)
-        const scenarioName = file.name.replace(/\.scn$/i, '');
 
         const uploadAndRunBtn = document.getElementById('upload-and-run-scenario-btn') as HTMLButtonElement;
         uploadAndRunBtn.disabled = true;
         uploadAndRunBtn.textContent = 'Uploading...';
 
         try {
-            const uploadSuccess = await this.performFileUpload(file, fileType);
+            const storedFilename = await this.performFileUpload(file, fileType);
 
-            if (uploadSuccess) {
+            if (storedFilename) {
                 this.showStatus('File uploaded successfully! Running scenario...', 'success');
                 this.closeModal();
 
-                // IC runs the just-uploaded scenario by name.
+                // IC runs the scenario under the name the backend stored it
+                // as, which can differ from the uploaded name (sanitization,
+                // auto-rename on conflict) — running file.name would silently
+                // start a stale namesake instead of the file just uploaded.
                 if (window.app) {
+                    const scenarioName = storedFilename.replace(/\.scn$/i, '');
                     window.app.sendCommand(`IC ${scenarioName}`);
                 } else {
                     this.showStatus('Could not run scenario: Application not available', 'error');
@@ -444,23 +438,25 @@ export class BlueSkyFileManager {
         }
     }
 
-    private async performFileUpload(file: File, fileType: string): Promise<boolean> {
-        // Validate file extension
+    /**
+     * Upload a file and return the filename the backend stored it under
+     * (which can differ from `file.name`), or null on failure.
+     */
+    private async performFileUpload(file: File, fileType: string): Promise<string | null> {
         const extension = this.fileExtensions[fileType];
         if (!file.name.toLowerCase().endsWith(extension)) {
             this.showStatus(`Invalid file type. Expected ${extension} file.`, 'error');
-            return false;
+            return null;
         }
 
-        // Validate file size (max 50MB for scenario files, 10MB for others)
-        const maxSize = fileType === 'scenario' ? 50 * 1024 * 1024 : 10 * 1024 * 1024; // 50MB or 10MB
+        // Size limits mirror the backend's (50MB scenarios, 10MB others).
+        const maxSize = fileType === 'scenario' ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
         if (file.size > maxSize) {
             const maxSizeMB = Math.floor(maxSize / (1024 * 1024));
             this.showStatus(`File too large. Maximum size: ${maxSizeMB}MB`, 'error');
-            return false;
+            return null;
         }
 
-        // Show progress bar
         const progressDiv = document.getElementById('upload-progress');
         const progressBar = document.getElementById('upload-progress-bar');
         progressDiv!.style.display = 'block';
@@ -469,7 +465,7 @@ export class BlueSkyFileManager {
             const formData = new FormData();
             formData.append('file', file);
 
-            // Simulate progress (since we can't get real progress from fetch easily)
+            // Simulate progress (fetch exposes no real upload progress).
             let progress = 0;
             const progressInterval = setInterval(() => {
                 progress += 10;
@@ -488,27 +484,19 @@ export class BlueSkyFileManager {
             progressBar!.style.width = '100%';
             progressBar!.textContent = '100%';
 
-            const result = await response.json();
+            const result: UploadResponse = await response.json();
 
             if (result.success) {
-                // Hide progress bar after a delay
-                setTimeout(() => {
-                    progressDiv!.style.display = 'none';
-                    progressBar!.style.width = '0%';
-                    progressBar!.textContent = '0%';
-                }, 2000);
-                
-                return true;
-            } else {
-                this.showStatus(`Upload failed: ${result.error}`, 'error');
-                return false;
+                return result.filename ?? file.name;
             }
+            this.showStatus(`Upload failed: ${result.error}`, 'error');
+            return null;
         } catch (error) {
             logger.error('BlueSkyFileManager', 'Upload error:', error);
             this.showStatus('Upload failed. Please try again.', 'error');
-            return false;
+            return null;
         } finally {
-            // Hide progress bar after a delay if not already hidden
+            // Hide the progress bar after a delay.
             setTimeout(() => {
                 progressDiv!.style.display = 'none';
                 progressBar!.style.width = '0%';
@@ -534,16 +522,15 @@ export class BlueSkyFileManager {
         uploadBtn.textContent = 'Uploading...';
 
         try {
-            const uploadSuccess = await this.performFileUpload(file, fileType);
-            
-            if (uploadSuccess) {
-                this.showStatus(`File uploaded successfully: ${file.name}`, 'success');
-                
-                // Clear file input
+            // Report the stored name — on a conflict the backend auto-renames
+            // (e.g. demo.scn -> demo_1.scn), and the list shows that name.
+            const storedFilename = await this.performFileUpload(file, fileType);
+
+            if (storedFilename) {
+                this.showStatus(`File uploaded successfully: ${storedFilename}`, 'success');
+
                 fileInput.value = '';
                 this.handleFileSelection();
-                
-                // Refresh file list
                 this.refreshFileList();
             }
         } catch (error) {

@@ -26,6 +26,10 @@ export class NavSearchBox {
     private debounceTimer: number | null = null;
     private activeIndex = -1;
     private current: NavSearchResult[] = [];
+    // Monotonic id of the newest search; responses carrying an older id are
+    // stale (out-of-order fetch, or the input was cleared meanwhile) and are
+    // dropped instead of rendered.
+    private searchSeq = 0;
 
     // Zoom levels the map flies to when a result is selected.
     private readonly AIRPORT_ZOOM = 11;
@@ -74,6 +78,9 @@ export class NavSearchBox {
             window.clearTimeout(this.debounceTimer);
         }
         if (query.length < 1) {
+            // Invalidate any in-flight request so its late response can't
+            // re-open the dropdown over the now-empty input.
+            this.searchSeq++;
             this.current = [];
             this.hideResults();
             return;
@@ -82,12 +89,15 @@ export class NavSearchBox {
     }
 
     private async search(query: string): Promise<void> {
+        const seq = ++this.searchSeq;
         try {
             const resp = await fetch(
                 `/api/navdata/search?q=${encodeURIComponent(query)}&limit=10`
             );
             const data = await resp.json();
+            if (seq !== this.searchSeq) return; // stale response
             if (!data.success) {
+                this.current = [];
                 this.renderMessage(
                     data.error === 'navdata index not built'
                         ? 'Navdata not available (run the offline build).'
@@ -99,7 +109,9 @@ export class NavSearchBox {
             this.activeIndex = -1;
             this.renderResults();
         } catch (err) {
+            if (seq !== this.searchSeq) return; // stale response
             logger.error('NavSearchBox', 'Search request failed:', err);
+            this.current = [];
             this.renderMessage('Search failed.');
         }
     }

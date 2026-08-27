@@ -104,6 +104,28 @@ class TestForward:
         proxy.command_proc.forward("OP")
         assert fake_client.sent == []
 
+    def test_no_client_is_a_clean_noop(self, proxy, fake_socketio):
+        """Regression: forward() used to resolve the target before checking the
+        client existed, so a missing client raised AttributeError internally and
+        echoed a confusing 'NoneType' error to the web console."""
+        proxy.bluesky_client = None
+        proxy.command_proc.forward("OP")  # must not raise
+        assert proxy.echo_data == {}
+        assert fake_socketio.count("echo") == 0
+
+    def test_send_failure_reports_dropped_command(
+        self, proxy, fake_client, fake_socketio
+    ):
+        """A full outbound buffer (send() -> False) must be reported to the
+        user, matching _forward_command's behavior, not silently dropped."""
+        fake_client.send = lambda topic, data="", to_group="": False
+        proxy.bluesky_client = fake_client
+        proxy.command_proc.forward("OP")
+        echo = fake_socketio.last("echo")
+        assert echo is not None
+        assert "dropped" in echo["text"]
+        assert echo["flags"] == 1
+
 
 class TestExecuteLocalCommand:
     def test_help_without_argument(self, proxy):

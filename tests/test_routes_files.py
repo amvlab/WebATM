@@ -73,6 +73,16 @@ class TestUpload:
         assert resp.status_code == 200
         assert (client.base_path / "plugins" / "myplugin.py").exists()
 
+    def test_upload_settings_reports_stored_name(self, client):
+        # Whatever the upload was called, it is stored as settings.cfg and
+        # the response must report that stored name, not the uploaded one.
+        resp = _upload(client, "settings", "my_custom.cfg", b"[settings]")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["filename"] == "settings.cfg"
+        assert (client.base_path / "settings.cfg").exists()
+        assert not (client.base_path / "my_custom.cfg").exists()
+
 
 class TestBrowse:
     def test_browse_lists_uploaded_files(self, client):

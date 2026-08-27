@@ -119,18 +119,14 @@ class ConnectionManager:
                 logger.error(f" Error in network connect(): {e}")
                 raise
 
-            # Initialize connection monitoring
+            # Initialize connection monitoring; was_connected flips to True
+            # once the first node is detected.
             self.proxy.last_successful_update = time.time()
-            self.proxy.was_connected = (
-                False  # Will be set to True when nodes are detected
-            )
+            self.proxy.was_connected = False
 
             self.proxy.running = True
 
-            # Start network timer (like web client does with timer)
             self._start_network_timer()
-
-            # Start backup data emission timer
             self.proxy.data_mgr.start_backup_timer()
 
             logger.debug(
@@ -161,17 +157,15 @@ class ConnectionManager:
                 and self.proxy.bluesky_client
             ):
                 try:
-                    # This is exactly what web client does: network_timer.timeout.connect(proxy.update)
                     self.proxy.bluesky_client.update()
-
-                    # Reset connection failures on successful update
                     self.proxy.connection_failures = 0
 
-                    # Update connection monitoring
                     current_time = time.time()
-                    has_active_nodes = len(self.proxy.tracked_nodes) > 0
 
-                    if has_active_nodes and not self.proxy.was_connected:
+                    if (
+                        len(self.proxy.tracked_nodes) > 0
+                        and not self.proxy.was_connected
+                    ):
                         self.proxy.was_connected = True
                         # Start the data-flow timeout clock from "first node
                         # appeared", not from start_client() — no data can arrive
@@ -182,23 +176,10 @@ class ConnectionManager:
                             "Connection established to BlueSky remote server hosted by amvlab"
                         )
                         self.proxy._emit_connection_status(True)
-                    elif not has_active_nodes and self.proxy.was_connected:
-                        # Check if we should still wait for nodes or mark as disconnected
-                        if (
-                            current_time - self.proxy.last_successful_update
-                            > self.proxy.connection_timeout
-                        ):
-                            self.proxy.was_connected = False
-                            logger.info(
-                                "No active nodes detected after timeout - BlueSky server disconnected"
-                            )
-                            self.proxy._emit_connection_status(False)
-                            self._handle_disconnection(
-                                "No nodes detected after timeout"
-                            )
-                            return
 
-                    # Check for connection timeout (more aggressive)
+                    # Data-flow timeout: nothing received within
+                    # connection_timeout (whether nodes are still listed or all
+                    # gone — no nodes means no data) counts as a disconnect.
                     if (
                         self.proxy.was_connected
                         and current_time - self.proxy.last_successful_update
@@ -229,7 +210,7 @@ class ConnectionManager:
                         self._handle_disconnection("Network error (max failures)")
                         return  # Don't schedule next timer
 
-                # Schedule next update (like web client's 20ms timer)
+                # Schedule the next update
                 if self.proxy.running and self.proxy.allow_reconnection:
                     self.proxy.network_timer = threading.Timer(
                         0.02, network_timer_callback

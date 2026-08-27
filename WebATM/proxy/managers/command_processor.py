@@ -82,11 +82,11 @@ class CommandProcessor:
             else:
                 self._forward_command(cmdline)
 
-    def _forward_command(self, cmdline):
-        """Forward command to BlueSky server for validation and execution."""
+    def _forward_command(self, cmdline, target_id=None):
+        """Forward a command line to the BlueSky server for validation and execution."""
         try:
             sent = self.proxy.bluesky_client.send(
-                "STACK", cmdline, self._resolve_target()
+                "STACK", cmdline, self._resolve_target(target_id)
             )
             if not sent:
                 # Full outbound ZMQ buffer or dead socket — tell the user
@@ -111,20 +111,10 @@ class CommandProcessor:
         """
         if not cmdlines:
             return
-
-        try:
-            command_str = ";".join(cmdlines)
-            target = self._resolve_target(target_id)
-
-            if self.proxy.bluesky_client and self.proxy.bluesky_client.running:
-                self.proxy.bluesky_client.send("STACK", command_str, target)
-                logger.info(f"Forwarded to {target}: {command_str}")
-            else:
-                logger.warning("Cannot forward - BlueSky client not running")
-
-        except Exception as e:
-            logger.error(f"Error in forward(): {e}")
-            self._echo_response(f"Error forwarding command: {e}", 1)
+        if not (self.proxy.bluesky_client and self.proxy.bluesky_client.running):
+            logger.warning("Cannot forward - BlueSky client not running")
+            return
+        self._forward_command(";".join(cmdlines), target_id)
 
     def _execute_local_command(self, cmd, argstring):
         """Execute a command the web client handles itself (bare HELP/? only)."""

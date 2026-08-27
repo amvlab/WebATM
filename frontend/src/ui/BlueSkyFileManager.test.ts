@@ -18,6 +18,8 @@ function buildDom(): void {
         <div id="file-drop-zone"></div>
         <button id="upload-file-btn"></button>
         <button id="upload-and-run-scenario-btn"></button>
+        <div id="upload-progress"><div id="upload-progress-bar"></div></div>
+        <div id="upload-status"></div>
         <div class="settings-section">
             <div class="section-header">
                 <h4>BlueSky File Management</h4>
@@ -84,6 +86,77 @@ describe('BlueSkyFileManager integrated mode', () => {
         blueSkyFileManager.enableIntegratedMode(); // second call is a no-op
 
         await vi.waitFor(() => expect(group.style.display).toBe('none'));
+    });
+});
+
+describe('BlueSkyFileManager upload uses the stored filename', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        buildDom();
+    });
+
+    afterEach(() => {
+        document.body.innerHTML = '';
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    /** Fetch stub: uploads succeed with the backend's stored name (which can
+     *  differ from the uploaded one — sanitization, auto-rename on conflict);
+     *  everything else reports "not configured". */
+    function stubFetch(storedFilename: string): void {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockImplementation(async (url: unknown) => ({
+                json: async () =>
+                    String(url).includes('/api/bluesky/upload/')
+                        ? { success: true, filename: storedFilename }
+                        : { configured: false },
+            })),
+        );
+    }
+
+    /** Stub a selected file, mirroring a real input: setting value = ''
+     *  clears the selection. */
+    function selectFile(name: string): void {
+        const fileInput = document.getElementById('file-input') as HTMLInputElement;
+        const file = new File(['00:00:00.00>CRE NEW1 A320 52 4 90 FL200 220'], name, {
+            type: 'text/plain',
+        });
+        let files: File[] = [file];
+        Object.defineProperty(fileInput, 'files', { get: () => files, configurable: true });
+        Object.defineProperty(fileInput, 'value', {
+            get: () => (files.length ? files[0].name : ''),
+            set: (v: string) => { if (v === '') files = []; },
+            configurable: true,
+        });
+    }
+
+    it('runs the scenario under the name the backend stored it as', async () => {
+        // Re-uploading demo.scn stores it as demo_1.scn; IC must run THAT
+        // file, not the stale root namesake the original name points at.
+        stubFetch('demo_1.scn');
+        const sendCommand = vi.fn();
+        vi.stubGlobal('app', { sendCommand });
+        await import('./BlueSkyFileManager');
+
+        selectFile('demo.scn');
+        (document.getElementById('upload-and-run-scenario-btn') as HTMLButtonElement).click();
+
+        await vi.waitFor(() => expect(sendCommand).toHaveBeenCalledWith('IC demo_1'));
+    });
+
+    it('reports the stored name in the plain-upload success toast', async () => {
+        stubFetch('demo_1.scn');
+        await import('./BlueSkyFileManager');
+
+        selectFile('demo.scn');
+        (document.getElementById('upload-file-btn') as HTMLButtonElement).click();
+
+        await vi.waitFor(() => {
+            const status = document.getElementById('upload-status')?.textContent || '';
+            expect(status).toContain('demo_1.scn');
+        });
     });
 });
 

@@ -280,6 +280,78 @@ class TestCommandRoute:
 
 
 class TestNavdataSearch:
+    @pytest.fixture
+    def navdata_db(self, tmp_path, monkeypatch):
+        """Build a tiny real navdata index (same schema as script/navdata)
+        and point the search route at it."""
+        import sqlite3
+
+        from WebATM.server import routes as routes_module
+
+        db_path = tmp_path / "navdata.sqlite"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE navaids ("
+            "id INTEGER PRIMARY KEY, kind TEXT NOT NULL, ident TEXT NOT NULL, "
+            "name TEXT NOT NULL DEFAULT '', lat REAL NOT NULL, lon REAL NOT NULL, "
+            "score REAL NOT NULL DEFAULT 0, rank INTEGER NOT NULL DEFAULT 0, "
+            "iata TEXT NOT NULL DEFAULT '', muni TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute(
+            "CREATE VIRTUAL TABLE navaids_fts USING fts5("
+            "ident, name, iata, muni, content='navaids', content_rowid='id', "
+            "tokenize='unicode61')"
+        )
+        rows = [
+            (
+                "airport",
+                "KORD",
+                "Chicago O'Hare International",
+                41.98,
+                -87.90,
+                9.0,
+                5,
+                "ORD",
+                "Chicago",
+            ),
+            (
+                "airport",
+                "ENAN",
+                "Andenes Airport, Andoya",
+                69.29,
+                16.14,
+                4.0,
+                3,
+                "ANX",
+                "Andenes",
+            ),
+            (
+                "airport",
+                "KSEA",
+                "Seattle Tacoma International",
+                47.45,
+                -122.31,
+                8.0,
+                5,
+                "SEA",
+                "Seattle",
+            ),
+            ("waypoint", "NOTGA", "", 50.0, 5.0, 0.0, 0, "", ""),
+        ]
+        conn.executemany(
+            "INSERT INTO navaids (kind, ident, name, lat, lon, score, rank, iata, muni) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.execute(
+            "INSERT INTO navaids_fts (rowid, ident, name, iata, muni) "
+            "SELECT id, ident, name, iata, muni FROM navaids"
+        )
+        conn.commit()
+        conn.close()
+        monkeypatch.setattr(routes_module, "NAVDATA_DB", db_path)
+        return db_path
+
     def test_empty_query_returns_empty_results(self, client):
         resp = client.get("/api/navdata/search?q=")
         assert resp.status_code == 200
@@ -287,11 +359,55 @@ class TestNavdataSearch:
         assert body["success"] is True
         assert body["results"] == []
 
-    def test_missing_db_returns_503(self, client):
-        # The navdata sqlite index is not built in the test environment.
+    def test_missing_db_returns_503(self, client, tmp_path, monkeypatch):
+        # With no navdata index built, the route degrades to 503 (the UI
+        # shows "navdata not available") rather than erroring.
+        from WebATM.server import routes as routes_module
+
+        monkeypatch.setattr(routes_module, "NAVDATA_DB", tmp_path / "missing.sqlite")
         resp = client.get("/api/navdata/search?q=KSEA")
         assert resp.status_code == 503
         assert resp.get_json()["success"] is False
+
+    def test_prefix_search_matches(self, client, navdata_db):
+        resp = client.get("/api/navdata/search?q=KSE")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["success"] is True
+        assert [r["ident"] for r in body["results"]] == ["KSEA"]
+
+    @pytest.mark.parametrize(
+        ("query", "expected_ident"),
+        [
+            # Uppercase FTS5 operator keywords must be treated as literal
+            # prefixes, not syntax: "OR" is the natural mid-typing state of
+            # "ORD", "AND" of "ANDENES", "NOT" of "NOTGA".
+            ("OR", "KORD"),
+            ("AND", "ENAN"),
+            ("NOT", "NOTGA"),
+        ],
+    )
+    def test_operator_keywords_search_as_literals(
+        self, client, navdata_db, query, expected_ident
+    ):
+        resp = client.get(f"/api/navdata/search?q={query}")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["success"] is True
+        assert expected_ident in [r["ident"] for r in body["results"]]
+
+    def test_multi_token_query_with_operator_word(self, client, navdata_db):
+        # "Chicago OR" (mid-typing "Chicago ORD") must not 500 either.
+        resp = client.get("/api/navdata/search?q=Chicago%20OR")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["success"] is True
+        assert [r["ident"] for r in body["results"]] == ["KORD"]
+
+    def test_kind_filter(self, client, navdata_db):
+        resp = client.get("/api/navdata/search?q=NOT&kind=airport")
+        assert resp.status_code == 200
+        assert resp.get_json()["results"] == []
 
 
 class TestAircraftModels:
@@ -348,6 +464,24 @@ class TestConfigureBasePath:
         assert body["success"] is True
         assert (tmp_path / "scenario").is_dir()
         assert (tmp_path / "plugins").is_dir()
+
+    def test_locked_base_path_refuses_reconfiguration(self, client, tmp_path):
+        # The integrated build fixes the base path to BlueSky's working
+        # directory and locks it; a manual reconfigure must not divert
+        # uploads away from where the bundled server reads them.
+        app = client.application
+        app.bluesky_base_path = str(tmp_path / "bluesky")
+        app.bluesky_base_path_locked = True
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        resp = client.post(
+            "/api/bluesky/configure-base-path", json={"base_path": str(elsewhere)}
+        )
+
+        assert resp.status_code == 403
+        assert resp.get_json()["success"] is False
+        assert app.bluesky_base_path == str(tmp_path / "bluesky")
 
 
 class TestErrorHandling:
