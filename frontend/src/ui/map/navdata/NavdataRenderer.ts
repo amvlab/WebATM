@@ -6,22 +6,13 @@ import type { StateManager } from '../../../core/StateManager';
 import { logger } from '../../../utils/Logger';
 
 /**
- * NavdataRenderer - renders the static airports + waypoints overlay.
- *
- * Unlike ShapeRenderer (which pushes simulation GeoJSON into geojson sources),
- * this reads a pre-built vector-tile archive produced offline from the
- * public-domain OurAirports data (see script/navdata/). The archive is served
- * as a single static PMTiles file and exposes the source-layers "airports",
- * "heliports", "waypoints" (radio navaids) and "runways" - plus "pavement"
- * (aprons), "taxiways" and "buildings" (terminals/hangars) when the archive
- * was built with an OpenStreetMap extract (those layers simply stay empty
- * otherwise). Because the tiles load
- * themselves, this renderer only has to declare the source + layers once and
- * toggle their visibility.
- *
- * If the archive is missing (the offline build step hasn't been run), MapLibre
- * simply emits tile-load errors that MapDisplay already suppresses, so the rest
- * of the map keeps working.
+ * NavdataRenderer - renders the static airports + waypoints overlay from a
+ * pre-built PMTiles vector archive (OurAirports data, see script/navdata/).
+ * Source-layers: "airports", "heliports", "waypoints", "runways", plus
+ * "pavement", "taxiways" and "buildings" when built with an OSM extract.
+ * The tiles load themselves, so this only declares the source + layers once
+ * and toggles their visibility. A missing archive just produces tile-load
+ * errors that MapDisplay already suppresses.
  */
 export class NavdataRenderer {
     private mapDisplay: MapDisplay;
@@ -34,6 +25,9 @@ export class NavdataRenderer {
     // Disarms the map 'error' listener armed by the latest prepareForStyleChange
     // call, if one is still pending (see armStyleSwapErrorReset).
     private disarmStyleSwapErrorReset: (() => void) | null = null;
+    // Detaches the persistent listeners registered in initialize(), so a
+    // destroy + re-initialize cycle doesn't stack duplicates.
+    private detachListeners: (() => void) | null = null;
 
     private readonly SOURCE_ID = 'navdata';
     // Served statically; the pmtiles:// protocol is registered in MapDisplay.
@@ -103,12 +97,9 @@ export class NavdataRenderer {
         [11, 0]   // everything once zoomed right in
     ];
 
-    // Theme-aware colours for the navdata overlay. Airports use a calmer blue on
-    // the dark basemap (the old #4da3ff was too bright) and a deep blue on light
-    // basemaps; waypoints darken on light maps where the dark grey would wash
-    // out. Halos flip so labels keep contrast against the background. Heliports
-    // read fine on both, so their colour is shared. These are not surfaced as
-    // user colour pickers, so the active map theme is the source of truth.
+    // Theme-aware colours for the navdata overlay; halos flip so labels keep
+    // contrast. Not surfaced as user colour pickers - the active map theme
+    // (MapDisplay.getMapTheme) is the source of truth.
     private readonly PALETTES = {
         dark: {
             airport: '#3f7fc2',
@@ -183,14 +174,19 @@ export class NavdataRenderer {
         // every style switch), so watch sourcedata to find out when an
         // OpenMapTiles 'aeroway' layer becomes available. The handler is a
         // cheap no-op once the layers exist.
-        map.on('sourcedata', () => this.tryAddBasemapAeroway(map));
+        const onSourceData = (): void => this.tryAddBasemapAeroway(map);
+        map.on('sourcedata', onSourceData);
 
         // React to visibility / colour changes from the display options panel.
-        this.stateManager.subscribe('displayOptions', (newOptions) => {
+        const unsubscribe = this.stateManager.subscribe('displayOptions', (newOptions) => {
             if (newOptions) {
                 this.updateDisplayOptions(newOptions);
             }
         });
+        this.detachListeners = () => {
+            map.off('sourcedata', onSourceData);
+            unsubscribe();
+        };
 
         this.initialized = true;
         logger.info('NavdataRenderer', 'Initialized');
@@ -225,10 +221,8 @@ export class NavdataRenderer {
                 'source-layer': this.PAVEMENT_SRC_LAYER,
                 paint: {
                     'fill-color': opts.pavementColor || '#5a6470',
-                    // Opaque on purpose: pavement, centrelines and runways
-                    // share one colour, so full opacity makes overlaps merge
-                    // into a single seamless surface instead of stacking
-                    // darker where features cross.
+                    // Opaque on purpose: overlapping pavement/centrelines/
+                    // runways merge into one surface instead of stacking darker.
                     'fill-opacity': 1
                 },
                 layout: { visibility: vis(opts.showAirports && opts.showPavement) }
@@ -280,9 +274,8 @@ export class NavdataRenderer {
                 'source-layer': this.RUNWAYS_SRC_LAYER,
                 paint: {
                     'fill-color': opts.runwayColor || '#c8d2dc',
-                    // Opaque, and deliberately added after the taxiway
-                    // centrelines: the strip masks lines crossing it, so
-                    // intersections don't show through.
+                    // Opaque and added after the taxiway centrelines, so the
+                    // strip masks lines crossing it.
                     'fill-opacity': 1
                 },
                 layout: { visibility: vis(opts.showAirports && opts.showRunways) }
@@ -501,16 +494,11 @@ export class NavdataRenderer {
 
     /**
      * Render taxiways/aprons from the basemap itself when its schema carries
-     * them, so no offline OSM build is needed:
-     *
-     * - OpenMapTiles styles (OpenFreeMap, MapTiler, ...) ship an 'aeroway'
-     *   source-layer with apron/taxiway polygons + taxiway centrelines.
-     * - Protomaps styles (the offline basemap) have no aprons at all, but a
-     *   deep-zoom extract carries taxiway centrelines in the 'roads' layer
-     *   (kind=aeroway / kind_detail=taxiway).
-     *
-     * The navdata archive's own pavement layers (built with --osm-pbf) take
-     * precedence when present, to avoid double-drawing the same OSM geometry.
+     * them, so no offline OSM build is needed: OpenMapTiles styles ship an
+     * 'aeroway' source-layer (polygons + centrelines); Protomaps styles carry
+     * only taxiway centrelines in 'roads' (kind=aeroway/kind_detail=taxiway).
+     * The navdata archive's own pavement layers take precedence when present,
+     * to avoid double-drawing the same OSM geometry.
      */
     private tryAddBasemapAeroway(map: MapLibreMap): void {
         if (this.styleTransitioning) return;
@@ -702,21 +690,12 @@ export class NavdataRenderer {
     }
 
     /**
-     * Explicit teardown for the basemap-attached aeroway layers (see
-     * tryAddBasemapAeroway), called right before a style swap starts.
-     *
-     * MapLibre's own style diff removes layers whose source disappears, but
-     * only correctly if nothing re-attaches a layer to the dying source in
-     * between computing and executing that diff. The persistent 'sourcedata'
-     * listener registered in initialize() can do exactly that: on a slow or
-     * flaky connection (observed on the demo deployment, not locally), the
-     * basemap's vector-tile metadata can arrive - triggering
-     * tryAddBasemapAeroway - right as an offline-fallback swap
-     * (MapStyleManager.armFirstLoadFallback / handleMapError) is in flight,
-     * which surfaces as MapLibre's "Source ... cannot be removed while layer
-     * ... is using it" error. Removing the layers upfront and pausing
-     * tryAddBasemapAeroway (via styleTransitioning) until the new style has
-     * loaded closes that window.
+     * Tear down the basemap-attached aeroway layers right before a style swap
+     * starts. The persistent 'sourcedata' listener could otherwise re-attach
+     * them to a source MapLibre is mid-way through removing (seen on slow
+     * connections as "Source ... cannot be removed while layer ... is using
+     * it"). Removing the layers upfront and pausing tryAddBasemapAeroway (via
+     * styleTransitioning) until the new style loads closes that window.
      */
     public prepareForStyleChange(): void {
         this.styleTransitioning = true;
@@ -732,16 +711,11 @@ export class NavdataRenderer {
     }
 
     /**
-     * Arm the failure-path reset for the styleTransitioning pause.
-     *
-     * onStyleChange (driven by MapDisplay's 'style.load' handler) lifts the
-     * pause only when the incoming style actually loads. If the style document
-     * fetch fails instead — a mistyped custom style URL, or a network failure
-     * once the one-shot offline fallback has already been used up — no
-     * 'style.load' ever fires and the pause would stick forever, permanently
-     * suppressing tryAddBasemapAeroway. So a map 'error' during the swap lifts
-     * the pause too. Worst case an unrelated (e.g. tile) error lifts it a
-     * little early, restoring the pre-pause self-healing re-attach behavior —
+     * Arm the failure-path reset for the styleTransitioning pause. If the
+     * incoming style never loads (bad URL, network failure), 'style.load'
+     * never fires and the pause would stick forever - so a map 'error' during
+     * the swap lifts it too. Worst case an unrelated (e.g. tile) error lifts
+     * it a little early, restoring the self-healing re-attach behavior -
      * never a stuck latch.
      */
     private armStyleSwapErrorReset(map: MapLibreMap): void {
@@ -789,6 +763,8 @@ export class NavdataRenderer {
         // A teardown mid-swap must not leave the pause latched (or the error
         // listener attached) into a later re-initialize.
         this.endStyleTransition();
+        this.detachListeners?.();
+        this.detachListeners = null;
         this.initialized = false;
         logger.info('NavdataRenderer', 'Destroyed');
     }

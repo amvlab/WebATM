@@ -79,9 +79,10 @@ function setup() {
         runwayColor: '#c8d2dc',
     } as unknown as DisplayOptions;
 
+    const unsubscribe = vi.fn();
     const stateManager = {
         getDisplayOptions: () => displayOptions,
-        subscribe: vi.fn(),
+        subscribe: vi.fn(() => unsubscribe),
     } as unknown as StateManager;
 
     const mapDisplay = {
@@ -90,7 +91,7 @@ function setup() {
     } as unknown as MapDisplay;
 
     const renderer = new NavdataRenderer(mapDisplay, stateManager);
-    return { renderer, map };
+    return { renderer, map, unsubscribe };
 }
 
 describe('NavdataRenderer basemap-aeroway style-swap pause', () => {
@@ -182,5 +183,19 @@ describe('NavdataRenderer basemap-aeroway style-swap pause', () => {
         renderer.initialize();
         map.fire('sourcedata');
         expect(map.layers.has(BASEMAP_PAVEMENT)).toBe(true);
+    });
+
+    it('detaches the persistent listeners on destroy instead of stacking duplicates', () => {
+        const { renderer, map, unsubscribe } = setup();
+        renderer.initialize();
+        expect(map.listenerCount('sourcedata')).toBe(1);
+
+        renderer.destroy();
+        expect(map.listenerCount('sourcedata')).toBe(0);
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
+
+        // A re-initialize registers exactly one fresh set, not a second copy.
+        renderer.initialize();
+        expect(map.listenerCount('sourcedata')).toBe(1);
     });
 });
