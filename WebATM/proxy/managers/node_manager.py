@@ -174,6 +174,10 @@ class NodeManager:
         node_id_str = id2str(node_id)
         if node_id_str in self.proxy.tracked_nodes:
             del self.proxy.tracked_nodes[node_id_str]
+            # The node is gone for good (IDs are never reused), so its cached
+            # shapes can never be served again.
+            self.proxy.poly_data_by_node.pop(node_id_str, None)
+            self.proxy.polyline_data_by_node.pop(node_id_str, None)
             self._failover_active_node(node_id)
             self._emit_node_info()
 
@@ -185,7 +189,9 @@ class NodeManager:
             and self.proxy.running
         ):
             logger.warning(" All nodes removed - checking for server shutdown...")
-            threading.Timer(1.0, self._check_node_shutdown).start()
+            shutdown_check = threading.Timer(1.0, self._check_node_shutdown)
+            shutdown_check.daemon = True
+            shutdown_check.start()
 
     def _failover_active_node(self, removed_node_id):
         """Re-activate a surviving node when the active node disappears.

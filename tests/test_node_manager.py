@@ -202,6 +202,56 @@ class TestNodeRemoval:
 
         assert fake_client.act_id == survivor_bytes
 
+    def test_removal_drops_the_node_cached_shapes(self, proxy):
+        """A removed node's IDs are never reused, so its cached shapes can
+        never be served again and must not linger in the per-node caches."""
+        node_bytes = b"\x01\x02\x03\x04\x81"
+        node_hex = node_bytes.hex()
+        proxy.tracked_nodes[node_hex] = {"node_id": node_bytes}
+        proxy.poly_data_by_node[node_hex] = {"polys": {"AREA1": {"name": "AREA1"}}}
+        proxy.polyline_data_by_node[node_hex] = {"polys": {"LINE1": {"name": "LINE1"}}}
+
+        proxy.node_mgr._on_node_removed(node_bytes)
+
+        assert node_hex not in proxy.poly_data_by_node
+        assert node_hex not in proxy.polyline_data_by_node
+
+    def test_last_node_removed_schedules_daemon_shutdown_check(
+        self, proxy, monkeypatch
+    ):
+        """The 1 s shutdown re-check timer must be a daemon like every other
+        timer, so a pending check cannot block interpreter exit."""
+        import threading
+
+        created = []
+
+        class FakeTimer:
+            def __init__(self, interval, function):
+                self.interval = interval
+                self.function = function
+                self.daemon = False
+                self.started = False
+                created.append(self)
+
+            def start(self):
+                self.started = True
+
+        monkeypatch.setattr(threading, "Timer", FakeTimer)
+
+        node_bytes = b"\x01\x02\x03\x04\x81"
+        proxy.running = True
+        proxy.was_connected = True
+        proxy.tracked_nodes[node_bytes.hex()] = {"node_id": node_bytes}
+
+        proxy.node_mgr._on_node_removed(node_bytes)
+
+        assert len(created) == 1
+        timer = created[0]
+        assert timer.interval == 1.0
+        assert timer.function == proxy.node_mgr._check_node_shutdown
+        assert timer.daemon is True
+        assert timer.started is True
+
     def test_removing_inactive_node_keeps_active_node(self, proxy, fake_client):
         active_bytes = b"\x01\x02\x03\x04\x81"
         other_bytes = b"\x01\x02\x03\x04\x82"

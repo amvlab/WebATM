@@ -92,9 +92,7 @@ class DataManager:
         """Start (or restart) the 0.5 s backup emission timer."""
         if self.proxy.backup_timer:
             self.proxy.backup_timer.cancel()
-        self.proxy.backup_timer = threading.Timer(
-            0.5, self.backup_data_emit
-        )  # More frequent backup
+        self.proxy.backup_timer = threading.Timer(0.5, self.backup_data_emit)
         self.proxy.backup_timer.daemon = True
         self.proxy.backup_timer.start()
 
