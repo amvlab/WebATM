@@ -79,7 +79,7 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         }
 
         if (this.displayOptions.showAircraftSpeed && speed > 0) {
-            // Speed values from BlueSky are in knots
+            // Speed values from BlueSky are in m/s
             labelParts.push(DataProcessor.formatSpeedLabel(speed, this.displayOptions.speedUnit));
         }
 

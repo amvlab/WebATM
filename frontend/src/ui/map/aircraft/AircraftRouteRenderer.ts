@@ -416,7 +416,6 @@ export class AircraftRouteRenderer {
 
     /** Format a waypoint speed constraint (server sends CAS in m/s). */
     private formatSpeedValue(speedMs: number): string {
-        const speedKnots = speedMs / 0.514444;
-        return DataProcessor.formatSpeed(speedKnots, this.displayOptions.speedUnit);
+        return DataProcessor.formatSpeed(speedMs, this.displayOptions.speedUnit);
     }
 }
