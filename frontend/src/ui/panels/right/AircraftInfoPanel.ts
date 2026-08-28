@@ -144,18 +144,18 @@ export class AircraftInfoPanel extends BasePanel {
 
         const data = this.currentAircraftData;
 
-        // Get aircraft data (in BlueSky units: alt in m, speeds in kt, vs in ft/s)
+        // Get aircraft data (in BlueSky SI units: alt in m, speeds and vs in m/s)
         const aircraftId = data.id[index];
         const aircraftType = data.actype && data.actype[index] ? data.actype[index] : 'N/A';
         const lat = data.lat[index];
         const lon = data.lon[index];
         const altMeters = data.alt[index];
         // cas/gs may be absent from the backend feed; 0 is a valid value
-        const casKnots = data.cas?.[index] ?? null;
-        const tasKnots = data.tas[index];
-        const gsKnots = data.gs?.[index] ?? null;
+        const casMs = data.cas?.[index] ?? null;
+        const tasMs = data.tas[index];
+        const gsMs = data.gs?.[index] ?? null;
         const trk = data.trk[index];
-        const vsFtPerSec = data.vs[index];
+        const vsMs = data.vs[index];
         const inconf = data.inconf[index];
         const tcpamax = data.tcpamax[index];
 
@@ -165,16 +165,16 @@ export class AircraftInfoPanel extends BasePanel {
         const altStr = DataProcessor.formatAltitude(altMeters, this.displayOptions.altitudeUnit);
 
         // Handle potentially missing speed data from backend
-        const casStr = casKnots !== null
-            ? DataProcessor.formatSpeed(casKnots, this.displayOptions.speedUnit)
-            : `N/A (using TAS: ${DataProcessor.formatSpeed(tasKnots, this.displayOptions.speedUnit)})`;
-        const tasStr = DataProcessor.formatSpeed(tasKnots, this.displayOptions.speedUnit);
-        const gsStr = gsKnots !== null
-            ? DataProcessor.formatSpeed(gsKnots, this.displayOptions.speedUnit)
-            : `N/A (using TAS: ${DataProcessor.formatSpeed(tasKnots, this.displayOptions.speedUnit)})`;
+        const casStr = casMs !== null
+            ? DataProcessor.formatSpeed(casMs, this.displayOptions.speedUnit)
+            : `N/A (using TAS: ${DataProcessor.formatSpeed(tasMs, this.displayOptions.speedUnit)})`;
+        const tasStr = DataProcessor.formatSpeed(tasMs, this.displayOptions.speedUnit);
+        const gsStr = gsMs !== null
+            ? DataProcessor.formatSpeed(gsMs, this.displayOptions.speedUnit)
+            : `N/A (using TAS: ${DataProcessor.formatSpeed(tasMs, this.displayOptions.speedUnit)})`;
 
         const trkStr = `${Math.round(trk)}°`;
-        const vsStr = DataProcessor.formatVerticalSpeed(vsFtPerSec, this.displayOptions.verticalSpeedUnit);
+        const vsStr = DataProcessor.formatVerticalSpeed(vsMs, this.displayOptions.verticalSpeedUnit);
 
         // Update copyable value fields in place
         this.setValueText('id', aircraftId);

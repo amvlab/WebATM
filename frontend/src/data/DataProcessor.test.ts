@@ -3,37 +3,38 @@
  *
  * These pin the current conversion/formatting behavior so refactors that
  * route more call sites through DataProcessor can't silently change what
- * users see. BlueSky wire units: speed in knots, altitude in meters,
- * vertical speed in ft/s.
+ * users see. BlueSky wire units (screenio.py sends bs.traf.* unconverted,
+ * i.e. SI): speed in m/s, altitude in meters, vertical speed in m/s.
  */
 import { describe, it, expect } from 'vitest';
 import { DataProcessor } from './DataProcessor';
 import { AircraftData } from './types';
 
 describe('DataProcessor.convertSpeed', () => {
-    it('returns knots unchanged', () => {
-        expect(DataProcessor.convertSpeed(250, 'knots')).toBe(250);
+    it('converts m/s to knots', () => {
+        // 300 kt CAS arrives on the wire as 154.3332 m/s
+        expect(DataProcessor.convertSpeed(154.3332, 'knots')).toBeCloseTo(300, 4);
     });
 
-    it('converts knots to m/s', () => {
-        expect(DataProcessor.convertSpeed(100, 'm/s')).toBeCloseTo(51.4444, 4);
+    it('returns m/s unchanged', () => {
+        expect(DataProcessor.convertSpeed(100, 'm/s')).toBe(100);
     });
 
-    it('converts knots to km/h', () => {
-        expect(DataProcessor.convertSpeed(100, 'km/h')).toBeCloseTo(185.2, 4);
+    it('converts m/s to km/h', () => {
+        expect(DataProcessor.convertSpeed(100, 'km/h')).toBeCloseTo(360, 4);
     });
 
-    it('converts knots to mph', () => {
-        expect(DataProcessor.convertSpeed(100, 'mph')).toBeCloseTo(115.078, 4);
+    it('converts m/s to mph', () => {
+        expect(DataProcessor.convertSpeed(100, 'mph')).toBeCloseTo(223.6936, 4);
     });
 });
 
 describe('DataProcessor.formatSpeed', () => {
     it('rounds and appends the unit label', () => {
-        expect(DataProcessor.formatSpeed(250, 'knots')).toBe('250 kt');
-        expect(DataProcessor.formatSpeed(100, 'm/s')).toBe('51 m/s');
-        expect(DataProcessor.formatSpeed(100, 'km/h')).toBe('185 km/h');
-        expect(DataProcessor.formatSpeed(100, 'mph')).toBe('115 mph');
+        expect(DataProcessor.formatSpeed(154.3332, 'knots')).toBe('300 kt');
+        expect(DataProcessor.formatSpeed(100, 'm/s')).toBe('100 m/s');
+        expect(DataProcessor.formatSpeed(100, 'km/h')).toBe('360 km/h');
+        expect(DataProcessor.formatSpeed(100, 'mph')).toBe('224 mph');
     });
 });
 
@@ -73,10 +74,10 @@ describe('DataProcessor.formatAltitude', () => {
 
 describe('DataProcessor compact map labels', () => {
     it('formatSpeedLabel rounds and appends the suffix without a space', () => {
-        expect(DataProcessor.formatSpeedLabel(250, 'knots')).toBe('250kt');
-        expect(DataProcessor.formatSpeedLabel(100, 'm/s')).toBe('51m/s');
-        expect(DataProcessor.formatSpeedLabel(100, 'km/h')).toBe('185km/h');
-        expect(DataProcessor.formatSpeedLabel(100, 'mph')).toBe('115mph');
+        expect(DataProcessor.formatSpeedLabel(154.3332, 'knots')).toBe('300kt');
+        expect(DataProcessor.formatSpeedLabel(100, 'm/s')).toBe('100m/s');
+        expect(DataProcessor.formatSpeedLabel(100, 'km/h')).toBe('360km/h');
+        expect(DataProcessor.formatSpeedLabel(100, 'mph')).toBe('224mph');
     });
 
     it('formatAltitudeLabel uses zero-padded FL, one-decimal km, integer ft/m', () => {
@@ -95,24 +96,25 @@ describe('DataProcessor compact map labels', () => {
 });
 
 describe('DataProcessor.convertVerticalSpeed', () => {
-    it('converts ft/s to m/s', () => {
-        expect(DataProcessor.convertVerticalSpeed(10, 'm/s')).toBeCloseTo(3.048, 6);
+    it('returns m/s unchanged', () => {
+        expect(DataProcessor.convertVerticalSpeed(10, 'm/s')).toBe(10);
     });
 
-    it('converts ft/s to m/min', () => {
-        expect(DataProcessor.convertVerticalSpeed(10, 'm/min')).toBeCloseTo(182.88, 6);
+    it('converts m/s to m/min', () => {
+        expect(DataProcessor.convertVerticalSpeed(10, 'm/min')).toBe(600);
     });
 
-    it('converts ft/s to ft/min', () => {
-        expect(DataProcessor.convertVerticalSpeed(10, 'ft/min')).toBe(600);
+    it('converts m/s to ft/min', () => {
+        // 5.08 m/s is exactly 1000 ft/min
+        expect(DataProcessor.convertVerticalSpeed(5.08, 'ft/min')).toBeCloseTo(1000, 6);
     });
 });
 
 describe('DataProcessor.formatVerticalSpeed', () => {
     it('rounds and appends the unit label', () => {
-        expect(DataProcessor.formatVerticalSpeed(10, 'm/s')).toBe('3 m/s');
-        expect(DataProcessor.formatVerticalSpeed(10, 'm/min')).toBe('183 m/min');
-        expect(DataProcessor.formatVerticalSpeed(10, 'ft/min')).toBe('600 ft/min');
+        expect(DataProcessor.formatVerticalSpeed(10, 'm/s')).toBe('10 m/s');
+        expect(DataProcessor.formatVerticalSpeed(10, 'm/min')).toBe('600 m/min');
+        expect(DataProcessor.formatVerticalSpeed(5.08, 'ft/min')).toBe('1000 ft/min');
     });
 });
 
@@ -158,11 +160,13 @@ describe('DataProcessor.getSpeedValue', () => {
 });
 
 describe('DataProcessor reverse conversions (for BlueSky commands)', () => {
-    it('speedToKnots inverts convertSpeed for every unit', () => {
+    it('speedToKnots converts a displayed value back to knots for every unit', () => {
+        // Display a wire speed of 154.3332 m/s (300 kt) in each unit, then
+        // convert the displayed value back for a command: always 300 kt.
         const units = ['knots', 'm/s', 'km/h', 'mph'] as const;
         for (const unit of units) {
-            const converted = DataProcessor.convertSpeed(250, unit);
-            expect(DataProcessor.speedToKnots(converted, unit)).toBeCloseTo(250, 6);
+            const displayed = DataProcessor.convertSpeed(154.3332, unit);
+            expect(DataProcessor.speedToKnots(displayed, unit)).toBeCloseTo(300, 1);
         }
     });
 

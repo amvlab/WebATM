@@ -2,37 +2,43 @@
  * DataProcessor - Unit conversion and data formatting utilities
  *
  * Provides centralized unit conversion for display across the application.
- * BlueSky server sends data in specific units:
- * - Speed: knots (kt)
+ * The BlueSky server sends ACDATA/ROUTEDATA in its internal SI units
+ * (bluesky/simulation/screenio.py forwards bs.traf.* arrays unconverted):
+ * - Speed (tas/cas/gs): meters per second (m/s)
  * - Altitude: meters (m)
- * - Vertical Speed: feet per second (ft/s)
+ * - Vertical Speed: meters per second (m/s)
  */
 
 import { AircraftData, SpeedType, SpeedUnit, AltitudeUnit, VerticalSpeedUnit } from './types';
 
+/** One knot in m/s (BlueSky's aero.kts). */
+const KTS = 0.514444;
+/** One foot in meters. */
+const FT = 0.3048;
+
 export class DataProcessor {
     /**
-     * Convert speed from knots to target unit
+     * Convert speed from m/s (BlueSky server unit) to target unit
      */
-    static convertSpeed(speedKnots: number, targetUnit: SpeedUnit): number {
+    static convertSpeed(speedMs: number, targetUnit: SpeedUnit): number {
         switch (targetUnit) {
             case 'm/s':
-                return speedKnots * 0.514444;
+                return speedMs;
             case 'km/h':
-                return speedKnots * 1.852;
+                return speedMs * 3.6;
             case 'mph':
-                return speedKnots * 1.15078;
+                return speedMs * 2.236936;
             case 'knots':
             default:
-                return speedKnots;
+                return speedMs / KTS;
         }
     }
 
     /**
      * Format speed value with unit label
      */
-    static formatSpeed(speedKnots: number, unit: SpeedUnit): string {
-        const converted = this.convertSpeed(speedKnots, unit);
+    static formatSpeed(speedMs: number, unit: SpeedUnit): string {
+        const converted = this.convertSpeed(speedMs, unit);
         const rounded = Math.round(converted);
 
         switch (unit) {
@@ -58,9 +64,9 @@ export class DataProcessor {
             case 'km':
                 return altMeters / 1000;
             case 'ft':
-                return altMeters / 0.3048;
+                return altMeters / FT;
             case 'fl':
-                return (altMeters / 0.3048) / 100; // Convert to feet, then to Flight Level
+                return (altMeters / FT) / 100; // Convert to feet, then to Flight Level
             default:
                 return altMeters;
         }
@@ -87,26 +93,26 @@ export class DataProcessor {
     }
 
     /**
-     * Convert vertical speed from feet per second to target unit
+     * Convert vertical speed from m/s (BlueSky server unit) to target unit
      */
-    static convertVerticalSpeed(vsFtPerSec: number, targetUnit: VerticalSpeedUnit): number {
+    static convertVerticalSpeed(vsMs: number, targetUnit: VerticalSpeedUnit): number {
         switch (targetUnit) {
             case 'm/s':
-                return vsFtPerSec * 0.3048;
+                return vsMs;
             case 'm/min':
-                return vsFtPerSec * 18.288;
+                return vsMs * 60;
             case 'ft/min':
-                return vsFtPerSec * 60;
+                return (vsMs / FT) * 60;
             default:
-                return vsFtPerSec;
+                return vsMs;
         }
     }
 
     /**
      * Format vertical speed value with unit label
      */
-    static formatVerticalSpeed(vsFtPerSec: number, unit: VerticalSpeedUnit): string {
-        const converted = this.convertVerticalSpeed(vsFtPerSec, unit);
+    static formatVerticalSpeed(vsMs: number, unit: VerticalSpeedUnit): string {
+        const converted = this.convertVerticalSpeed(vsMs, unit);
         const rounded = Math.round(converted);
 
         switch (unit) {
@@ -158,8 +164,8 @@ export class DataProcessor {
     /**
      * Compact speed label for map display (no space before the unit).
      */
-    static formatSpeedLabel(speedKnots: number, unit: SpeedUnit): string {
-        const rounded = Math.round(this.convertSpeed(speedKnots, unit));
+    static formatSpeedLabel(speedMs: number, unit: SpeedUnit): string {
+        const rounded = Math.round(this.convertSpeed(speedMs, unit));
         return `${rounded}${this.speedUnitLabel(unit)}`;
     }
 
@@ -186,9 +192,10 @@ export class DataProcessor {
     }
 
     /**
-     * Get speed value for aircraft based on speed type (CAS/TAS/GS).
-     * Falls back to other speeds only when a field is absent — a genuine
-     * 0 kt (stationary/held aircraft) is a valid value, not missing data.
+     * Get speed value (in m/s, as sent by BlueSky) for aircraft based on
+     * speed type (CAS/TAS/GS). Falls back to other speeds only when a field
+     * is absent — a genuine 0 (stationary/held aircraft) is a valid value,
+     * not missing data.
      */
     static getSpeedValue(data: AircraftData, index: number, type: SpeedType): number {
         switch (type) {
@@ -204,12 +211,13 @@ export class DataProcessor {
     }
 
     /**
-     * Reverse conversion: Convert speed from any unit to knots (for BlueSky commands)
+     * Convert a user-entered speed from any display unit to knots (the unit
+     * BlueSky commands expect). Independent of the wire format above.
      */
     static speedToKnots(value: number, fromUnit: SpeedUnit): number {
         switch (fromUnit) {
             case 'm/s':
-                return value / 0.514444;
+                return value / KTS;
             case 'km/h':
                 return value / 1.852;
             case 'mph':
@@ -221,14 +229,15 @@ export class DataProcessor {
     }
 
     /**
-     * Reverse conversion: Convert altitude from any unit to feet (for BlueSky commands)
+     * Convert a user-entered altitude from any display unit to feet (the unit
+     * BlueSky commands expect). Independent of the wire format above.
      */
     static altitudeToFeet(value: number, fromUnit: AltitudeUnit): number {
         switch (fromUnit) {
             case 'm':
-                return value / 0.3048;
+                return value / FT;
             case 'km':
-                return value / 0.0003048;
+                return value / (FT / 1000);
             case 'ft':
                 return value;
             case 'fl':
