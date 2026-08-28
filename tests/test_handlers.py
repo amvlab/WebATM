@@ -431,8 +431,10 @@ class TestResetHandler:
 
         proxy.connected_clients = 0
         proxy.traffic_data = {"id": ["GHOST1"], "lat": [1.0]}
+        proxy.sim_data = {"simt": 3600.0, "scenname": "demo"}
         on_reset_received(sender_id=b"NODE1")
         assert proxy.traffic_data == empty_traffic_data()
+        assert proxy.sim_data == {}
         assert fake_socketio.count("acdata") == 0  # nobody to emit to
 
     def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
@@ -471,6 +473,7 @@ class TestResetActiveNodeScoping:
         }
         proxy.polyline_data_by_node = {active_hex: {"polys": {"keep": {}}}}
         proxy.traffic_data = {"id": ["ACTIVE1"], "lat": [1.0]}
+        proxy.sim_data = {"simt": 120.0, "scenname": "ACTIVE"}
 
         on_reset_received(sender_id=other)
 
@@ -478,8 +481,9 @@ class TestResetActiveNodeScoping:
         assert other_hex not in proxy.poly_data_by_node
         assert proxy.poly_data_by_node[active_hex] == {"polys": {"keep": {}}}
         assert proxy.polyline_data_by_node[active_hex] == {"polys": {"keep": {}}}
-        # The active node's cached aircraft survive a background reset.
+        # The active node's cached aircraft and sim info survive a background reset.
         assert proxy.traffic_data == {"id": ["ACTIVE1"], "lat": [1.0]}
+        assert proxy.sim_data == {"simt": 120.0, "scenname": "ACTIVE"}
         # Nothing display-clearing reaches the browser.
         assert fake_socketio.count("reset") == 0
         assert fake_socketio.count("acdata") == 0
@@ -504,6 +508,21 @@ class TestResetActiveNodeScoping:
         assert fake_socketio.last("acdata") == empty_traffic_data()
         assert fake_socketio.last("poly") == {"polys": {}}
         assert fake_socketio.last("polyline") == {"polys": {}}
+
+    def test_active_node_reset_clears_cached_sim_data(
+        self, proxy, fake_client, fake_socketio
+    ):
+        # The 0.5 s backup timer and the initial_data snapshot serve
+        # proxy.sim_data verbatim. Left uncleared, a reset pushes the
+        # pre-reset clock/scenario/ntraf right back into the header the
+        # browser just cleared, until the first post-reset SIMINFO arrives.
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        self._activate(proxy, fake_client, active)
+        proxy.sim_data = {"simt": 3600.0, "scenname": "demo", "ntraf": 8, "state": 2}
+
+        on_reset_received(sender_id=active)
+
+        assert proxy.sim_data == {}
 
     def test_unresolvable_sender_falls_back_to_active_node(
         self, proxy, fake_client, fake_socketio

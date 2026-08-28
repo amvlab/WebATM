@@ -4,7 +4,7 @@ import time
 
 from ...logger import get_logger
 from ...utils import empty_traffic_data, id2str
-from ._base import active_proxy
+from ._base import active_proxy, is_active_node
 
 logger = get_logger()
 
@@ -14,12 +14,12 @@ def on_reset_received(data=None, *args, sender_id=None, **kwargs):
 
     Clears the stored polygon/polyline shapes for the node that sent the
     reset. Browsers display the active node only, so when the resetting node
-    is the active one this also clears the cached aircraft and emits the
-    map-clearing ``acdata``/``poly``/``polyline`` payloads plus the ``reset``
-    event — while a background node's reset must not wipe the active node's
-    display. When the sender or active node can't be resolved, the reset is
-    accepted so a single-node display still works (same fallback as the
-    SIMINFO/ACDATA active-node filter).
+    is the active one this also drops the cached aircraft and sim info and
+    emits the map-clearing ``acdata``/``poly``/``polyline`` payloads plus the
+    ``reset`` event — while a background node's reset must not wipe the active
+    node's display. When the sender or active node can't be resolved, the
+    reset is accepted so a single-node display still works (same fallback as
+    the SIMINFO/ACDATA active-node filter).
 
     Args:
         data (Any): Optional RESET payload (unused).
@@ -37,8 +37,7 @@ def on_reset_received(data=None, *args, sender_id=None, **kwargs):
     try:
         sender_id = id2str(sender_id)
 
-        active_node_id = proxy._get_safe_active_node()
-        reset_node_id = sender_id or active_node_id
+        reset_node_id = sender_id or proxy._get_safe_active_node()
         if not reset_node_id:
             return
 
@@ -46,18 +45,17 @@ def on_reset_received(data=None, *args, sender_id=None, **kwargs):
         proxy.poly_data_by_node.pop(reset_node_id, None)
         proxy.polyline_data_by_node.pop(reset_node_id, None)
 
-        is_active_node = (
-            active_node_id is None or sender_id is None or sender_id == active_node_id
-        )
-        if not is_active_node:
+        if not is_active_node(proxy, sender_id):
             return
 
-        # The active node's cached aircraft are gone too. Clear even with no
-        # browser connected: on_acdata_received only refreshes this cache
-        # while clients are attached, so a stale cache would otherwise be
-        # served verbatim in the next initial_data snapshot (ghost aircraft).
+        # The active node's cached aircraft and sim info are stale too. Clear
+        # both even with no browser connected — the backup timer and the next
+        # initial_data snapshot serve these caches verbatim, so leaving them
+        # would resurrect pre-reset aircraft (ghosts) and the pre-reset
+        # clock/scenario in a header the browser just cleared.
         cleared = empty_traffic_data()
         proxy.traffic_data = cleared
+        proxy.sim_data = {}
 
         if proxy.socketio and proxy.connected_clients > 0:
             proxy.socketio.emit("acdata", cleared)

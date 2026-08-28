@@ -12,22 +12,9 @@ import time
 from ...logger import get_logger
 from ...utils import id2str, make_json_serializable, tim2txt
 from ..perf import data_path_perf
-from ._base import active_proxy, get_bluesky_proxy
+from ._base import active_proxy, get_bluesky_proxy, is_active_node
 
 logger = get_logger()
-
-
-def _is_active_node(proxy, sender_id_str):
-    """Check whether a frame belongs to the currently active node.
-
-    The header clock/rate/state must follow the ACTIVE node only, not
-    whichever node sent the latest update; otherwise, with two or more nodes
-    running, the displayed values jump between them. When the active node
-    can't be resolved yet (e.g. early in connection setup) or the sender is
-    unknown, accept the frame so a single-node display still works.
-    """
-    active_node = proxy._get_safe_active_node()
-    return active_node is None or sender_id_str is None or sender_id_str == active_node
 
 
 def on_siminfo_received(
@@ -86,7 +73,7 @@ def on_siminfo_received(
             proxy._emit_node_info()
 
     # Cache and emit the header sim info solely for the active node.
-    if not _is_active_node(proxy, sender_id_str):
+    if not is_active_node(proxy, sender_id_str):
         return
 
     proxy.sim_data = sim_data
@@ -148,7 +135,7 @@ def on_acdata_received(data):
 
         # Only the active node's traffic is displayed. Skip serializing frames
         # from background nodes nobody is viewing (mirrors the SIMINFO filter).
-        if not _is_active_node(proxy, sender_id_str):
+        if not is_active_node(proxy, sender_id_str):
             data_path_perf.record_filtered()
             return
 
@@ -217,7 +204,7 @@ def on_statechange_received(data, sender_id=None):
 
     sender_id_str = id2str(sender_id)
 
-    if not _is_active_node(proxy, sender_id_str):
+    if not is_active_node(proxy, sender_id_str):
         logger.debug(
             f"STATECHANGE from background node {sender_id_str} ignored "
             f"(simstate={simstate})"
