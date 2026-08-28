@@ -38,3 +38,23 @@ def active_proxy():
 
     proxy.last_successful_update = time.time()
     return proxy
+
+
+def is_active_node(proxy, sender_id_str):
+    """Check whether a message belongs to the currently active node.
+
+    Browsers display the active node only, so per-node data (the header
+    clock/rate/state, traffic frames, resets) must follow the ACTIVE node,
+    not whichever node sent the latest message. When the active node can't
+    be resolved yet (e.g. early in connection setup) or the sender is
+    unknown, the message is accepted so a single-node display still works.
+
+    Args:
+        proxy (BlueSkyProxy): The active proxy.
+        sender_id_str (str | None): Hex sender ID from the message header.
+
+    Returns:
+        bool: True when the message should be treated as the active node's.
+    """
+    active_node = proxy._get_safe_active_node()
+    return active_node is None or sender_id_str is None or sender_id_str == active_node

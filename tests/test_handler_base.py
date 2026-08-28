@@ -50,3 +50,19 @@ def test_active_proxy_refreshes_timestamp_when_connected(monkeypatch):
 
     assert result is proxy
     assert proxy.last_successful_update >= before
+
+
+def _proxy_with_active_node(active_node):
+    return types.SimpleNamespace(_get_safe_active_node=lambda: active_node)
+
+
+def test_is_active_node_matches_sender():
+    proxy = _proxy_with_active_node("aa81")
+    assert _base.is_active_node(proxy, "aa81")
+    assert not _base.is_active_node(proxy, "bb81")
+
+
+def test_is_active_node_accepts_unresolvable_cases():
+    """No resolvable active node or sender -> accept (single-node fallback)."""
+    assert _base.is_active_node(_proxy_with_active_node(None), "aa81")
+    assert _base.is_active_node(_proxy_with_active_node("aa81"), None)
