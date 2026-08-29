@@ -44,6 +44,7 @@ nav:
   - User Guide:
       - Getting Started: getting-started.md
       - Configuration: configuration.md
+      - Logging & Plotting: logging-plotting.md
       - Offline Use (PMTiles): offline-pmtiles.md
       - Integrated Build: integrated-build.md
       - Screenshot Gallery: gallery.md
