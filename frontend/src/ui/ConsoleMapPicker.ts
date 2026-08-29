@@ -3,7 +3,7 @@ import type { MapDisplay } from './map/MapDisplay';
 import type { Console } from './Console';
 import type { NavaidSnapper } from './map/navdata/NavaidSnapper';
 import { lineStringFeature, pointFeature } from '../utils/geojson';
-import { computeBearing } from '../utils/geo';
+import { roundedBearing } from '../utils/geo';
 import { logger } from '../utils/Logger';
 import {
     DRAWING_CURSOR,
@@ -99,8 +99,7 @@ export class ConsoleMapPicker {
         // other parts of the same argument).
         if (this.active === ctx.kind) {
             this.currentContext = ctx;
-            // Guide line / marker origin may have changed if the user edited
-            // the lat/lon tokens earlier in the command - rebuild accordingly.
+            // The origin lat/lon tokens may have been edited - rebuild.
             if (ctx.kind === 'hdg') {
                 this.ensureHeadingMouseMove(map);
                 this.ensurePositionMarker(map);
@@ -135,10 +134,8 @@ export class ConsoleMapPicker {
         // Show the hint text next to the console input.
         this.showHint(ctx.kind);
 
-        // Heading picking additionally draws a dashed guide line from the
-        // already-typed lat/lon to the mouse cursor, plus a red marker at the
-        // origin so the user can see where the aircraft will spawn. Gated to
-        // CRE by Console.getGeoContext().
+        // Heading picking (CRE only) also draws a dashed guide line from the
+        // typed lat/lon to the cursor, plus a red marker at the origin.
         if (ctx.kind === 'hdg') {
             this.ensureHeadingMouseMove(map);
             this.ensurePositionMarker(map);
@@ -323,11 +320,8 @@ export class ConsoleMapPicker {
         // synchronously return focus to the console input.
         if (e.originalEvent) e.originalEvent.preventDefault();
 
-        // Snap to a nearby navaid when enabled. Coordinate picks land on the
-        // navaid; heading picks aim the bearing at it, so the user can point
-        // the aircraft straight at a known airport/waypoint. Mirrors the
-        // Draw-Aircraft flow (AircraftCreationManager), which snaps both the
-        // position and the heading clicks.
+        // Snap to a nearby navaid: coordinate picks land on it, heading picks
+        // aim at it. Mirrors the Draw-Aircraft flow (AircraftCreationManager).
         let clickLat = e.lngLat.lat;
         let clickLon = e.lngLat.lng;
         const snapped = this.navaidSnapper.snap(e);
@@ -337,10 +331,9 @@ export class ConsoleMapPicker {
         }
 
         if (ctx.kind === 'lat' || ctx.kind === 'lon') {
-            // Insert the full lat,lon pair at the *current* cursor slot,
-            // not the first lat/lon in params. That way commands with
-            // repeating pairs (POLY foo,lat,lon,lat,lon,...) write a new
-            // pair at the cursor instead of always overwriting the first.
+            // Insert the lat,lon pair at the *current* cursor slot, so
+            // commands with repeating pairs (POLY name,lat,lon,lat,lon,...)
+            // append at the cursor instead of overwriting the first pair.
             const latIdx =
                 ctx.kind === 'lat'
                     ? ctx.currentArgIndex
@@ -380,14 +373,14 @@ export class ConsoleMapPicker {
                 );
                 return;
             }
-            const brng = computeBearing(
+            const brng = roundedBearing(
                 origin.lat,
                 origin.lon,
                 clickLat,
                 clickLon
             );
             this.consoleInstance.insertGeoValue(
-                Math.round(brng).toString(),
+                brng.toString(),
                 ctx.currentArgIndex,
                 1
             );
@@ -406,11 +399,8 @@ export class ConsoleMapPicker {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        // Snap the heading endpoint to a nearby navaid so the previewed guide
-        // line and bearing match what a click commits - this lets the user aim
-        // the heading straight at a known airport/waypoint. The snap-hover
-        // handler draws the highlight ring; here we only consume the snapped
-        // coordinate. Falls back to the raw cursor when nothing is in range.
+        // Snap the endpoint to a nearby navaid so the previewed guide line and
+        // bearing match what a click commits; raw cursor when nothing is in range.
         const snapped = this.navaidSnapper.snap(e);
         const endLon = snapped ? snapped.lng : e.lngLat.lng;
         const endLat = snapped ? snapped.lat : e.lngLat.lat;
@@ -439,8 +429,8 @@ export class ConsoleMapPicker {
         ]);
 
         // Live heading readout in the hint while moving.
-        const brng = computeBearing(originLat, originLon, endLat, endLon);
-        this.updateHintText(`Heading: ${Math.round(brng)}°  (click to set)`);
+        const brng = roundedBearing(originLat, originLon, endLat, endLon);
+        this.updateHintText(`Heading: ${brng}°  (click to set)`);
     }
 
     /**
@@ -452,11 +442,8 @@ export class ConsoleMapPicker {
     }
 
     /**
-     * Draw a red circle at the resolved origin lat/lon so the user sees
-     * where the aircraft will spawn while they're picking the heading.
-     * Mirrors the orange marker used by the Draw Aircraft dialog.
-     * Only called when kind === 'hdg', which Console.getGeoContext() gates
-     * to CRE.
+     * Draw a red circle at the resolved origin lat/lon so the user sees where
+     * the aircraft will spawn while picking its heading (hdg picks only).
      */
     private ensurePositionMarker(map: MapLibreMap): void {
         const origin = this.resolveHdgOrigin();

@@ -142,6 +142,19 @@ describe('ConsoleMapPicker navaid snapping', () => {
         expect(consoleInstance.insertGeoValue).toHaveBeenCalledWith(expected, 4, 1);
     });
 
+    it('normalizes a near-due-north heading pick to 0, not 360', () => {
+        snapper.snap.mockReturnValue(null);
+
+        picker.enable(hdgContext);
+        // Just west of due north from the typed origin (52, 4): the raw
+        // bearing is ~359.8, which must be inserted as 0 - matching the
+        // Draw-Aircraft tool (AircraftCreationManager uses roundedBearing).
+        expect(bearing(52, 4, 70, 3.8)).toBeGreaterThan(359);
+        map.fire('click', clickEvent(70, 3.8));
+
+        expect(consoleInstance.insertGeoValue).toHaveBeenCalledWith('0', 4, 1);
+    });
+
     it('highlights snap candidates while a heading is being picked', () => {
         picker.enable(hdgContext);
         map.fire('mousemove', clickEvent(11, 11));
