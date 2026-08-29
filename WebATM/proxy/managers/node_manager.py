@@ -49,17 +49,17 @@ class NodeManager:
     def _on_actnode_changed(self, node_id):
         """Callback when active node changes."""
         if self.proxy.running:
-            # The cached traffic belongs to the previous node; drop it (and
-            # clear browsers) so it can't be re-served while the new node's
-            # ACDATA stream spins up. Same idea as the shape clear below.
+            # The cached traffic and sim info belong to the previous node;
+            # drop both (and clear browsers) so the backup timer and the
+            # initial_data snapshot can't re-serve them while the new node's
+            # streams spin up. Same idea as the shape clear below.
             cleared = empty_traffic_data()
             self.proxy.traffic_data = cleared
+            self.proxy.sim_data = {}
             if self.proxy.socketio and self.proxy.connected_clients > 0:
                 self.proxy.socketio.emit("acdata", cleared)
 
             self._emit_node_info()
-
-            # Emit POLY data for the newly active node
             self._emit_active_node_poly_data()
 
     def _emit_active_node_poly_data(self):
@@ -128,10 +128,8 @@ class NodeManager:
                 if not self.proxy.was_connected:
                     self.proxy.was_connected = True
                     # Restart the data-flow timeout clock from "first node
-                    # appeared". This runs inside bluesky_client.update() and
-                    # flips was_connected before the network timer's own reset
-                    # (guarded on `not was_connected`) can run, so without this
-                    # a stale start_client() timestamp times out immediately.
+                    # appeared"; a stale start_client() timestamp would time
+                    # out immediately after a slow cold start.
                     self.proxy.last_successful_update = time.time()
                     logger.info(" Connection established")
                     self.proxy._emit_connection_status(True)
@@ -145,15 +143,11 @@ class NodeManager:
     def _reactivate_if_active_node_gone(self, node_id):
         """Activate a newly discovered node if the client's active node is dead.
 
-        The network client auto-selects only the very first node it ever sees;
-        after that, ``_failover_active_node`` re-activates a survivor when the
-        active node is removed. But when the last node vanishes (e.g. its
-        process crashes) there is no survivor: ``act_id`` keeps pointing at the
-        dead node, and a node added afterwards would never be activated. The
+        When the last node vanishes there is no survivor for
+        ``_failover_active_node`` to pick: ``act_id`` keeps pointing at the
+        dead node, so a node added later would never be activated and the
         actonly topics (ACDATA/ROUTEDATA) would stay subscribed to the dead
-        node, no traffic would flow, and the data-flow timeout would tear down
-        a live connection. Activating the newcomer here re-subscribes those
-        topics and resumes the data flow.
+        node until the data-flow timeout tore down a live connection.
         """
         client = self.proxy.bluesky_client
         if client.act_id is None or client.act_id not in client.nodes:
@@ -246,8 +240,10 @@ class NodeManager:
         Returns:
             dict: ``nodes``, ``servers``, ``active_node`` and ``total_nodes``.
         """
+        # Iterate over snapshots: the network-timer thread mutates these maps
+        # while Socket.IO threads (get_nodes, initial_data) serialize them.
         nodes_data = {}
-        for node_id_str, tracked in self.proxy.tracked_nodes.items():
+        for node_id_str, tracked in list(self.proxy.tracked_nodes.items()):
             node_data = tracked.copy()
             if "node_id" in node_data:
                 node_data["node_id"] = safe_decode(node_data["node_id"])
@@ -255,11 +251,10 @@ class NodeManager:
                 raw_server_id = node_data["server_id"]
                 node_data["server_id"] = safe_decode(raw_server_id)
                 node_data["server_id_hex"] = id2str(raw_server_id)
-                node_data["server_id_raw"] = str(raw_server_id)
             nodes_data[node_id_str] = node_data
 
         servers_data = {}
-        for server_id, tracked in self.proxy.tracked_servers.items():
+        for server_id, tracked in list(self.proxy.tracked_servers.items()):
             server_data = tracked.copy()
             if "server_id" in server_data:
                 server_data["server_id"] = safe_decode(server_data["server_id"])
@@ -269,7 +264,7 @@ class NodeManager:
             "nodes": nodes_data,
             "servers": servers_data,
             "active_node": self._get_safe_active_node(),
-            "total_nodes": len(self.proxy.tracked_nodes),
+            "total_nodes": len(nodes_data),
         }
 
     def _emit_node_info(self):

@@ -94,7 +94,6 @@ export interface NodeData {
   status: string;
   time: string;
   server_id_hex?: string;
-  server_id_raw?: string;
   server_id?: string;
   [key: string]: unknown;
 }
