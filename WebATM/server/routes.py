@@ -32,6 +32,11 @@ FILE_TYPES = {
 }
 WRITABLE_FILE_TYPES = ("scenario", "plugins", "settings")
 
+# Subdirectories pre-created under a configured base path so browsing works
+# before BlueSky's first start (BlueSky itself maintains the same set in its
+# working directory). Shared with the integrated build's auto-configuration.
+MANAGED_SUBDIRS = ("scenario", "plugins", "output")
+
 # Offline-built SQLite FTS index behind /api/navdata/search (see
 # script/navdata/). Module-level so tests can point it at a fixture DB.
 NAVDATA_DB = Path(__file__).parent.parent / "static" / "navdata" / "navdata.sqlite"
@@ -725,7 +730,7 @@ def register_basic_routes(app, session_manager):
             current_app.bluesky_base_path = str(path_obj)
 
             try:
-                for subdir in ("scenario", "plugins", "output"):
+                for subdir in MANAGED_SUBDIRS:
                     (path_obj / subdir).mkdir(exist_ok=True)
                 logger.info(
                     f"BlueSky base path configured: {current_app.bluesky_base_path}"
