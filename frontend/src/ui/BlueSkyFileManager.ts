@@ -418,13 +418,13 @@ export class BlueSkyFileManager {
                 this.showStatus('File uploaded successfully! Running scenario...', 'success');
                 this.closeModal();
 
-                // IC runs the scenario under the name the backend stored it
-                // as, which can differ from the uploaded name (sanitization,
-                // auto-rename on conflict) — running file.name would silently
-                // start a stale namesake instead of the file just uploaded.
+                // IC runs the scenario under the full name the backend stored
+                // it as — it can differ from the uploaded name (sanitization,
+                // auto-rename on conflict), and stripping .scn would let
+                // BlueSky's Path.with_suffix rewrite a dotted name
+                // ("demo.v2" -> "demo.scn") to a stale namesake.
                 if (window.app) {
-                    const scenarioName = storedFilename.replace(/\.scn$/i, '');
-                    window.app.sendCommand(`IC ${scenarioName}`);
+                    window.app.sendCommand(`IC ${storedFilename}`);
                 } else {
                     this.showStatus('Could not run scenario: Application not available', 'error');
                 }
@@ -657,8 +657,10 @@ export class BlueSkyFileManager {
     }
 
     public runScenario(filename: string): void {
-        // IC takes the scenario name without its .scn extension.
-        const scenarioName = this.relativePath('scenario', filename).replace(/\.scn$/i, '');
+        // Keep the .scn extension: BlueSky's IC forces one onto the name via
+        // Path.with_suffix, which would rewrite a stripped dotted name
+        // ("demo.v2" -> "demo.scn") and silently run the wrong scenario.
+        const scenarioName = this.relativePath('scenario', filename);
 
         this.closeModal();
 

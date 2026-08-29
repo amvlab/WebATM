@@ -827,6 +827,15 @@ def register_basic_routes(app, session_manager):
                 # Single fixed file; a re-upload replaces it.
                 target_path = base_path / config["filepath"]
             else:
+                extension = config["extension"]
+                if not filename.lower().endswith(extension):
+                    # secure_filename can reduce a name like ".scn" to the
+                    # bare extension, which browse would never list.
+                    return jsonify({"success": False, "error": "Invalid filename"}), 400
+                # Store the extension lowercase: BlueSky's IC forces ".scn"
+                # onto the name via Path.with_suffix, so an uploaded
+                # "DEMO.SCN" could never be run on a case-sensitive fs.
+                filename = filename[: -len(extension)] + extension
                 target_dir = base_path / config["directory"]
                 target_dir.mkdir(exist_ok=True)
 

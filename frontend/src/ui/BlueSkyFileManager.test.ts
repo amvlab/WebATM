@@ -134,7 +134,9 @@ describe('BlueSkyFileManager upload uses the stored filename', () => {
 
     it('runs the scenario under the name the backend stored it as', async () => {
         // Re-uploading demo.scn stores it as demo_1.scn; IC must run THAT
-        // file, not the stale root namesake the original name points at.
+        // file, not the stale root namesake the original name points at. The
+        // .scn extension is kept — BlueSky's IC forces one onto the name via
+        // Path.with_suffix, so a stripped name must never lose a dot part.
         stubFetch('demo_1.scn');
         const sendCommand = vi.fn();
         vi.stubGlobal('app', { sendCommand });
@@ -143,7 +145,22 @@ describe('BlueSkyFileManager upload uses the stored filename', () => {
         selectFile('demo.scn');
         (document.getElementById('upload-and-run-scenario-btn') as HTMLButtonElement).click();
 
-        await vi.waitFor(() => expect(sendCommand).toHaveBeenCalledWith('IC demo_1'));
+        await vi.waitFor(() => expect(sendCommand).toHaveBeenCalledWith('IC demo_1.scn'));
+    });
+
+    it('keeps a dotted scenario name intact in the IC command', async () => {
+        // "IC demo.v2" would be rewritten by BlueSky's Path.with_suffix to
+        // "demo.scn" — a different (possibly stale) scenario. Sending the
+        // full stored filename makes with_suffix a no-op.
+        stubFetch('demo.v2.scn');
+        const sendCommand = vi.fn();
+        vi.stubGlobal('app', { sendCommand });
+        await import('./BlueSkyFileManager');
+
+        selectFile('demo.v2.scn');
+        (document.getElementById('upload-and-run-scenario-btn') as HTMLButtonElement).click();
+
+        await vi.waitFor(() => expect(sendCommand).toHaveBeenCalledWith('IC demo.v2.scn'));
     });
 
     it('reports the stored name in the plain-upload success toast', async () => {
