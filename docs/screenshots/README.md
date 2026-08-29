@@ -131,3 +131,9 @@ frame is captured, so the header reads `Rate: 0x`.
 |---|---|
 | ![Fleet over Lake Geneva](swiss-leman-fleet-light.png) | ![A350 above the Rhône valley](swiss-leman-a350.png) |
 | Fleet over Lake Geneva and the Rhône valley (light theme) | A350 above the Rhône valley near Aigle (light theme) |
+
+## User guide figures
+
+The `logging-*.png` files are UI captures used by the
+[Logging & Plotting](../logging-plotting.md) user-guide page, not part of the
+gallery above.
