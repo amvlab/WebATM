@@ -5,6 +5,8 @@ import { logger } from './utils/Logger';
 import { themeManager } from './utils/ThemeManager';
 import './ui/LogStreamManager';
 import './ui/OutputFileBrowser';
+import './ui/blueskylogging/CreateLogManager';
+import './ui/blueskylogging/LogPlotModal';
 
 /**
  * Entry point for the WebATM TypeScript application: creates and

@@ -18,6 +18,7 @@ export class LogStreamManager {
     private logStreamTabBtn: HTMLElement | null = null;
     private filenameDisplay: HTMLElement | null = null;
     private clearEchoBtn: HTMLElement | null = null;
+    private createLogBtn: HTMLElement | null = null;
     private refreshBtn: HTMLElement | null = null;
     private clearStreamBtn: HTMLElement | null = null;
     private stopBtn: HTMLElement | null = null;
@@ -74,6 +75,7 @@ export class LogStreamManager {
         this.logStreamTabBtn = document.getElementById('log-stream-tab-btn');
         this.filenameDisplay = document.getElementById('log-stream-filename');
         this.clearEchoBtn = document.getElementById('clear-echo');
+        this.createLogBtn = document.getElementById('create-log-btn');
         this.refreshBtn = document.getElementById('refresh-output-files');
         this.clearStreamBtn = document.getElementById('clear-log-stream');
         this.stopBtn = document.getElementById('stop-log-stream');
@@ -394,6 +396,7 @@ export class LogStreamManager {
     private showStreamView(): void {
         if (this.fileBrowserElement) this.fileBrowserElement.style.display = 'none';
         if (this.logStreamOutput) this.logStreamOutput.style.display = '';
+        if (this.createLogBtn) this.createLogBtn.style.display = 'none';
         if (this.refreshBtn) this.refreshBtn.style.display = 'none';
         if (this.clearStreamBtn) this.clearStreamBtn.style.display = '';
     }
@@ -401,6 +404,7 @@ export class LogStreamManager {
     private showBrowserView(): void {
         if (this.logStreamOutput) this.logStreamOutput.style.display = 'none';
         if (this.fileBrowserElement) this.fileBrowserElement.style.display = '';
+        if (this.createLogBtn) this.createLogBtn.style.display = '';
         if (this.refreshBtn) this.refreshBtn.style.display = '';
         if (this.clearStreamBtn) this.clearStreamBtn.style.display = 'none';
     }
@@ -428,6 +432,7 @@ export class LogStreamManager {
         if (this.echoTabBtn) this.echoTabBtn.classList.add('active');
         if (this.logStreamTabBtn) this.logStreamTabBtn.classList.remove('active');
         if (this.clearEchoBtn) this.clearEchoBtn.style.display = '';
+        if (this.createLogBtn) this.createLogBtn.style.display = 'none';
         if (this.refreshBtn) this.refreshBtn.style.display = 'none';
         if (this.clearStreamBtn) this.clearStreamBtn.style.display = 'none';
         if (this.stopBtn) this.stopBtn.style.display = 'none';

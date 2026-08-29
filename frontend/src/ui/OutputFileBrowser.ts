@@ -91,6 +91,8 @@ export class OutputFileBrowser {
                     void this.navigateToFolder(target.dataset.name || '');
                 } else if (action === 'stream') {
                     this.streamFile(target.dataset.path || '');
+                } else if (action === 'plot') {
+                    this.plotFile(target.dataset.path || '');
                 } else if (action === 'download') {
                     this.downloadFile(target.dataset.path || '');
                 }
@@ -216,12 +218,20 @@ export class OutputFileBrowser {
                 </div>`;
             }
 
+            // Tabular data logs (CRELOG writes .log; .csv for good measure)
+            // additionally get a quick-look Plot action.
+            const plottable = /\.(log|csv)$/i.test(file.filename);
+            const plotButton = plottable
+                ? `<button class="console-btn" data-action="plot" data-path="${escapeHtml(filePath)}">📈 Plot</button>`
+                : '';
+
             return `<div class="output-file-row">
                 <span class="output-file-icon">📄</span>
                 <span class="output-file-name">${escapeHtml(file.filename)}</span>
                 <span class="output-file-meta">${escapeHtml(sizeText)} &bull; ${modifiedDate} ${modifiedTime}</span>
                 <span class="output-file-actions">
                     <button class="console-btn" data-action="stream" data-path="${escapeHtml(filePath)}">▶ Stream</button>
+                    ${plotButton}
                     <button class="console-btn" data-action="download" data-path="${escapeHtml(filePath)}">⬇ Download</button>
                 </span>
             </div>`;
@@ -255,6 +265,10 @@ export class OutputFileBrowser {
 
     public streamFile(filepath: string): void {
         window.logStreamManager?.startStreaming(filepath);
+    }
+
+    public plotFile(filepath: string): void {
+        window.logPlotModal?.open(filepath);
     }
 
     public downloadFile(filepath: string): void {

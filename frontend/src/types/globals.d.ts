@@ -13,6 +13,7 @@ import type { Console } from '../ui/Console';
 import type { EchoManager } from '../ui/EchoManager';
 import type { BlueSkyFileManager } from '../ui/BlueSkyFileManager';
 import type { LogStreamManager } from '../ui/LogStreamManager';
+import type { LogPlotModal } from '../ui/blueskylogging/LogPlotModal';
 import type { OutputFileBrowser } from '../ui/OutputFileBrowser';
 import type { PanelResizer } from '../ui/panels/PanelResizer';
 import type { AircraftClickEvent } from '../ui/map/aircraft/AircraftInteractionManager';
@@ -36,6 +37,7 @@ declare global {
         outputFileBrowser?: OutputFileBrowser;
         blueSkyFileManager?: BlueSkyFileManager;
         logStreamManager?: LogStreamManager;
+        logPlotModal?: LogPlotModal;
 
         // HTML onclick handlers (wired in main.ts)
         zoomIn?: () => void;
@@ -55,6 +57,8 @@ declare global {
         'aircraft-unselect': CustomEvent<AircraftClickEvent>;
         'consoleMessage': CustomEvent<{ message: string; type: string }>;
         'echoMessage': CustomEvent<{ message: string; type: string }>;
+        'echoMessageAdded': CustomEvent<{ message: string; type: string; nodeId?: string; timestamp: Date }>;
+        'simulation-reset': CustomEvent<unknown>;
     }
 }
 

@@ -637,6 +637,7 @@
                     <div class="echo-header-controls">
                         <span id="log-stream-filename"></span>
                         <button id="clear-echo" class="console-btn">Clear</button>
+                        <button id="create-log-btn" class="console-btn" style="display: none;" title="Create a BlueSky data log (CRELOG)">+ Create Log</button>
                         <button id="refresh-output-files" class="console-btn" style="display: none;">Reload</button>
                         <button id="clear-log-stream" class="console-btn" style="display: none;">Clear</button>
                         <button id="stop-log-stream" class="console-btn" style="display: none;">Exit Stream</button>
@@ -649,6 +650,7 @@
                         <div id="output-not-configured" style="padding: 12px; color: var(--accent-warning); display: none;">
                             BlueSky base directory not configured. Configure it in Settings.
                         </div>
+                        <div id="log-quick-controls" class="log-quick-controls" style="display: none;"></div>
                         <div class="output-search-bar">
                             <input id="output-search-input" type="text" placeholder="Filter files..." class="output-search-field">
                         </div>
@@ -678,6 +680,107 @@
             </div>
             <div class="modal-body">
                 <div id="command-palette-list-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Log Modal (BlueSky CRELOG helper) -->
+    <div id="create-log-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create Data Log</h3>
+                <button class="modal-close" id="create-log-modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <label for="create-log-name-input">Log Name:</label>
+                    <input type="text" id="create-log-name-input" placeholder="e.g. MYLOG" maxlength="24" autocomplete="off">
+                    <small class="setting-help">Name of the BlueSky logger (letters, digits, underscore). It also
+                        becomes a console command: <code>NAME ON/OFF</code>.</small>
+                </div>
+                <div class="setting-group">
+                    <label for="create-log-dt-input">Update Interval (s):</label>
+                    <input type="number" id="create-log-dt-input" value="1.0" step="0.1" min="0.1">
+                    <small class="setting-help">Simulation-time interval between log entries</small>
+                </div>
+                <div class="setting-group">
+                    <label for="create-log-header-input">File Header (optional):</label>
+                    <input type="text" id="create-log-header-input" placeholder="e.g. My experiment log" autocomplete="off">
+                    <small class="setting-help">Comment text written at the top of the log file</small>
+                </div>
+                <div class="setting-group">
+                    <label>Variables to log:</label>
+                    <div id="create-log-var-grid" class="create-log-var-grid"></div>
+                    <small class="setting-help">Per-aircraft (traf) variables recorded at every interval; simulation
+                        time (simt) is always the first column</small>
+                </div>
+                <div class="setting-group">
+                    <label for="create-log-custom-vars">Custom variables (optional):</label>
+                    <div class="create-log-custom-row">
+                        <input type="text" id="create-log-custom-vars" placeholder="Search or type, e.g. traf.perf.mass" autocomplete="off">
+                        <button id="create-log-add-var-btn" class="btn-secondary">Add</button>
+                        <div id="create-log-suggest-list" class="create-log-suggest-list" style="display: none;"></div>
+                    </div>
+                    <small id="create-log-custom-status" class="setting-help create-log-custom-status" style="display: none;"></small>
+                    <small class="setting-help">Type to search the connected simulation's variables (discovered live
+                        via <code>LSVAR</code>; end with a dot, e.g. <code>traf.perf.</code>, to explore deeper).
+                        Press Enter or Add to validate and add the variable. Added variables are remembered for
+                        future sessions; ones not available in the current simulation are greyed out.</small>
+                </div>
+                <div class="setting-group">
+                    <label class="create-log-checkbox-label">
+                        <input type="checkbox" id="create-log-start-checkbox" checked>
+                        Start logging immediately
+                    </label>
+                    <small class="setting-help">The log file appears in the Output Log file browser once
+                        started; a simulation RESET closes it</small>
+                </div>
+                <div class="setting-group">
+                    <label>Commands to send:</label>
+                    <pre id="create-log-preview" class="create-log-preview"></pre>
+                </div>
+                <div id="create-log-error" class="create-log-error" style="display: none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="create-log-submit-btn" class="btn-primary">Create Log</button>
+                <button id="create-log-cancel-btn" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Plot Modal (quick client-side view of BlueSky data logs) -->
+    <div id="log-plot-modal" class="modal" style="display: none;">
+        <div class="modal-content log-plot-content">
+            <div class="modal-header">
+                <h3>Log Plot &mdash; <span id="log-plot-filename"></span></h3>
+                <button class="modal-close" id="log-plot-modal-close">&times;</button>
+            </div>
+            <div class="modal-body log-plot-body">
+                <div class="log-plot-toolbar">
+                    <div class="log-plot-tabs">
+                        <button class="log-plot-tab active" data-view="timeseries">Time Series</button>
+                        <button class="log-plot-tab" data-view="xy">X-Y Plot</button>
+                        <button class="log-plot-tab" data-view="table">Data &amp; Stats</button>
+                    </div>
+                    <div class="log-plot-controls">
+                        <label id="log-plot-x-label" style="display: none;">X:
+                            <select id="log-plot-x-select"></select>
+                        </label>
+                        <label id="log-plot-y-label">Y:
+                            <select id="log-plot-y-select"></select>
+                        </label>
+                        <button id="log-plot-reload-btn" class="console-btn" title="Re-read the file (a running log keeps growing)">Reload</button>
+                        <button id="log-plot-download-btn" class="console-btn" title="Download the raw log file">⬇ Download</button>
+                    </div>
+                </div>
+                <div id="log-plot-legend" class="log-plot-legend"></div>
+                <div id="log-plot-chart-wrap" class="log-plot-chart-wrap">
+                    <canvas id="log-plot-canvas"></canvas>
+                    <div id="log-plot-readout" class="log-plot-readout" style="display: none;"></div>
+                </div>
+                <div id="log-plot-table-wrap" class="log-plot-table-wrap" style="display: none;"></div>
+                <div id="log-plot-unplottable" class="log-plot-unplottable" style="display: none;"></div>
+                <div id="log-plot-status" class="log-plot-status"></div>
             </div>
         </div>
     </div>
