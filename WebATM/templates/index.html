@@ -748,6 +748,43 @@
         </div>
     </div>
 
+    <!-- Log Plot Modal (quick client-side view of BlueSky data logs) -->
+    <div id="log-plot-modal" class="modal" style="display: none;">
+        <div class="modal-content log-plot-content">
+            <div class="modal-header">
+                <h3>Log Plot &mdash; <span id="log-plot-filename"></span></h3>
+                <button class="modal-close" id="log-plot-modal-close">&times;</button>
+            </div>
+            <div class="modal-body log-plot-body">
+                <div class="log-plot-toolbar">
+                    <div class="log-plot-tabs">
+                        <button class="log-plot-tab active" data-view="timeseries">Time Series</button>
+                        <button class="log-plot-tab" data-view="xy">X-Y Plot</button>
+                        <button class="log-plot-tab" data-view="table">Data &amp; Stats</button>
+                    </div>
+                    <div class="log-plot-controls">
+                        <label id="log-plot-x-label" style="display: none;">X:
+                            <select id="log-plot-x-select"></select>
+                        </label>
+                        <label id="log-plot-y-label">Y:
+                            <select id="log-plot-y-select"></select>
+                        </label>
+                        <button id="log-plot-reload-btn" class="console-btn" title="Re-read the file (a running log keeps growing)">Reload</button>
+                        <button id="log-plot-download-btn" class="console-btn" title="Download the raw log file">⬇ Download</button>
+                    </div>
+                </div>
+                <div id="log-plot-legend" class="log-plot-legend"></div>
+                <div id="log-plot-chart-wrap" class="log-plot-chart-wrap">
+                    <canvas id="log-plot-canvas"></canvas>
+                    <div id="log-plot-readout" class="log-plot-readout" style="display: none;"></div>
+                </div>
+                <div id="log-plot-table-wrap" class="log-plot-table-wrap" style="display: none;"></div>
+                <div id="log-plot-unplottable" class="log-plot-unplottable" style="display: none;"></div>
+                <div id="log-plot-status" class="log-plot-status"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings Modal -->
     <div id="settings-modal" class="modal" style="display: none;">
         <div class="modal-content">

@@ -3666,3 +3666,250 @@ button.disabled:hover {
 .log-chip-dismiss:hover {
     color: var(--text-primary);
 }
+
+/* --- Log Plot modal (quick client-side view of BlueSky data logs) --- */
+
+/* Much larger than the default modal: the chart needs room */
+#log-plot-modal .modal-content.log-plot-content {
+    max-width: 1100px;
+    width: 92%;
+    height: 84vh;
+    max-height: 84vh;
+}
+
+#log-plot-modal .modal-header h3 {
+    font-size: calc(var(--panel-font-size) + 5px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#log-plot-filename {
+    font-family: 'Courier New', monospace;
+    color: var(--text-primary);
+}
+
+.log-plot-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+    overflow: hidden;
+}
+
+.log-plot-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.log-plot-tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.log-plot-tab {
+    background-color: var(--bg-control);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    padding: 4px 12px;
+    font-size: calc(var(--panel-font-size) + 1px);
+    cursor: pointer;
+}
+
+.log-plot-tab:hover {
+    color: var(--text-primary);
+}
+
+.log-plot-tab.active {
+    background-color: var(--accent-primary-bg);
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+
+.log-plot-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.log-plot-controls label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-secondary);
+    font-size: calc(var(--panel-font-size) + 1px);
+}
+
+.log-plot-controls select {
+    background-color: var(--bg-control);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-family: 'Courier New', monospace;
+    font-size: var(--panel-font-size);
+    padding: 3px 6px;
+    max-width: 160px;
+}
+
+.log-plot-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    max-height: 58px;
+    overflow-y: auto;
+}
+
+.log-plot-legend:empty {
+    display: none;
+}
+
+.log-plot-legend-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 6px;
+}
+
+.log-plot-legend-actions .console-btn {
+    padding: 1px 8px;
+    font-size: var(--panel-font-size);
+}
+
+.log-plot-legend-count {
+    color: var(--text-muted);
+    font-size: var(--panel-font-size);
+    min-width: 40px;
+}
+
+.log-plot-legend-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: 'Courier New', monospace;
+    font-size: var(--panel-font-size);
+    color: var(--text-primary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.log-plot-legend-chip.hidden-series {
+    opacity: 0.35;
+    text-decoration: line-through;
+}
+
+.log-plot-legend-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.log-plot-chart-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 200px;
+    background-color: var(--bg-deep);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.log-plot-chart-wrap canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.log-plot-readout {
+    position: absolute;
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-family: 'Courier New', monospace;
+    font-size: var(--panel-font-size);
+    color: var(--text-primary);
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 5;
+}
+
+.log-plot-table-wrap {
+    flex: 1;
+    overflow: auto;
+    background-color: var(--bg-deep);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 8px 12px;
+}
+
+.log-plot-table-wrap h4 {
+    color: var(--accent-primary);
+    font-size: calc(var(--panel-font-size) + 2px);
+    margin: 8px 0 6px;
+}
+
+.log-plot-table {
+    border-collapse: collapse;
+    font-family: 'Courier New', monospace;
+    font-size: var(--panel-font-size);
+    color: var(--text-primary);
+}
+
+.log-plot-table th,
+.log-plot-table td {
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.log-plot-table th {
+    background-color: var(--bg-elevated);
+    color: var(--text-secondary);
+    position: sticky;
+    top: 0;
+}
+
+.log-plot-table .log-plot-col-name,
+.log-plot-table td:first-child {
+    text-align: left;
+}
+
+.log-plot-empty {
+    color: var(--text-muted);
+    padding: 16px;
+    font-size: calc(var(--panel-font-size) + 1px);
+}
+
+/* Shown instead of the chart/table for logs in a format the quick-look
+   viewer does not understand (e.g. CONFLOG/FLSTLOG event logs) */
+.log-plot-unplottable {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px 15%;
+    background-color: var(--bg-deep);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: calc(var(--panel-font-size) + 2px);
+    line-height: 1.6;
+}
+
+.log-plot-status {
+    color: var(--text-muted);
+    font-size: var(--panel-font-size);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
