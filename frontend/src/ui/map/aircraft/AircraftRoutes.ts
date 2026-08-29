@@ -1,6 +1,7 @@
 import { Map } from 'maplibre-gl';
 import { RouteData, DisplayOptions } from '../../../data/types';
 import { AircraftRouteRenderer } from './AircraftRouteRenderer';
+import { clampActiveWaypoint } from '../../../utils/route';
 import { logger } from '../../../utils/Logger';
 
 /**
@@ -90,7 +91,7 @@ export class AircraftRoutes {
             return;
         }
 
-        const activeWaypointIndex = data.iactwp || 0;
+        const activeWaypointIndex = clampActiveWaypoint(data.iactwp, data.wplat.length);
         const features = this.renderer.buildRouteFeatures(data, activeWaypointIndex);
         this.renderer.updateMapSources(features, this.showRouteLabels);
     }

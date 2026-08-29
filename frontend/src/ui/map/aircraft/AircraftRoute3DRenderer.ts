@@ -6,6 +6,7 @@ import { altitudeScaledForOrigin, mercatorCameraMatrix, relativePositionMeters }
 import type { RouteData, DisplayOptions } from '../../../data/types';
 import { logger } from '../../../utils/Logger';
 import { safeRemoveLayer } from '../../../utils/maplibre';
+import { clampActiveWaypoint } from '../../../utils/route';
 
 /**
  * 3D aircraft route renderer using Three.js.
@@ -240,7 +241,7 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
         const aircraft = this.aircraftState!;
         this.updateSceneOrigin();
 
-        const iactwp = Math.max(0, Math.min(data.iactwp || 0, data.wplat.length - 1));
+        const iactwp = clampActiveWaypoint(data.iactwp, data.wplat.length);
 
         const altFor = (i: number): number => {
             const wpalt = data.wpalt && data.wpalt[i] !== undefined ? data.wpalt[i] : -1;
