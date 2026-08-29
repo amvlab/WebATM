@@ -10,9 +10,33 @@ import uuid
 from flask import current_app, session
 from flask_socketio import emit
 
+from ..bluesky_client import safe_decode
 from ..logger import get_logger
+from ..utils import id2str
 
 logger = get_logger()
+
+
+def _tracked_binary_server_id(proxy, server_id):
+    """Map a frontend server-ID string to the tracked server's binary ID.
+
+    ``node_info`` serializes server IDs as hex (``server_id_hex``) or decoded
+    (``server_id``) strings, so re-encoding the string with ``str.encode``
+    would not restore the original bytes.
+
+    Args:
+        proxy (BlueSkyProxy): The current BlueSky proxy.
+        server_id (str): Server ID string as sent by the frontend.
+
+    Returns:
+        bytes | None: The original binary server ID, or None when the server
+            is not tracked.
+    """
+    for raw_id in list(proxy.tracked_servers):
+        if server_id in (id2str(raw_id), safe_decode(raw_id)):
+            return raw_id
+    logger.debug(f"Could not find server ID for: {server_id}")
+    return None
 
 
 def _tracked_binary_node_id(proxy, node_id):
@@ -165,13 +189,18 @@ def register_socket_handlers(socketio, session_manager):
 
         Args:
             data (dict): Payload with ``count`` (default 1) and an optional
-                ``server_id`` string, encoded to bytes before delegation.
+                ``server_id`` string, resolved to the tracked server's
+                binary ID before delegation.
         """
         try:
             count = (data or {}).get("count", 1)
             server_id = (data or {}).get("server_id")
             if server_id and isinstance(server_id, str):
-                server_id = server_id.encode()
+                server_id = _tracked_binary_server_id(
+                    current_app.bluesky_proxy, server_id
+                )
+                if server_id is None:
+                    return
             current_app.bluesky_proxy.addnodes(count, server_id=server_id)
             logger.info(f"Requested {count} new node(s) on server {server_id}")
         except Exception as e:

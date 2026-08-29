@@ -32,6 +32,11 @@ FILE_TYPES = {
 }
 WRITABLE_FILE_TYPES = ("scenario", "plugins", "settings")
 
+# Subdirectories pre-created under a configured base path so browsing works
+# before BlueSky's first start (BlueSky itself maintains the same set in its
+# working directory). Shared with the integrated build's auto-configuration.
+MANAGED_SUBDIRS = ("scenario", "plugins", "output")
+
 # Offline-built SQLite FTS index behind /api/navdata/search (see
 # script/navdata/). Module-level so tests can point it at a fixture DB.
 NAVDATA_DB = Path(__file__).parent.parent / "static" / "navdata" / "navdata.sqlite"
@@ -725,7 +730,7 @@ def register_basic_routes(app, session_manager):
             current_app.bluesky_base_path = str(path_obj)
 
             try:
-                for subdir in ("scenario", "plugins", "output"):
+                for subdir in MANAGED_SUBDIRS:
                     (path_obj / subdir).mkdir(exist_ok=True)
                 logger.info(
                     f"BlueSky base path configured: {current_app.bluesky_base_path}"
@@ -822,6 +827,15 @@ def register_basic_routes(app, session_manager):
                 # Single fixed file; a re-upload replaces it.
                 target_path = base_path / config["filepath"]
             else:
+                extension = config["extension"]
+                if not filename.lower().endswith(extension):
+                    # secure_filename can reduce a name like ".scn" to the
+                    # bare extension, which browse would never list.
+                    return jsonify({"success": False, "error": "Invalid filename"}), 400
+                # Store the extension lowercase: BlueSky's IC forces ".scn"
+                # onto the name via Path.with_suffix, so an uploaded
+                # "DEMO.SCN" could never be run on a case-sensitive fs.
+                filename = filename[: -len(extension)] + extension
                 target_dir = base_path / config["directory"]
                 target_dir.mkdir(exist_ok=True)
 

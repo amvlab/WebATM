@@ -73,6 +73,26 @@ class TestUpload:
         assert resp.status_code == 200
         assert (client.base_path / "plugins" / "myplugin.py").exists()
 
+    def test_upload_uppercase_extension_stored_lowercase(self, client):
+        # BlueSky's IC forces ".scn" onto the name via Path.with_suffix, so a
+        # stored "DEMO.SCN" could never be run on a case-sensitive filesystem.
+        resp = _upload(client, "scenario", "DEMO.SCN")
+        assert resp.status_code == 200
+        assert resp.get_json()["filename"] == "DEMO.scn"
+        assert (client.base_path / "scenario" / "DEMO.scn").exists()
+
+    def test_upload_dotted_name_kept_intact(self, client):
+        resp = _upload(client, "scenario", "demo.v2.scn")
+        assert resp.status_code == 200
+        assert resp.get_json()["filename"] == "demo.v2.scn"
+        assert (client.base_path / "scenario" / "demo.v2.scn").exists()
+
+    def test_upload_bare_extension_rejected(self, client):
+        # secure_filename(".scn") leaves just "scn" — an unlistable,
+        # unrunnable file — so the upload must be rejected instead.
+        resp = _upload(client, "scenario", ".scn")
+        assert resp.status_code == 400
+
     def test_upload_settings_reports_stored_name(self, client):
         # Whatever the upload was called, it is stored as settings.cfg and
         # the response must report that stored name, not the uploaded one.

@@ -121,6 +121,50 @@ class TestNodeEvents:
         client.emit("add_nodes", {"count": 2})
         assert client.is_connected()
 
+    def test_add_nodes_resolves_server_id_to_tracked_bytes(self, sio):
+        """The frontend only ever has the serialized (hex/decoded) server ID
+        strings, so the handler must map them back to the tracked server's
+        original bytes — naively encoding the string would address a server
+        that doesn't exist."""
+        app, socketio, client = sio
+        client.get_received()
+        proxy = app.bluesky_proxy
+        raw_server = b"S\x05z\x9d\x80"
+
+        class RecordingClient:
+            def __init__(self):
+                self.calls = []
+
+            def addnodes(self, count, server_id=None):
+                self.calls.append((count, server_id))
+
+        proxy.bluesky_client = RecordingClient()
+        proxy.tracked_servers[raw_server] = {"server_id": raw_server}
+
+        # Both serialized forms (id2str hex and safe_decode) must resolve.
+        client.emit("add_nodes", {"count": 2, "server_id": raw_server.hex()})
+        client.emit("add_nodes", {"count": 1, "server_id": raw_server.hex().upper()})
+        assert proxy.bluesky_client.calls == [(2, raw_server), (1, raw_server)]
+
+    def test_add_nodes_unknown_server_id_is_dropped(self, sio):
+        """An unresolvable server ID must not be forwarded as garbage bytes."""
+        app, socketio, client = sio
+        client.get_received()
+        proxy = app.bluesky_proxy
+
+        class RecordingClient:
+            def __init__(self):
+                self.calls = []
+
+            def addnodes(self, count, server_id=None):
+                self.calls.append((count, server_id))
+
+        proxy.bluesky_client = RecordingClient()
+
+        client.emit("add_nodes", {"count": 2, "server_id": "deadbeef00"})
+        assert proxy.bluesky_client.calls == []
+        assert client.is_connected()
+
     def test_set_active_node_unknown_id(self, sio):
         app, socketio, client = sio
         client.get_received()

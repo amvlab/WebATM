@@ -285,9 +285,11 @@ class TestEmitNodeInfo:
         assert payload is not None
         assert payload["total_nodes"] == 1
         assert node_hex in payload["nodes"]
-        # server_id should be decoded and carry hex/raw variants.
+        # server_id should be decoded and carry the hex variant; the old
+        # server_id_raw field (a Python bytes repr) is gone.
         node_entry = payload["nodes"][node_hex]
         assert "server_id_hex" in node_entry
+        assert "server_id_raw" not in node_entry
 
     def test_no_emit_without_clients(self, proxy, fake_socketio):
         proxy.connected_clients = 0
@@ -356,9 +358,11 @@ class TestEmitActiveNodePolyData:
 
 
 class TestActnodeChangedTrafficClear:
-    """Switching the active node drops the previous node's cached aircraft:
-    the cache would otherwise be re-served (initial_data snapshot, backup
-    emit) until the new node's ACDATA stream produces its first frame."""
+    """Switching the active node drops the previous node's cached aircraft
+    and sim info: the caches would otherwise be re-served (initial_data
+    snapshot, backup emit) until the new node's streams produce their first
+    frames — e.g. the header keeps showing the old node's clock and
+    scenario on a node that is sitting at 00:00:00."""
 
     def test_switch_clears_cached_traffic_and_emits_empty_acdata(
         self, proxy, fake_client, fake_socketio
@@ -373,6 +377,19 @@ class TestActnodeChangedTrafficClear:
 
         assert proxy.traffic_data == empty_traffic_data()
         assert fake_socketio.last("acdata") == empty_traffic_data()
+
+    def test_switch_clears_cached_sim_info(self, proxy, fake_client):
+        """Regression: the previous node's SIMINFO cache survived a node
+        switch, so the 0.5 s backup emit and the initial_data snapshot kept
+        serving the old node's clock/scenario/aircraft count as if they
+        belonged to the newly active node."""
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.sim_data = {"simt": 6169.0, "scenname": "OLD", "ntraf": 3}
+
+        proxy.node_mgr._on_actnode_changed(b"\x01\x02\x03\x04\x81")
+
+        assert proxy.sim_data == {}
 
     def test_switch_clears_cache_even_without_clients(
         self, proxy, fake_client, fake_socketio
