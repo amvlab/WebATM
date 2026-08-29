@@ -55,6 +55,8 @@ declare global {
         'aircraft-unselect': CustomEvent<AircraftClickEvent>;
         'consoleMessage': CustomEvent<{ message: string; type: string }>;
         'echoMessage': CustomEvent<{ message: string; type: string }>;
+        'echoMessageAdded': CustomEvent<{ message: string; type: string; nodeId?: string; timestamp: Date }>;
+        'simulation-reset': CustomEvent<unknown>;
     }
 }
 

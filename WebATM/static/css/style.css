@@ -3430,3 +3430,239 @@ button.disabled:hover {
     border-color: var(--accent-primary);
     background-color: var(--accent-primary-bg);
 }
+
+/* --- Create Log dialog (BlueSky CRELOG helper) --- */
+
+/* The dialog's text scales with the Display panel's "Panel Text Size"
+   slider (--panel-font-size, default 11px). The offsets keep the default
+   look identical to the Settings modal's fixed sizing (13px body / 11px
+   help / 16px title). */
+#create-log-modal .modal-header h3 {
+    font-size: calc(var(--panel-font-size) + 5px);
+}
+
+#create-log-modal .setting-group label,
+#create-log-modal .setting-group input[type="text"],
+#create-log-modal .setting-group input[type="number"],
+#create-log-modal .modal-footer .btn-primary,
+#create-log-modal .modal-footer .btn-secondary,
+#create-log-modal .create-log-custom-row .btn-secondary {
+    font-size: calc(var(--panel-font-size) + 2px);
+}
+
+#create-log-modal .setting-help {
+    font-size: var(--panel-font-size);
+}
+
+.create-log-var-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 4px 12px;
+    background-color: var(--bg-deep);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 8px;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.create-log-var-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    /* 13px at the default 11px panel size, tracking the Display slider */
+    font-size: calc(var(--panel-font-size) + 2px);
+    color: var(--text-primary);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+/* Custom variable not present in the currently connected simulation */
+.create-log-var-item.unavailable {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.create-log-var-item input[type="checkbox"] {
+    flex-shrink: 0;
+    accent-color: var(--accent-primary);
+}
+
+.create-log-var-item .create-log-var-name {
+    font-family: 'Courier New', monospace;
+}
+
+.create-log-var-item .create-log-var-desc {
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.create-log-checkbox-label {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.create-log-checkbox-label input[type="checkbox"] {
+    accent-color: var(--accent-primary);
+}
+
+.create-log-preview {
+    background-color: var(--bg-deep);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 8px;
+    margin: 0;
+    font-family: 'Courier New', monospace;
+    /* 13px at the default 11px panel size, tracking the Display slider */
+    font-size: calc(var(--panel-font-size) + 2px);
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.create-log-custom-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    position: relative; /* anchors the suggestion dropdown */
+}
+
+.create-log-suggest-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    margin-top: 2px;
+    background-color: var(--bg-control);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    max-height: 180px;
+    overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.create-log-suggest-item {
+    padding: 5px 10px;
+    font-family: 'Courier New', monospace;
+    font-size: calc(var(--panel-font-size) + 2px);
+    color: var(--text-primary);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.create-log-suggest-item:hover,
+.create-log-suggest-item.active {
+    background-color: var(--accent-primary-bg);
+}
+
+.create-log-custom-row input[type="text"] {
+    flex: 1;
+}
+
+.create-log-custom-row .btn-secondary {
+    flex-shrink: 0;
+}
+
+.create-log-custom-status.error {
+    color: var(--accent-danger-bright);
+}
+
+.create-log-custom-status.success {
+    color: var(--accent-primary-bright);
+}
+
+.create-log-var-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 2px;
+    line-height: 1;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.create-log-var-remove:hover {
+    color: var(--accent-danger-bright);
+}
+
+.create-log-error {
+    color: var(--accent-danger-bright);
+    font-size: calc(var(--panel-font-size) + 1px);
+    padding: 8px;
+    border: 1px solid var(--accent-danger);
+    border-radius: 4px;
+    background-color: var(--accent-danger-tint);
+}
+
+/* Quick Start/Stop strip for loggers created this session (Output Log tab) */
+.log-quick-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.log-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background-color: var(--bg-control);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    padding: 2px 6px 2px 10px;
+    /* Lives in the echo/output area, so it tracks the console text slider */
+    font-size: calc(var(--console-font-size) + 1px);
+}
+
+.log-chip-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.log-chip.running .log-chip-status {
+    background-color: var(--accent-primary-bright);
+    box-shadow: 0 0 4px var(--accent-primary-glow-strong);
+}
+
+.log-chip-name {
+    font-family: 'Courier New', monospace;
+    color: var(--text-primary);
+}
+
+.log-chip-dt {
+    color: var(--text-muted);
+    font-size: var(--console-font-size);
+}
+
+.log-chip .console-btn {
+    padding: 1px 8px;
+    font-size: 11px;
+}
+
+.log-chip-dismiss {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+.log-chip-dismiss:hover {
+    color: var(--text-primary);
+}

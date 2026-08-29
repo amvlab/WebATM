@@ -443,6 +443,12 @@ export class App {
                 // This handler overrides SocketManager's built-in onReset, so
                 // the state reset it normally performs must happen here.
                 this.stateManager.reset();
+
+                // Broadcast for loosely-coupled UI singletons (e.g.
+                // CreateLogManager marks its data-log chips stopped, since a
+                // RESET closes every log file server-side).
+                document.dispatchEvent(new CustomEvent('simulation-reset'));
+
                 logger.info('App', 'Simulation reset - connection maintained');
             }
         });
