@@ -49,6 +49,9 @@ export class LogPlotModal {
     private yLabelEl: HTMLElement | null = null;
 
     private filepath = '';
+    // Bumped on every load so a slow response for a previously opened file
+    // cannot overwrite the file opened after it.
+    private loadGeneration = 0;
     private log: ParsedLog | null = null;
     private view: PlotView = 'timeseries';
     private series: PlotSeries[] = [];
@@ -146,11 +149,15 @@ export class LogPlotModal {
 
     private async load(): Promise<void> {
         if (!this.filepath) return;
+        const generation = ++this.loadGeneration;
         try {
             const encodedPath = encodeURIComponent(this.filepath);
+            // include_header keeps the '#' header (column names) that a plain
+            // tail of a log longer than FETCH_LINES would cut off.
             const response = await fetch(
-                `/api/bluesky/output/content/${encodedPath}?lines=${FETCH_LINES}`);
+                `/api/bluesky/output/content/${encodedPath}?lines=${FETCH_LINES}&include_header=1`);
             const result: ContentResponse = await response.json();
+            if (generation !== this.loadGeneration) return; // a newer load won
             if (!result.success) {
                 this.log = null;
                 this.setStatus(`Could not read file: ${result.error ?? 'unknown error'}`);
@@ -161,6 +168,7 @@ export class LogPlotModal {
             this.applyDefaultColumns();
             this.render();
         } catch (error) {
+            if (generation !== this.loadGeneration) return;
             logger.error('LogPlotModal', 'Failed to load log file:', error);
             this.log = null;
             this.setStatus('Failed to load file');
@@ -223,9 +231,8 @@ export class LogPlotModal {
             return;
         }
 
-        // Not every BlueSky log is a periodic data log this viewer can draw
-        // (e.g. CONFLOG/FLSTLOG event logs) — say so instead of plotting
-        // something misleading.
+        // Event logs (CONFLOG/FLSTLOG) can't be drawn — say so instead of
+        // plotting something misleading.
         const reason = plotabilityError(this.log);
         if (reason) {
             this.renderUnplottable(reason);
