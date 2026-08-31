@@ -389,9 +389,10 @@ export class App {
             this.cleanup();
         }, { signal });
 
-        window.addEventListener('resize', () => {
-            this.handleResize();
-        }, { signal });
+        // No window 'resize' listener: MapLibre's built-in trackResize
+        // observer already resizes-and-redraws the map when its container
+        // changes size. A duplicate bare resize() here would clear the
+        // canvas without repainting it and flash white during live resizes.
 
         // Command palette shortcut. Bind Ctrl/Cmd+K and Ctrl/Cmd+Shift+P
         // (VS Code muscle memory). We avoid plain Ctrl+P because that's the
@@ -452,12 +453,6 @@ export class App {
                 logger.info('App', 'Simulation reset - connection maintained');
             }
         });
-    }
-
-    private handleResize(): void {
-        if (this.mapDisplay && this.mapDisplay.isInitialized()) {
-            this.mapDisplay.resize();
-        }
     }
 
     /**

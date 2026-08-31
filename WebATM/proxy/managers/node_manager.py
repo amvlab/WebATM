@@ -1,7 +1,6 @@
 """Node and server management for the BlueSky proxy."""
 
 import threading
-import time
 import traceback
 
 from ...bluesky_client import safe_decode, seqid2idx, seqidx2id
@@ -125,14 +124,7 @@ class NodeManager:
 
                 self._reactivate_if_active_node_gone(node_id)
 
-                if not self.proxy.was_connected:
-                    self.proxy.was_connected = True
-                    # Restart the data-flow timeout clock from "first node
-                    # appeared"; a stale start_client() timestamp would time
-                    # out immediately after a slow cold start.
-                    self.proxy.last_successful_update = time.time()
-                    logger.info(" Connection established")
-                    self.proxy._emit_connection_status(True)
+                self.proxy.connection_mgr.mark_connected()
 
                 if self.proxy.running:
                     self._emit_node_info()

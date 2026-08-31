@@ -51,15 +51,6 @@ export class MapDisplay {
     // every style.load.
     private terrainControl: TerrainToggleControl | null = null;
 
-    // Keeps the map's internal transform (size + projection matrix) in sync
-    // with the on-screen canvas. MapLibre only recomputes these on resize(),
-    // but the container can change size from layout settling, scrollbars, or
-    // panel drags without firing a window 'resize' event. A stale transform
-    // makes unproject() (and therefore every e.lngLat) drift from the real
-    // cursor position - which shows up as drawing previews not lining up with
-    // the pointer. The observer resyncs on any container size change.
-    private containerResizeObserver: ResizeObserver | null = null;
-
     // Detects device-pixel-ratio changes (e.g. dragging the window between a
     // Retina display and an external monitor). DPR changes do not fire a
     // 'resize' event, yet they require a resize() to keep the canvas buffer
@@ -153,9 +144,14 @@ export class MapDisplay {
         // erroring) still swaps to the bundled offline basemap in seconds.
         this.styleManager.armFirstLoadFallback();
 
-        // Keep the map transform synced to the container/canvas so cursor
-        // positions (e.lngLat) always match the on-screen pointer.
-        this.observeContainerResize();
+        // Container size changes (window resizes, panel drags, layout
+        // settling, scrollbars) are tracked by MapLibre's own built-in
+        // ResizeObserver (trackResize, on by default), which resizes and
+        // synchronously redraws in one step. Do NOT add extra resize
+        // listeners here: competing bare map.resize() calls clear the canvas
+        // without repainting it and cause intermittent white flashes. Only
+        // DPR changes need a hand-rolled watcher, since they can change the
+        // required canvas buffer size without resizing the container.
         this.watchDevicePixelRatio();
 
         // Hide the map style message since we have a default style
@@ -260,7 +256,7 @@ export class MapDisplay {
 
         // Resize to fix canvas/viewport sync after style load
         requestAnimationFrame(() => {
-            this.map?.resize();
+            this.resize();
         });
     }
 
@@ -376,47 +372,23 @@ export class MapDisplay {
     }
 
     /**
-     * Resize the map
-     * Should be called when the container size changes
+     * Resize the map to its container, without flashing.
+     *
+     * MapLibre's resize() reassigns the canvas width/height attributes, and
+     * a canvas assignment clears the drawing buffer even when the value is
+     * unchanged. A bare map.resize() therefore leaves a blank (background
+     * colored) canvas until MapLibre's next scheduled render frame — visible
+     * as an intermittent white flash. Following resize() with the
+     * synchronous redraw() repaints in the same frame, which is exactly what
+     * MapLibre's own container ResizeObserver does internally. Every manual
+     * resync (panel/layout changes, style swaps, DPR changes) must go
+     * through this method rather than calling map.resize() directly.
      */
     public resize(): void {
         if (this.map) {
             this.map.resize();
+            this.map.redraw();
         }
-    }
-
-    /**
-     * Observe the map container for size changes and resync the map transform.
-     *
-     * The ad-hoc window-resize and panel-drag listeners elsewhere only cover
-     * a subset of the ways the container can change size. Layout settling
-     * after fonts load, scrollbars appearing/disappearing, and flexbox
-     * reflows can all resize the container without a window 'resize' event,
-     * leaving MapLibre's cached transform stale. A stale transform makes
-     * unproject() drift from the real pointer, so drawing previews (heading
-     * guides, polygon/route lines) no longer line up with the cursor.
-     *
-     * The resize() call is deferred to the next animation frame to avoid the
-     * "ResizeObserver loop completed with undelivered notifications" warning
-     * that fires when resizing synchronously inside the observer callback.
-     */
-    private observeContainerResize(): void {
-        if (typeof ResizeObserver === 'undefined') return;
-
-        const container = document.getElementById(this.mapContainer);
-        if (!container) {
-            logger.warn('MapDisplay', 'Map container not found; cannot observe resize');
-            return;
-        }
-
-        this.containerResizeObserver = new ResizeObserver(() => {
-            requestAnimationFrame(() => {
-                this.map?.resize();
-            });
-        });
-        this.containerResizeObserver.observe(container);
-
-        logger.debug('MapDisplay', 'Container resize observer attached');
     }
 
     /**
@@ -436,7 +408,7 @@ export class MapDisplay {
         }
 
         this.dprListener = () => {
-            this.map?.resize();
+            this.resize();
             // The matched DPR has changed, so the query no longer applies;
             // build a fresh one for the new ratio.
             this.watchDevicePixelRatio();
@@ -570,11 +542,6 @@ export class MapDisplay {
      * Destroy the map and clean up resources
      */
     public destroy(): void {
-        if (this.containerResizeObserver) {
-            this.containerResizeObserver.disconnect();
-            this.containerResizeObserver = null;
-        }
-
         if (this.dprMediaQuery && this.dprListener) {
             this.dprMediaQuery.removeEventListener('change', this.dprListener);
             this.dprMediaQuery = null;

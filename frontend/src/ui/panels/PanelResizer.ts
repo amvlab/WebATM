@@ -194,10 +194,10 @@ export class PanelResizer {
             mapElement.style.pointerEvents = '';
         }
 
-        // Trigger map resize if MapLibre instance exists and has resize method
-        if (window.map && typeof window.map.resize === 'function') {
-            setTimeout(() => window.map!.resize(), 100);
-        }
+        // No explicit map resize here: MapLibre's built-in trackResize
+        // observer follows the container through the whole drag with a
+        // synchronous redraw per step. A delayed bare resize() would clear
+        // the canvas without repainting it and flash white.
 
         // Save panel sizes to localStorage
         this.savePanelSizes();
@@ -380,10 +380,8 @@ export class PanelResizer {
 
             logger.debug('PanelResizer', 'Panel layout loaded from localStorage');
 
-            // Trigger map resize after loading (if map exists and has resize method)
-            if (window.map && typeof window.map.resize === 'function') {
-                setTimeout(() => window.map!.resize(), 100);
-            }
+            // No explicit map resize: MapLibre's built-in trackResize
+            // observer picks up the container change from the applied sizes.
         } catch (error) {
             logger.error('PanelResizer', 'Error loading panel layout:', error);
         }

@@ -54,11 +54,10 @@ class DataManager:
         """
         if self.proxy.socketio and self.proxy.connected_clients > 0:
             try:
-                # Emit empty traffic data to clear all aircraft from the map
                 self.proxy.socketio.emit("acdata", empty_traffic_data())
 
-                # Emit empty simulation data (same shape the SIMINFO handler
-                # emits, so clients always see a complete siminfo payload)
+                # Same shape the SIMINFO handler emits, so clients always see
+                # a complete siminfo payload.
                 empty_sim_data = {
                     "speed": 0.0,
                     "simdt": 0.0,
@@ -71,12 +70,9 @@ class DataManager:
                 }
                 self.proxy.socketio.emit("siminfo", empty_sim_data)
 
-                # Emit empty shape data to clear all polygons and polylines
-                empty_shape_data = {"polys": {}}
-                self.proxy.socketio.emit("poly", empty_shape_data)
-                self.proxy.socketio.emit("polyline", empty_shape_data)
+                self.proxy.socketio.emit("poly", {"polys": {}})
+                self.proxy.socketio.emit("polyline", {"polys": {}})
 
-                # Emit disconnection event for map clearing
                 self.proxy.socketio.emit(
                     "server_disconnected",
                     {"timestamp": time.time(), "reason": "BlueSky server disconnected"},
@@ -108,16 +104,13 @@ class DataManager:
 
         if self.proxy.socketio and self.proxy.connected_clients > 0:
             try:
-                # Force emit current data
                 if self.proxy.sim_data:
                     self.proxy.socketio.emit("siminfo", self.proxy.sim_data)
                 if self.proxy.traffic_data:
                     self.proxy.socketio.emit("acdata", self.proxy.traffic_data)
             except Exception:
-                # Handle emission errors gracefully (e.g., disconnected clients)
                 pass
 
-        # Schedule next backup emission
         self.start_backup_timer()
 
     def _reset_cached_state(self):
@@ -130,6 +123,7 @@ class DataManager:
         ``_handle_disconnection``) so the paths cannot drift apart.
         """
         self.proxy.was_connected = False
+        self.proxy.connection_failures = 0
         self.proxy.last_successful_update = time.time()
 
         self.proxy.tracked_nodes.clear()
@@ -159,7 +153,7 @@ class DataManager:
         """
         self._reset_cached_state()
 
-        # Emit updated node info to show disconnection
+        # Let browsers show the (now empty) node picture.
         if self.proxy.socketio and self.proxy.connected_clients > 0:
             try:
                 self.proxy.node_mgr._emit_node_info()

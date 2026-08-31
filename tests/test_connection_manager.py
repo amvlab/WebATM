@@ -5,6 +5,8 @@ Covers the teardown paths (``close``, ``stop_client``,
 through ``DataManager._reset_cached_state`` so the paths cannot drift apart.
 """
 
+import time
+
 
 def _seed_cached_state(proxy):
     """Populate every cache a teardown is expected to clear."""
@@ -20,6 +22,7 @@ def _seed_cached_state(proxy):
     proxy.last_node_info_emit = 123.0
     proxy.current_bbox = (0.0, 0.0, 1.0, 1.0)
     proxy.was_connected = True
+    proxy.connection_failures = 2
 
 
 def _assert_cached_state_cleared(proxy):
@@ -36,6 +39,9 @@ def _assert_cached_state_cleared(proxy):
     assert proxy.current_bbox is None
     assert proxy.cmddict == {}
     assert proxy.was_connected is False
+    # A leftover failure count would put the next session on the same proxy
+    # one transient error away from the max-failures forced disconnect.
+    assert proxy.connection_failures == 0
 
 
 class TestClose:
@@ -85,6 +91,31 @@ class TestStopClient:
         # Unlike close(), stop_client destroys the client instance.
         assert proxy.bluesky_client is None
         _assert_cached_state_cleared(proxy)
+
+
+class TestMarkConnected:
+    """Single implementation of the "first node appeared" transition, shared
+    by the node-added signal and the network timer."""
+
+    def test_flips_connected_and_restarts_timeout_clock(self, proxy, fake_socketio):
+        proxy.was_connected = False
+        proxy.last_successful_update = time.time() - 999
+
+        before = time.time()
+        proxy.connection_mgr.mark_connected()
+
+        assert proxy.was_connected is True
+        assert proxy.last_successful_update >= before
+        assert fake_socketio.last("connection_status")["connected"] is True
+
+    def test_noop_when_already_connected(self, proxy, fake_socketio):
+        proxy.was_connected = True
+        sentinel = proxy.last_successful_update
+
+        proxy.connection_mgr.mark_connected()
+
+        assert proxy.last_successful_update == sentinel
+        assert fake_socketio.count("connection_status") == 0
 
 
 class TestHandleDisconnection:
