@@ -1052,6 +1052,10 @@ def register_basic_routes(app, session_manager):
         - ``offset``: byte offset to read from (0 = tail mode).
         - ``lines``: maximum lines for the initial tail load (default 200);
           0 or negative skips history and streams from the current end.
+        - ``include_header``: with a truthy value, a tail load that dropped
+          lines prepends the file's leading ``#`` comment block. BlueSky's
+          datalog writes a log's header (including the column-names line)
+          only once at the top, so a plain tail of a long log would lose it.
 
         Args:
             filepath (str): Path of the file relative to the output
@@ -1068,6 +1072,7 @@ def register_basic_routes(app, session_manager):
 
             offset = request.args.get("offset", type=int, default=0)
             max_lines = request.args.get("lines", type=int, default=200)
+            include_header = request.args.get("include_header", type=int, default=0)
             file_size = resolved_path.stat().st_size
 
             # A file smaller than the offset was truncated or rewritten
@@ -1083,7 +1088,16 @@ def register_basic_routes(app, session_manager):
                     data = f.read()
                 elif max_lines > 0:
                     # Initial (or post-truncation) load: tail the last N lines.
-                    data = b"".join(f.readlines()[-max_lines:])
+                    all_lines = f.readlines()
+                    data = b"".join(all_lines[-max_lines:])
+                    cut = len(all_lines) - max_lines
+                    if include_header and cut > 0:
+                        header = []
+                        for line in all_lines[:cut]:
+                            if not line.startswith(b"#"):
+                                break
+                            header.append(line)
+                        data = b"".join(header) + data
                 else:
                     f.seek(0, os.SEEK_END)
                     data = b""

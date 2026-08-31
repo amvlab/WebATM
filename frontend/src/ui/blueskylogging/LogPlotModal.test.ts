@@ -144,6 +144,34 @@ describe('LogPlotModal aircraft selection', () => {
         expect(document.getElementById('log-plot-status')!.textContent).toMatch(/not a plottable periodic log/);
     });
 
+    it('fetches the tail with the header block included', async () => {
+        await boot();
+        const url = vi.mocked(globalThis.fetch).mock.calls[0][0] as string;
+        expect(url).toContain('include_header=1');
+    });
+
+    it('ignores a slow response for a previously opened file', async () => {
+        let resolveSlow: (value: { json: () => Promise<unknown> }) => void = () => undefined;
+        vi.stubGlobal('fetch', vi.fn()
+            .mockImplementationOnce(() => new Promise(res => { resolveSlow = res; }))
+            .mockImplementationOnce(async () => ({
+                json: async () => ({ success: true, content: SAMPLE }),
+            })));
+        const module = await import('./LogPlotModal');
+        const modal = module.logPlotModal;
+        modal.open('output/SLOW.log');
+        modal.open('output/FAST.log');
+        await vi.waitFor(() => expect(chips()).toHaveLength(3));
+
+        // The stale response (a different, single-aircraft log) lands late —
+        // the modal must keep showing FAST.log's data.
+        resolveSlow({ json: async () => ({
+            success: true, content: '# simt, id, alt\n1,ZZ999,100\n2,ZZ999,101\n',
+        }) });
+        await new Promise(resolve => setTimeout(resolve, 10));
+        expect(chips().map(c => c.dataset.series)).toEqual(['KL001', 'KL002', 'AF265']);
+    });
+
     it('resets the selection when opening another file', async () => {
         const modal = await boot();
         chip('KL001')!.click();

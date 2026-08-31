@@ -414,6 +414,53 @@ class TestOutputContent:
         assert body["content"] == "b\nc\n"
         assert body["offset"] == log.stat().st_size
 
+    @staticmethod
+    def _write_crelog(client, rows):
+        # A CRELOG-shaped file: datalog writes the '#' header (including the
+        # column-names line) only once, at the top of the file.
+        output_dir = client.base_path / "output"
+        output_dir.mkdir(exist_ok=True)
+        log = output_dir / "MYLOG.log"
+        header = "# My experiment\n# simt, id, lat, lon, alt\n"
+        data = "".join(f"{t}.0,KL001,52.0,4.0,3000\n" for t in range(rows))
+        log.write_text(header + data)
+        return log
+
+    def test_include_header_keeps_comment_block_on_long_tail(self, client):
+        log = self._write_crelog(client, rows=50)
+        body = client.get(
+            "/api/bluesky/output/content/MYLOG.log?lines=10&include_header=1"
+        ).get_json()
+        lines = body["content"].splitlines()
+        # The header survives the tail; the data is still just the last 10 rows
+        assert lines[:2] == ["# My experiment", "# simt, id, lat, lon, alt"]
+        assert lines[2] == "40.0,KL001,52.0,4.0,3000"
+        assert len(lines) == 12
+        assert body["offset"] == log.stat().st_size
+
+    def test_tail_without_include_header_is_unchanged(self, client):
+        self._write_crelog(client, rows=50)
+        body = client.get("/api/bluesky/output/content/MYLOG.log?lines=10").get_json()
+        lines = body["content"].splitlines()
+        assert len(lines) == 10
+        assert not any(line.startswith("#") for line in lines)
+
+    def test_include_header_does_not_duplicate_a_header_inside_the_tail(self, client):
+        # lines=6 keeps the second header line + all 5 rows; only the header
+        # line the tail actually dropped is prepended.
+        log = self._write_crelog(client, rows=5)
+        body = client.get(
+            "/api/bluesky/output/content/MYLOG.log?lines=6&include_header=1"
+        ).get_json()
+        assert body["content"] == log.read_text()
+
+    def test_include_header_noop_when_nothing_was_dropped(self, client):
+        log = self._write_crelog(client, rows=5)
+        body = client.get(
+            "/api/bluesky/output/content/MYLOG.log?lines=100&include_header=1"
+        ).get_json()
+        assert body["content"] == log.read_text()
+
 
 class TestFileStatusConfigured:
     def test_filestatus_after_configuration(self, client):

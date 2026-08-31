@@ -361,14 +361,61 @@ class TestDataMessageDispatch:
         assert client.context.action == b"R"
         assert client.context.sender_id == b"NODE\x81"
 
-    def test_generic_topic_still_dispatches(self):
+    def test_generic_topic_dict_dispatches_as_kwargs(self):
+        # Event topics with dict payloads (e.g. SHOWDIALOG's
+        # dict(dialog='OPENFILE')) are splatted as keyword arguments, matching
+        # BlueSky's own client convention.
         client = BlueSkyClient()
         received = []
-        client.subscriber.subscribe("DEFWPT", lambda **kw: received.append(kw))
+        client.subscriber.subscribe(
+            "SHOWDIALOG", lambda *a, **kw: received.append((a, kw))
+        )
 
-        client._process_data_message(self._frame("DEFWPT", {"name": "WPT1"}))
+        client._process_data_message(self._frame("SHOWDIALOG", {"dialog": "OPENFILE"}))
 
-        assert received == [{"name": "WPT1"}]
+        assert received == [((), {"dialog": "OPENFILE"})]
+
+    def test_stackcmds_shared_state_unwraps(self):
+        # STACKCMDS is a BlueSky StatePublisher: the wire payload is
+        # [action, {'cmddict': ...}] and the handler gets the unwrapped dict.
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe("STACKCMDS", lambda data: received.append(data))
+
+        payload = {"cmddict": {"CRE": "acid,type"}}
+        client._process_data_message(self._frame("STACKCMDS", [b"R", payload]))
+
+        assert received == [payload]
+        assert client.context.action == b"R"
+
+    def test_trails_shared_state_unwraps(self):
+        # TRAILS extends line segments each tick as [b'E', {...}]; the handler
+        # must see the segment dict, not the action byte.
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe(
+            "TRAILS", lambda data: received.append((client.context.action, data))
+        )
+
+        segments = {"traillat0": [52.0], "traillon0": [4.0]}
+        client._process_data_message(self._frame("TRAILS", [b"E", segments]))
+
+        assert received == [(b"E", segments)]
+
+    def test_defwpt_collected_pairs_dispatch_each(self):
+        # DEFWPT's publisher is created with collect=True (like POLY), so one
+        # message can carry several (action, data) pairs.
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe(
+            "DEFWPT", lambda data: received.append((client.context.action, data))
+        )
+
+        add = {"custwplbl": "WPT1", "custwplat": [52.0], "custwplon": [4.0]}
+        delete = {"custwplbl": "WPT2"}
+        client._process_data_message(self._frame("DEFWPT", [b"E", add, b"D", delete]))
+
+        assert received == [(b"E", add), (b"D", delete)]
 
     def test_poly_single_action_sets_context_and_unwraps(self):
         client = BlueSkyClient()

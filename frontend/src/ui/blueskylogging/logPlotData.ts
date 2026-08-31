@@ -128,17 +128,11 @@ function headerNames(comments: readonly string[], columnCount: number): string[]
 }
 
 /**
- * Whether a parsed log is something the quick-look plot can honestly draw:
- * a periodic data log with simulation time in the first column. Returns a
- * human-readable reason when it is not, or null when it is plottable.
- *
- * Not every BlueSky log qualifies. Event loggers such as CONFLOG and FLSTLOG
- * (bluesky/plugins/area.py) pass their values as extra arguments to `log()`
- * rather than registered variables, so the column list that datalog writes as
- * the LAST comment line ("# simt, var1, ...") names fewer fields than the
- * rows actually carry (CONFLOG: "# simt" vs 2-field rows). A periodic log
- * created through the Create Log dialog always matches, so a mismatch is the
- * marker of a format this viewer does not understand.
+ * Returns a human-readable reason the quick-look plot cannot honestly draw
+ * this log, or null when it can (a periodic data log with simulation time
+ * first). Event loggers such as CONFLOG/FLSTLOG pass their values as extra
+ * `log()` arguments, so their "# simt" column line names fewer fields than
+ * the rows carry — that mismatch marks a format this viewer cannot plot.
  */
 export function plotabilityError(log: ParsedLog): string | null {
     if (log.rows.length === 0) {

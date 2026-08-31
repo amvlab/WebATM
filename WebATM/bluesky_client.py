@@ -52,6 +52,14 @@ GROUPID_DEFAULT = 0
 MSG_SUBSCRIBE = 1
 MSG_UNSUBSCRIBE = 0
 
+# Topics BlueSky publishes in its shared-state format [action, data, ...]
+# (bluesky.network.publisher.StatePublisher). Publishers created with
+# collect=True (POLY, DEFWPT) can pack several (action, data) pairs into a
+# single message.
+SHAREDSTATE_TOPICS = frozenset(
+    {"ACDATA", "ROUTEDATA", "POLY", "STACKCMDS", "TRAILS", "SIMSETTINGS", "DEFWPT"}
+)
+
 
 def genid(group_id=GROUPID_NOGROUP, seqidx=1):
     """Generate a unique node identifier.
@@ -680,18 +688,25 @@ class BlueSkyClient:
                     # SIMINFO expects: speed, simdt, simt, simutc, ntraf, state, scenname
                     # Pass sender_id as additional parameter to our custom handler
                     self.subscriber.emit(topic, *data, sender_id=sender_id)
-                elif topic in ("ACDATA", "ROUTEDATA"):
-                    # ACDATA and ROUTEDATA use the BlueSky shared-state format
-                    # [action_type, data_dict]; record the wire action ('R',
-                    # 'U', ...) and sender on the context, then pass handlers
-                    # the unwrapped data dict.
-                    if isinstance(data, (list, tuple)) and len(data) == 2:
-                        action_type, actual_data = data
-                        self.context.action = action_type
-                        self.context.sender_id = sender_id
-                        self.subscriber.emit(topic, actual_data)
+                elif topic in SHAREDSTATE_TOPICS:
+                    # Shared-state payloads are [action, data, ...]: record each
+                    # wire action ('R', 'U', ...) and the sender on the context,
+                    # then pass handlers the unwrapped data. Collecting
+                    # publishers (POLY, DEFWPT) can pack several (action, data)
+                    # pairs into one message — e.g. an update and a delete
+                    # issued on the same scenario line — so dispatch each pair
+                    # with its own context action.
+                    if (
+                        isinstance(data, (list, tuple))
+                        and len(data) >= 2
+                        and len(data) % 2 == 0
+                    ):
+                        for i in range(0, len(data), 2):
+                            self.context.action = data[i]
+                            self.context.sender_id = sender_id
+                            self.subscriber.emit(topic, data[i + 1])
                     else:
-                        self.subscriber.emit(topic, data)  # Pass as single argument
+                        self.subscriber.emit(topic, data)
                 elif topic == "ECHO":
                     # ECHO handlers expect (text, flags, sender_id). Normalize
                     # the payload — [text], [text, flags], [text, flags,
@@ -718,23 +733,6 @@ class BlueSkyClient:
                         self.subscriber.emit(topic, actual_data, sender_id=sender_id)
                     else:
                         self.subscriber.emit(topic, data, sender_id=sender_id)
-                elif topic == "POLY":
-                    # POLY uses the BlueSky shared-state format [action, data,
-                    # ...]. Its publisher collects actions between send ticks,
-                    # so one message can carry several (action, data) pairs -
-                    # e.g. an update and a delete issued on the same scenario
-                    # line. Dispatch each pair with its own context action.
-                    if (
-                        isinstance(data, (list, tuple))
-                        and len(data) >= 2
-                        and len(data) % 2 == 0
-                    ):
-                        for i in range(0, len(data), 2):
-                            self.context.action = data[i]
-                            self.context.sender_id = sender_id
-                            self.subscriber.emit(topic, data[i + 1])
-                    else:
-                        self.subscriber.emit(topic, data)
                 elif topic == "RESET":
                     # What matters for RESET is WHICH node reset, so thread the
                     # sender from the message header. The generic path below
