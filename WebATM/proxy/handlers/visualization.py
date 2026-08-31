@@ -1,4 +1,11 @@
-"""Visualization handlers for PLOT, TRAILS, SHOWDIALOG, and SIMSETTINGS events."""
+"""Visualization handlers for PLOT, TRAILS, SHOWDIALOG, and SIMSETTINGS events.
+
+All four are placeholders that only log their payload until visualization
+support is implemented in the web client. Their signatures accept any payload
+shape the client dispatches: shared-state topics (TRAILS, SIMSETTINGS) arrive
+as one positional dict, while event topics with dict payloads (PLOT,
+SHOWDIALOG) arrive as keyword arguments.
+"""
 
 from ...logger import get_logger
 from ._base import active_proxy
@@ -6,85 +13,33 @@ from ._base import active_proxy
 logger = get_logger()
 
 
-def on_plot_received(data, *args, **kwargs):
-    """Handle PLOT events from the BlueSky server.
-
-    Currently only logs the payload; plot visualization is not yet
-    implemented in the web client.
-
-    Args:
-        data (Any): The PLOT payload.
-        *args (Any): Additional positional payload items (unused).
-        **kwargs (Any): Additional keyword payload items (unused).
-    """
+def on_plot_received(*args, **kwargs):
+    """Log PLOT events; plot display is not yet implemented."""
     if not active_proxy():
         return
 
-    try:
-        logger.debug(f"PLOT data received: {data}")
-        # TODO: Implement plot data handling and visualization
-    except Exception as e:
-        logger.error(f"Error processing PLOT data: {e}")
+    logger.debug(f"PLOT data received: args={args} kwargs={kwargs}")
 
 
-def on_showdialog_received(data, *args, **kwargs):
-    """Handle SHOWDIALOG events from the BlueSky server.
-
-    Currently only logs the payload; dialog display in the web interface is
-    not yet implemented.
-
-    Args:
-        data (Any): The SHOWDIALOG payload.
-        *args (Any): Additional positional payload items (unused).
-        **kwargs (Any): Additional keyword payload items (unused).
-    """
+def on_showdialog_received(*args, **kwargs):
+    """Log SHOWDIALOG events; web dialog display is not yet implemented."""
     if not active_proxy():
         return
 
-    try:
-        logger.debug(f"SHOWDIALOG data received: {data}")
-        # TODO: Implement dialog display logic for web interface
-    except Exception as e:
-        logger.error(f"Error processing SHOWDIALOG data: {e}")
+    logger.debug(f"SHOWDIALOG data received: args={args} kwargs={kwargs}")
 
 
-def on_simsettings_received(data, *args, **kwargs):
-    """Handle SIMSETTINGS events from the BlueSky server.
-
-    Currently only logs the payload; simulation settings handling is not yet
-    implemented.
-
-    Args:
-        data (Any): The SIMSETTINGS payload.
-        *args (Any): Additional positional payload items (unused).
-        **kwargs (Any): Additional keyword payload items (unused).
-    """
+def on_simsettings_received(*args, **kwargs):
+    """Log SIMSETTINGS events; settings handling is not yet implemented."""
     if not active_proxy():
         return
 
-    try:
-        logger.debug(f"SIMSETTINGS data received: {data}")
-        # TODO: Implement simulation settings handling
-    except Exception as e:
-        logger.error(f"Error processing SIMSETTINGS data: {e}")
+    logger.debug(f"SIMSETTINGS data received: args={args} kwargs={kwargs}")
 
 
-def on_trails_received(data, *args, **kwargs):
-    """Handle TRAILS events from the BlueSky server.
-
-    Currently only logs the payload; aircraft trail visualization is not yet
-    implemented.
-
-    Args:
-        data (Any): The TRAILS payload.
-        *args (Any): Additional positional payload items (unused).
-        **kwargs (Any): Additional keyword payload items (unused).
-    """
+def on_trails_received(*args, **kwargs):
+    """Log TRAILS events; trail visualization is not yet implemented."""
     if not active_proxy():
         return
 
-    try:
-        logger.debug(f"TRAILS data received: {data}")
-        # TODO: Implement aircraft trail/track visualization
-    except Exception as e:
-        logger.error(f"Error processing TRAILS data: {e}")
+    logger.debug(f"TRAILS data received: args={args} kwargs={kwargs}")

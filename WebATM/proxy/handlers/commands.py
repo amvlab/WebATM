@@ -14,7 +14,7 @@ from ._base import active_proxy
 logger = get_logger()
 
 
-def on_stackcmds_received(action, data):
+def on_stackcmds_received(data):
     """Process a BlueSky STACKCMDS event and emit ``cmddict`` to web clients.
 
     When the payload is a dict, merges its ``cmddict`` mapping into the proxy's
@@ -22,9 +22,9 @@ def on_stackcmds_received(action, data):
     Other payload shapes are only logged.
 
     Args:
-        action (Any): Action marker delivered with the event (unused).
-        data (dict | bytes | str): STACKCMDS payload; a dict is expected to
-            contain a ``cmddict`` mapping of command names to metadata.
+        data (dict | bytes | str): Unwrapped STACKCMDS shared-state payload; a
+            dict is expected to contain a ``cmddict`` mapping of command names
+            to metadata.
     """
     proxy = active_proxy()
     if not proxy:

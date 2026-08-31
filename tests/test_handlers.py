@@ -349,22 +349,22 @@ class TestEchoHandler:
 
 class TestStackcmdsHandler:
     def test_updates_cmddict_and_emits(self, proxy, fake_socketio):
-        on_stackcmds_received("UPDATE", {"cmddict": {"CRE": "acid,type"}})
+        on_stackcmds_received({"cmddict": {"CRE": "acid,type"}})
         assert proxy.cmddict["CRE"] == "acid,type"
         assert fake_socketio.count("cmddict") == 1
 
     def test_non_dict_data_does_not_raise(self, proxy):
-        on_stackcmds_received("UPDATE", "some string")
-        on_stackcmds_received("UPDATE", b"bytes")
+        on_stackcmds_received("some string")
+        on_stackcmds_received(b"bytes")
 
     def test_dict_without_cmddict_key_does_not_raise(self, proxy, fake_socketio):
-        on_stackcmds_received("UPDATE", {"other": 1})
+        on_stackcmds_received({"other": 1})
         assert fake_socketio.count("cmddict") == 0
 
     def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
         proxy.allow_reconnection = False
         proxy.last_successful_update = 42.0
-        on_stackcmds_received("UPDATE", {"cmddict": {"CRE": "acid,type"}})
+        on_stackcmds_received({"cmddict": {"CRE": "acid,type"}})
         assert "CRE" not in proxy.cmddict
         assert fake_socketio.count("cmddict") == 0
         assert proxy.last_successful_update == 42.0  # liveness untouched
@@ -560,9 +560,14 @@ class TestSmokeHandlers:
 
     def test_plot_handler(self, proxy):
         on_plot_received({"data": 1})  # should not raise
+        # Real PLOT payloads are dicts, dispatched as keyword arguments
+        # (regression: this used to raise TypeError inside the subscriber).
+        on_plot_received(show=True)
 
     def test_showdialog_handler(self, proxy):
         on_showdialog_received({"dialog": "x"})
+        on_showdialog_received(dialog="OPENFILE")
+        on_showdialog_received(dialog="DOC", args="CRE")
 
     def test_simsettings_handler(self, proxy):
         on_simsettings_received({"setting": 1})
