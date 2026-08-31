@@ -3,6 +3,8 @@
 import threading
 import time
 
+import zmq
+
 from ...bluesky_client import BlueSkyClient, safe_decode
 from ...logger import get_logger
 
@@ -80,7 +82,6 @@ class ConnectionManager:
         if self.proxy.running:
             logger.info("Stopping existing connection before starting new one")
             self.stop_client()
-            # Wait for cleanup to complete
             time.sleep(0.2)
 
         # Following ZMQ pattern: create context and sockets when connecting
@@ -141,6 +142,24 @@ class ConnectionManager:
             self.proxy.was_connected = False
             raise
 
+    def mark_connected(self):
+        """Flip the proxy to connected once the first node is detected.
+
+        Restarts the data-flow timeout clock from "first node appeared" — no
+        data can arrive before nodes exist, so a slow cold start must not
+        count against ``connection_timeout``. Called from both the node-added
+        signal and the network timer (whichever sees the first node first);
+        a no-op when already connected.
+        """
+        if self.proxy.was_connected:
+            return
+        self.proxy.was_connected = True
+        self.proxy.last_successful_update = time.time()
+        logger.info(
+            f"Connection established to BlueSky server '{self.proxy.server_ip}'"
+        )
+        self.proxy._emit_connection_status(True)
+
     def _start_network_timer(self):
         """Start the recurring 20 ms network update timer.
 
@@ -162,20 +181,8 @@ class ConnectionManager:
 
                     current_time = time.time()
 
-                    if (
-                        len(self.proxy.tracked_nodes) > 0
-                        and not self.proxy.was_connected
-                    ):
-                        self.proxy.was_connected = True
-                        # Start the data-flow timeout clock from "first node
-                        # appeared", not from start_client() — no data can arrive
-                        # before nodes exist, so a slow cold-start must not count
-                        # against connection_timeout.
-                        self.proxy.last_successful_update = current_time
-                        logger.info(
-                            "Connection established to BlueSky remote server hosted by amvlab"
-                        )
-                        self.proxy._emit_connection_status(True)
+                    if len(self.proxy.tracked_nodes) > 0:
+                        self.mark_connected()
 
                     # Data-flow timeout: nothing received within
                     # connection_timeout (whether nodes are still listed or all
@@ -239,7 +246,6 @@ class ConnectionManager:
         # Don't try to reconnect - just stop running and close
         self.proxy.running = False
         self.proxy.allow_reconnection = False
-        self.proxy.connection_failures = 0
 
         # Clear the cached state BEFORE emitting below, so browsers receive
         # the disconnected (empty) node/traffic picture, not the stale one.
@@ -300,15 +306,10 @@ class ConnectionManager:
             logger.info("Stopping BlueSky client connection")
 
         self.proxy.running = False
-        self.proxy.allow_reconnection = False  # Disable reconnection when stopping
+        self.proxy.allow_reconnection = False
 
-        # Cancel timers with proper cleanup
         self._cancel_timers()
-
-        # Close network client with proper ZMQ error handling
         self._close_bluesky_client()
-
-        # Clear remaining state
         self.proxy.data_mgr._clear_state(context)
 
     def _cancel_timers(self):
@@ -338,19 +339,15 @@ class ConnectionManager:
         if self.proxy.bluesky_client:
             try:
                 logger.debug(" Closing network client sockets...")
-                # Close the client (this closes all sockets)
                 self.proxy.bluesky_client.close()
                 logger.info(" Network client sockets closed successfully")
-            except Exception as e:
-                import zmq
-
-                if hasattr(zmq, "ZMQError") and isinstance(e, zmq.ZMQError):
-                    if e.errno == zmq.ENOTSOCK:
-                        logger.warning(" Socket already closed, ignoring")
-                    else:
-                        logger.warning(f" ZMQ error during client close: {e}")
+            except zmq.ZMQError as e:
+                if e.errno == zmq.ENOTSOCK:
+                    logger.warning(" Socket already closed, ignoring")
                 else:
-                    logger.warning(f" Error during client close: {e}")
+                    logger.warning(f" ZMQ error during client close: {e}")
+            except Exception as e:
+                logger.warning(f" Error during client close: {e}")
             finally:
                 # Following ZMQ pattern: destroy client instance after closing sockets
                 self.proxy.bluesky_client = None
