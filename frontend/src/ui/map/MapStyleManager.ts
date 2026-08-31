@@ -92,8 +92,11 @@ export class MapStyleManager {
             // persistent 'style.load' handler, so we only need to trigger a
             // resize after the style settles.
             map.once('idle', () => {
-                // Resize to fix canvas/viewport sync after style change
-                this.getMap()?.resize();
+                // Resize to fix canvas/viewport sync after style change. The
+                // synchronous redraw() repaints in the same frame, since
+                // resize() clears the canvas and would otherwise leave it
+                // blank until the next render frame (a visible flash).
+                this.getMap()?.resize().redraw();
             });
 
             this.onBeforeStyleChange?.();
