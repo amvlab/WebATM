@@ -3,7 +3,8 @@ import { SpeedUnit, AltitudeUnit } from '../../../data/types';
 import { DataProcessor } from '../../../data/DataProcessor';
 import { OPENAP_AIRCRAFT_TYPES, isOpenapAircraftType } from '../../../data/aircraftTypes';
 import { logger } from '../../../utils/Logger';
-import { Dropdown } from '../../../utils/dropdown';
+import { Dropdown, rankByPrefixThenContains } from '../../../utils/dropdown';
+import { parseNumericField } from './aircraftCreationValidation';
 
 /**
  * Form values captured for map-based creation: everything except the
@@ -54,25 +55,16 @@ export class AircraftCreationForm {
         this.setupModalHandlers();
     }
 
-    /**
-     * Get current altitude unit from UI
-     */
     private getCurrentAltitudeUnit(): AltitudeUnit {
         const altitudeUnitSelect = document.getElementById('altitude-unit-select') as HTMLSelectElement;
         return (altitudeUnitSelect?.value as AltitudeUnit) || 'ft';
     }
 
-    /**
-     * Get current speed unit from UI
-     */
     private getCurrentSpeedUnit(): SpeedUnit {
         const speedUnitSelect = document.getElementById('speed-unit-select') as HTMLSelectElement;
         return (speedUnitSelect?.value as SpeedUnit) || 'knots';
     }
 
-    /**
-     * Set up modal event handlers
-     */
     private setupModalHandlers(): void {
         // Handle Create Aircraft submit button
         const submitBtn = document.getElementById('create-aircraft-submit');
@@ -138,9 +130,6 @@ export class AircraftCreationForm {
         });
     }
 
-    /**
-     * Show the aircraft creation modal
-     */
     public showModal(): void {
         const modal = modalManager.open('create-aircraft-modal');
         if (modal) {
@@ -219,9 +208,6 @@ export class AircraftCreationForm {
         logger.debug('AircraftCreationForm', `Updated unit labels: altitude=${currentAltUnit}, speed=${currentSpeedUnit}`);
     }
 
-    /**
-     * Close the aircraft creation modal
-     */
     private closeModal(): void {
         modalManager.close('create-aircraft-modal');
 
@@ -256,9 +242,6 @@ export class AircraftCreationForm {
         logger.debug('AircraftCreationForm', 'Closed aircraft creation modal');
     }
 
-    /**
-     * Update creation mode UI
-     */
     private updateCreationMode(): void {
         const modeSelect = document.getElementById('aircraft-creation-mode') as HTMLSelectElement;
         const mode = modeSelect?.value || 'manual';
@@ -282,9 +265,6 @@ export class AircraftCreationForm {
         }
     }
 
-    /**
-     * Handle submit button click
-     */
     private onSubmitClick(): void {
         if (this.creationMode === 'manual') {
             this.createAircraftManual();
@@ -292,51 +272,68 @@ export class AircraftCreationForm {
     }
 
     /**
-     * Handle start drawing button click (map mode)
+     * Read and validate the ID + type inputs (shared by manual and map mode).
+     * Alerts and returns null when a required field is missing.
      */
-    private onStartDrawingClick(): void {
-        logger.debug('AircraftCreationForm', 'Start drawing aircraft on map');
-
-        // Get input values for aircraft data
+    private readIdAndType(): { id: string; actype: string } | null {
         const idInput = document.getElementById('aircraft-id-input') as HTMLInputElement;
         const typeInput = document.getElementById('aircraft-type-input') as HTMLInputElement;
-        const altInput = document.getElementById('aircraft-alt-input') as HTMLInputElement;
-        const spdInput = document.getElementById('aircraft-spd-input') as HTMLInputElement;
 
         const id = idInput?.value.trim();
-        const type = typeInput?.value.trim();
-        const alt = altInput?.value;
-        const spd = spdInput?.value;
-
-        // Validate required fields
         if (!id) {
             alert('Please enter an aircraft ID');
             idInput?.focus();
-            return;
+            return null;
         }
 
         // Duplicate-ID check is advisory only (non-blocking). Refresh the
         // warning so it reflects the latest value, then continue.
         this.updateAircraftIdWarning();
 
-        if (!type) {
+        const actype = typeInput?.value.trim();
+        if (!actype) {
             alert('Please enter an aircraft type');
             typeInput?.focus();
-            return;
+            return null;
         }
 
-        if (!alt || !spd) {
-            alert('Please enter altitude and speed');
-            return;
-        }
+        return { id, actype };
+    }
 
-        // Capture aircraft data with current unit selections
+    /**
+     * Read a numeric input strictly (see parseNumericField). Alerts, focuses
+     * the field and returns null when the value is missing, non-numeric or
+     * out of range.
+     */
+    private readNumericInput(
+        inputId: string,
+        label: string,
+        range?: { min: number; max: number }
+    ): number | null {
+        const input = document.getElementById(inputId) as HTMLInputElement;
+        const result = parseNumericField(input?.value ?? '', label, range);
+        if (!result.ok) {
+            alert(result.message);
+            input?.focus();
+            return null;
+        }
+        return result.value;
+    }
+
+    private onStartDrawingClick(): void {
+        const common = this.readIdAndType();
+        if (!common) return;
+
+        const altDisplay = this.readNumericInput('aircraft-alt-input', 'Altitude');
+        if (altDisplay === null) return;
+        const spdDisplay = this.readNumericInput('aircraft-spd-input', 'Speed');
+        if (spdDisplay === null) return;
+
         const data: AircraftCreationData = {
-            id: id,
-            actype: type,
-            altDisplay: parseFloat(alt),
+            ...common,
+            altDisplay,
             altUnit: this.getCurrentAltitudeUnit(),
-            spdDisplay: parseFloat(spd),
+            spdDisplay,
             spdUnit: this.getCurrentSpeedUnit()
         };
 
@@ -407,20 +404,7 @@ export class AircraftCreationForm {
         if (!typeInput || !this.typeDropdown) return;
 
         const upperPartial = typeInput.value.trim().toUpperCase();
-
-        // Empty partial -> show the entire list (scrollable)
-        let filtered: string[];
-        if (upperPartial.length === 0) {
-            filtered = [...OPENAP_AIRCRAFT_TYPES];
-        } else {
-            const startsWith = OPENAP_AIRCRAFT_TYPES.filter(t =>
-                t.startsWith(upperPartial)
-            );
-            const contains = OPENAP_AIRCRAFT_TYPES.filter(t =>
-                !t.startsWith(upperPartial) && t.includes(upperPartial)
-            );
-            filtered = [...startsWith, ...contains];
-        }
+        const filtered = rankByPrefixThenContains(OPENAP_AIRCRAFT_TYPES, upperPartial);
 
         // Hide if exact-only match (nothing left to pick) or no matches at all
         // (let the user type a custom type freely).
@@ -521,9 +505,6 @@ export class AircraftCreationForm {
         warningElement.style.display = 'block';
     }
 
-    /**
-     * Hide the duplicate-ID warning
-     */
     private hideAircraftIdWarning(): void {
         const idInput = document.getElementById('aircraft-id-input') as HTMLInputElement;
         if (idInput) {
@@ -537,74 +518,22 @@ export class AircraftCreationForm {
         }
     }
 
-    /**
-     * Create aircraft using manual input
-     */
     private createAircraftManual(): void {
-        // Get input values
-        const idInput = document.getElementById('aircraft-id-input') as HTMLInputElement;
-        const typeInput = document.getElementById('aircraft-type-input') as HTMLInputElement;
-        const latInput = document.getElementById('aircraft-lat-input') as HTMLInputElement;
-        const lonInput = document.getElementById('aircraft-lon-input') as HTMLInputElement;
-        const hdgInput = document.getElementById('aircraft-hdg-input') as HTMLInputElement;
-        const altInput = document.getElementById('aircraft-alt-input') as HTMLInputElement;
-        const spdInput = document.getElementById('aircraft-spd-input') as HTMLInputElement;
+        const common = this.readIdAndType();
+        if (!common) return;
 
-        const id = idInput?.value.trim();
-        const type = typeInput?.value.trim();
-        const lat = latInput?.value;
-        const lon = lonInput?.value;
-        const hdg = hdgInput?.value;
-        const alt = altInput?.value;
-        const spd = spdInput?.value;
+        const latitude = this.readNumericInput('aircraft-lat-input', 'Latitude', { min: -90, max: 90 });
+        if (latitude === null) return;
+        const longitude = this.readNumericInput('aircraft-lon-input', 'Longitude', { min: -180, max: 180 });
+        if (longitude === null) return;
+        const heading = this.readNumericInput('aircraft-hdg-input', 'Heading', { min: 0, max: 360 });
+        if (heading === null) return;
+        const altitudeDisplay = this.readNumericInput('aircraft-alt-input', 'Altitude');
+        if (altitudeDisplay === null) return;
+        const speedDisplay = this.readNumericInput('aircraft-spd-input', 'Speed');
+        if (speedDisplay === null) return;
 
-        // Validate inputs
-        if (!id) {
-            alert('Please enter an aircraft ID');
-            idInput?.focus();
-            return;
-        }
-
-        // Duplicate-ID check is advisory only (non-blocking). Refresh the
-        // warning so it reflects the latest value, then continue.
-        this.updateAircraftIdWarning();
-
-        if (!type) {
-            alert('Please enter an aircraft type');
-            typeInput?.focus();
-            return;
-        }
-
-        if (!lat || !lon || !hdg || !alt || !spd) {
-            alert('Please fill in all required fields');
-            return;
-        }
-
-        // Parse numeric values
-        const latitude = parseFloat(lat);
-        const longitude = parseFloat(lon);
-        const heading = parseFloat(hdg);
-        const altitudeDisplay = parseFloat(alt);
-        const speedDisplay = parseFloat(spd);
-
-        // Validate ranges
-        if (latitude < -90 || latitude > 90) {
-            alert('Latitude must be between -90 and 90');
-            latInput?.focus();
-            return;
-        }
-
-        if (longitude < -180 || longitude > 180) {
-            alert('Longitude must be between -180 and 180');
-            lonInput?.focus();
-            return;
-        }
-
-        if (heading < 0 || heading > 360) {
-            alert('Heading must be between 0 and 360');
-            hdgInput?.focus();
-            return;
-        }
+        const { id, actype: type } = common;
 
         // Get current units and convert to BlueSky format (feet and knots)
         const currentAltUnit = this.getCurrentAltitudeUnit();

@@ -306,50 +306,68 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         this.setSelectedEntity(aircraftId);
     }
 
+    /** Options that feed the sprite/label/zone/trail colors. */
+    private static readonly COLOR_KEYS = [
+        'aircraftIconColor',
+        'aircraftLabelColor',
+        'aircraftSelectedColor',
+        'aircraftConflictColor',
+        'protectedZonesColor',
+        'aircraftTrailColor',
+        'trailConflictColor'
+    ] as const satisfies ReadonlyArray<keyof DisplayOptions>;
+
+    /** Options baked into each feature's label text by buildEntityLabel. */
+    private static readonly LABEL_CONTENT_KEYS = [
+        'showAircraftId',
+        'showAircraftType',
+        'showAircraftSpeed',
+        'showAircraftAltitude',
+        'speedType',
+        'speedUnit',
+        'altitudeUnit'
+    ] as const satisfies ReadonlyArray<keyof DisplayOptions>;
+
     /**
-     * Update display options
+     * Apply changed display options. Callers pass the full DisplayOptions
+     * object (MapOverlay always does), so each side effect must be gated on
+     * an actual value change against the previous options. The old
+     * `options.x !== undefined` checks were always true with a full object:
+     * every option change — each input event of a slider drag included —
+     * took the color path, regenerating all sprites and rebuilding every
+     * feature.
      */
     public updateDisplayOptions(options: Partial<DisplayOptions>): void {
-        this.displayOptions = { ...this.displayOptions, ...options };
+        const previous = this.displayOptions;
+        this.displayOptions = { ...previous, ...options };
+        const changed = (key: keyof DisplayOptions): boolean =>
+            options[key] !== undefined && options[key] !== previous[key];
 
-        // Check if any colors have changed
-        const colorChanged =
-            options.aircraftIconColor !== undefined ||
-            options.aircraftLabelColor !== undefined ||
-            options.aircraftSelectedColor !== undefined ||
-            options.aircraftConflictColor !== undefined ||
-            options.protectedZonesColor !== undefined ||
-            options.aircraftTrailColor !== undefined ||
-            options.trailConflictColor !== undefined;
-
-        // Update colors if any changed
-        if (colorChanged) {
+        if (AircraftRenderer.COLOR_KEYS.some(changed)) {
             this.updateColors({
                 normal: this.displayOptions.aircraftIconColor,
                 selected: this.displayOptions.aircraftSelectedColor,
                 conflict: this.displayOptions.aircraftConflictColor,
                 label: this.displayOptions.aircraftLabelColor
             });
-            // Update trail colors
             this.updateTrailColors();
         }
 
-        // Update aircraft icon size if changed
-        if (options.aircraftIconSize !== undefined) {
-            this.updateIconSize(options.aircraftIconSize);
+        if (changed('aircraftIconSize')) {
+            this.updateIconSize(this.displayOptions.aircraftIconSize);
         }
 
-        // Update label text size if changed
-        if (options.mapLabelsTextSize !== undefined && this.map.getLayer('aircraft-labels')) {
+        if (changed('mapLabelsTextSize') && this.map.getLayer('aircraft-labels')) {
             this.map.setLayoutProperty('aircraft-labels', 'text-size', this.displayOptions.mapLabelsTextSize);
         }
 
-        // Refresh display with new options (if colors didn't already refresh it)
-        if (!colorChanged && this.entityData) {
+        // Label text lives in the feature properties, so a content change
+        // rebuilds the features here, explicitly — previously that happened
+        // only as a side effect of the always-taken color path.
+        if (AircraftRenderer.LABEL_CONTENT_KEYS.some(changed) && this.entityData) {
             this.updateAircraftDisplay(this.entityData);
         }
 
-        // Update layer visibility
         this.updateLayerVisibility();
     }
 

@@ -28,16 +28,12 @@ __all__ = [
 def register(app, socketio, *, session_manager=None, bluesky_proxy=None):
     """Wire the integrated features into an existing WebATM app.
 
-    Called by ``WebATM.app.create_app`` when ``WEBATM_INTEGRATED=1``. Points the
-    file-management routes at BlueSky's fixed working directory, creates the
-    process manager and log streamer (stashed on ``app`` as
-    ``bluesky_process_manager`` / ``bluesky_log_streamer``), registers the
-    integrated REST routes and Socket.IO handlers, and arranges for the whole
-    BlueSky process group to be reaped when the worker exits. On the first boot
-    only (guarded by ``claim_first_boot()``, so a replaced gunicorn worker never
-    resurrects a manually-stopped server) it also schedules the background
-    auto-start of the bundled BlueSky server; disable that with
-    ``WEBATM_AUTO_START=0``.
+    Called by ``WebATM.app.create_app`` when ``WEBATM_INTEGRATED=1``. Points
+    file management at BlueSky's fixed working directory, creates the process
+    manager and log streamer (stashed on ``app``), registers the integrated
+    REST routes and Socket.IO handlers, reaps the BlueSky process group on
+    worker exit, and — on the first boot only (``claim_first_boot()``) —
+    schedules the background auto-start (disable with ``WEBATM_AUTO_START=0``).
 
     Args:
         app (flask.Flask): Flask application instance.

@@ -12,8 +12,8 @@ Socket.IO events.
 import math
 
 from ...logger import get_logger
-from ...utils import id2str, make_json_serializable
-from ._base import active_proxy
+from ...utils import make_json_serializable
+from ._base import DELETE_ACTION, REPLACE_ACTIONS, active_proxy, shared_context
 
 logger = get_logger()
 
@@ -29,13 +29,6 @@ _NM_PER_DEGREE = 60.0
 # vanilla BlueSky omits them. Any bound at or beyond this magnitude is treated
 # as unbounded (no vertical extent -> flat 2D, the vanilla behaviour).
 _ALT_UNBOUNDED = 9e8
-
-# Shared-state action markers (bluesky.network.common.ActionType values,
-# decoded to str). Replace/Reset/ActChange overwrite a node's stored shapes;
-# Delete removes the named shapes; anything else merges. The RESET/ACTCHANGE
-# spellings cover the client's translated context constants.
-_REPLACE_ACTIONS = {"R", "X", "C", "RESET", "ACTCHANGE"}
-_DELETE_ACTION = "D"
 
 # Cap on stored shapes per node and kind (demo limit): oldest are dropped.
 _MAX_SHAPES_PER_KIND = 5
@@ -160,29 +153,6 @@ def _coords_to_latlon(shape_dict, name, min_values):
         shape_dict["name"] = name
 
 
-def _context_info(proxy):
-    """Return the (sender, action) the network client recorded for this message.
-
-    The client sets ``context.sender_id`` and ``context.action`` just before
-    dispatching each POLY shared-state message (the ``[action, payload]``
-    wrapper itself is stripped before the handler is called).
-
-    Args:
-        proxy (BlueSkyProxy): The active proxy.
-
-    Returns:
-        tuple[str | None, str | None]: Hex sender ID and action marker, either
-        of which may be None when no context is available.
-    """
-    ctx = getattr(proxy.bluesky_client, "context", None)
-    if ctx is None:
-        return None, None
-    action = ctx.action
-    if isinstance(action, bytes):
-        action = action.decode("charmap", errors="replace")
-    return id2str(ctx.sender_id), action
-
-
 def _shapes_of(separated):
     """Return the ``polys`` mapping from one side of the separated data.
 
@@ -302,7 +272,7 @@ def on_poly_received(data, *args, **kwargs):
         return
 
     try:
-        sender_id, action = _context_info(proxy)
+        sender_id, action = shared_context(proxy)
         poly_data = make_json_serializable(data)
 
         if sender_id:
@@ -311,7 +281,7 @@ def on_poly_received(data, *args, **kwargs):
                 sender_id, {"polys": {}}
             )
 
-            if action == _DELETE_ACTION:
+            if action == DELETE_ACTION:
                 for name in _deleted_names(poly_data):
                     poly_store["polys"].pop(name, None)
                     line_store["polys"].pop(name, None)
@@ -320,7 +290,7 @@ def on_poly_received(data, *args, **kwargs):
                 new_polys = _shapes_of(separated["polygons"])
                 new_lines = _shapes_of(separated["polylines"])
 
-                if action in _REPLACE_ACTIONS:
+                if action in REPLACE_ACTIONS:
                     poly_store["polys"] = new_polys
                     line_store["polys"] = new_lines
                 else:

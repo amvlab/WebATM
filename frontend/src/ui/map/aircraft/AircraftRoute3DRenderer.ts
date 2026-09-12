@@ -45,11 +45,9 @@ export class AircraftRoute3DRenderer {
     }
 
     /**
-     * Run `callback` once the map style is loaded, polling with
-     * requestAnimationFrame (the style.load event may have already fired).
-     * Aborts if the renderer is destroyed or re-initialized on another map
-     * while waiting, so a stale wait can't re-add the layer to a map this
-     * renderer no longer manages.
+     * Run `callback` once the map style is loaded (rAF polling; style.load may
+     * have already fired). Aborts if the renderer is destroyed or moved to
+     * another map while waiting.
      */
     private whenStyleLoaded(map: MapLibreMap, callback: () => void): void {
         const poll = () => {
@@ -140,7 +138,7 @@ const PASSED_COLOR = 0x888888;
 const ACTIVE_WAYPOINT_COLOR = 0x00ff00;
 const DEFAULT_LINE_WIDTH = 2;
 
-class AircraftRoute3DCustomLayer extends CustomLayer3D {
+export class AircraftRoute3DCustomLayer extends CustomLayer3D {
     private displayOptions: DisplayOptions;
     private routeData: RouteData | null = null;
     private selectedAircraftId: string | null = null;
@@ -148,6 +146,15 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
     private sphereMeshes: THREE.Mesh[] = [];
     private lineObjects: THREE.Line[] = [];
     private sceneOrigin: { lng: number; lat: number } | null = null;
+
+    // The scene is rebuilt on every aircraft data tick (the origin follows
+    // the aircraft, moving every waypoint). Geometry and materials don't
+    // change across rebuilds, so they are shared/cached and only positions
+    // are rebuilt — disposing and reallocating them per tick churned GPU
+    // buffers and garbage at the sim update rate.
+    private unitSphereGeometry: THREE.SphereGeometry | null = null;
+    private readonly sphereMaterials = new Map<number, THREE.MeshBasicMaterial>();
+    private readonly lineMaterials = new Map<number, THREE.LineBasicMaterial>();
 
     // Scene-relative mercator group. Matches Aircraft3DCustomLayer's mercator group
     // conventions (x=east, y=up, z=north) so geometry aligns with aircraft meshes.
@@ -202,26 +209,31 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
 
     cleanup(): void {
         this.clearGeometry();
+
+        this.unitSphereGeometry?.dispose();
+        this.unitSphereGeometry = null;
+        this.sphereMaterials.forEach((m) => m.dispose());
+        this.sphereMaterials.clear();
+        this.lineMaterials.forEach((m) => m.dispose());
+        this.lineMaterials.clear();
     }
 
+    /**
+     * Detach the current meshes. Line geometries are per-line (they hold the
+     * segment's points) and are disposed here; the sphere geometry and all
+     * materials are shared across rebuilds and live until cleanup().
+     */
     private clearGeometry(): void {
         if (!this.mercatorGroup) return;
 
         for (const sphere of this.sphereMeshes) {
             this.mercatorGroup.remove(sphere);
-            sphere.geometry.dispose();
-            if (sphere.material instanceof THREE.Material) {
-                sphere.material.dispose();
-            }
         }
         this.sphereMeshes = [];
 
         for (const line of this.lineObjects) {
             this.mercatorGroup.remove(line);
             line.geometry.dispose();
-            if (line.material instanceof THREE.Material) {
-                line.material.dispose();
-            }
         }
         this.lineObjects = [];
     }
@@ -321,6 +333,8 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
         const baseRadius = 60 * (this.displayOptions.aircraft3DScale || 2.0);
         const upcomingColor = this.parseColor(this.displayOptions.routePointsColor, 0x00aaff);
 
+        this.unitSphereGeometry ??= new THREE.SphereGeometry(1, 16, 12);
+
         for (let i = 0; i < waypointPositions.length; i++) {
             const isActive = i === iactwp;
             const isPassed = i < iactwp;
@@ -332,9 +346,8 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
                     ? PASSED_COLOR
                     : upcomingColor;
 
-            const geometry = new THREE.SphereGeometry(radius, 16, 12);
-            const material = new THREE.MeshBasicMaterial({ color });
-            const mesh = new THREE.Mesh(geometry, material);
+            const mesh = new THREE.Mesh(this.unitSphereGeometry, this.sphereMaterial(color));
+            mesh.scale.setScalar(radius);
             mesh.position.copy(waypointPositions[i]);
             mesh.frustumCulled = false;
 
@@ -343,13 +356,27 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
         }
     }
 
+    private sphereMaterial(color: number): THREE.MeshBasicMaterial {
+        let material = this.sphereMaterials.get(color);
+        if (!material) {
+            material = new THREE.MeshBasicMaterial({ color });
+            this.sphereMaterials.set(color, material);
+        }
+        return material;
+    }
+
+    private lineMaterial(color: number): THREE.LineBasicMaterial {
+        let material = this.lineMaterials.get(color);
+        if (!material) {
+            material = new THREE.LineBasicMaterial({ color, linewidth: DEFAULT_LINE_WIDTH });
+            this.lineMaterials.set(color, material);
+        }
+        return material;
+    }
+
     private makeLine(points: THREE.Vector3[], color: number): THREE.Line {
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        const material = new THREE.LineBasicMaterial({
-            color,
-            linewidth: DEFAULT_LINE_WIDTH
-        });
-        const line = new THREE.Line(geometry, material);
+        const line = new THREE.Line(geometry, this.lineMaterial(color));
         line.frustumCulled = false;
         this.mercatorGroup!.add(line);
         return line;
@@ -368,22 +395,17 @@ class AircraftRoute3DCustomLayer extends CustomLayer3D {
      * Convert lat/lon/alt to scene-relative meter coordinates (x=east, y=up,
      * z=north). Altitude is pre-scaled per point (see altitudeScaledForOrigin)
      * so this layer and the 3D aircraft layer agree on visual height even
-     * though they use different scene origins.
+     * though they use different scene origins. Only called from rebuildScene,
+     * after updateSceneOrigin has established the origin.
      */
     private toScenePos(lat: number, lon: number, altitudeMeters: number): THREE.Vector3 {
-        const rel = this.calculateRelativePosition(lat, lon);
-        if (!this.sceneOrigin) {
-            return new THREE.Vector3(rel.east, altitudeMeters, rel.north);
+        const origin = this.sceneOrigin;
+        if (!origin) {
+            return new THREE.Vector3(0, altitudeMeters, 0);
         }
-        const altScaled = altitudeScaledForOrigin(altitudeMeters, { lng: lon, lat }, this.sceneOrigin);
+        const rel = relativePositionMeters(origin, { lng: lon, lat });
+        const altScaled = altitudeScaledForOrigin(altitudeMeters, { lng: lon, lat }, origin);
         return new THREE.Vector3(rel.east, altScaled, rel.north);
-    }
-
-    private calculateRelativePosition(lat: number, lng: number): { east: number; north: number } {
-        if (!this.sceneOrigin) {
-            return { east: 0, north: 0 };
-        }
-        return relativePositionMeters(this.sceneOrigin, { lng, lat });
     }
 
     /**

@@ -46,17 +46,6 @@ def on_siminfo_received(
     sender_id_str = id2str(sender_id)
     current_time = time.time()
 
-    sim_data = {
-        "speed": float(speed) if speed is not None else 0.0,
-        "simdt": float(simdt) if simdt is not None else 0.0,
-        "simt": float(simt) if simt is not None else 0.0,
-        "simutc": str(simutc) if simutc is not None else "",  # UTC is a string
-        "ntraf": int(ntraf) if ntraf is not None else 0,
-        "state": int(state) if state is not None else 0,
-        "scenname": str(scenname) if scenname is not None else "",
-        "sender_id": sender_id_str,  # Include sender ID for node identification
-    }
-
     # Update per-node tracking for EVERY node so the Simulation Nodes panel
     # shows each node's own clock, regardless of which node is currently active.
     if sender_id_str and sender_id_str in proxy.tracked_nodes:
@@ -64,10 +53,8 @@ def on_siminfo_received(
         proxy.tracked_nodes[sender_id_str].update(
             {"status": scenname or "init", "time": simt_str}
         )
-        # Refresh the Nodes panel on a wall-clock cadence, not every frame. A
-        # sim-time throttle (int(simt) % 5) misbehaves when the sim is paused
-        # (spams or never fires, depending on the frozen value) or fast-forwarded
-        # (frames jump past the multiple), so throttle on real time instead.
+        # Wall-clock throttle: a sim-time cadence misbehaves when the sim is
+        # paused or fast-forwarded.
         if (current_time - proxy.last_node_info_emit) >= proxy.node_info_interval:
             proxy.last_node_info_emit = current_time
             proxy._emit_node_info()
@@ -76,7 +63,16 @@ def on_siminfo_received(
     if not is_active_node(proxy, sender_id_str):
         return
 
-    proxy.sim_data = sim_data
+    proxy.sim_data = {
+        "speed": float(speed) if speed is not None else 0.0,
+        "simdt": float(simdt) if simdt is not None else 0.0,
+        "simt": float(simt) if simt is not None else 0.0,
+        "simutc": str(simutc) if simutc is not None else "",
+        "ntraf": int(ntraf) if ntraf is not None else 0,
+        "state": int(state) if state is not None else 0,
+        "scenname": str(scenname) if scenname is not None else "",
+        "sender_id": sender_id_str,
+    }
 
     # Throttle sim info emissions
     if (
@@ -85,7 +81,7 @@ def on_siminfo_received(
         and (current_time - proxy.last_siminfo_emit) >= proxy.siminfo_interval
     ):
         try:
-            proxy.socketio.emit("siminfo", sim_data)
+            proxy.socketio.emit("siminfo", proxy.sim_data)
             proxy.last_siminfo_emit = current_time
         except Exception as e:
             logger.error(f"Proxy→Web: Error sending SIMINFO: {e}")
@@ -120,29 +116,27 @@ def on_acdata_received(data):
             logger.debug("on_acdata_received ignored - reconnection not allowed")
             return
 
-        # Resolve which node sent this frame (set on the shared context just
-        # before this synchronous dispatch) for the active-node filter below.
+        # The sending node is set on the shared context just before this
+        # synchronous dispatch.
         sender_id_str = None
         if proxy.bluesky_client and hasattr(proxy.bluesky_client, "context"):
             sender_id_str = id2str(
                 getattr(proxy.bluesky_client.context, "sender_id", None)
             )
 
-        # Any ACDATA from any node proves the link to BlueSky is alive: update
-        # liveness before filtering so a background node's traffic still counts.
+        # ACDATA from any node proves the link is alive: update liveness
+        # before the active-node filter.
         proxy.last_successful_update = time.time()
         data_path_perf.record_received()
 
-        # Only the active node's traffic is displayed. Skip serializing frames
-        # from background nodes nobody is viewing (mirrors the SIMINFO filter).
+        # Only the active node's traffic is displayed (mirrors the SIMINFO
+        # filter).
         if not is_active_node(proxy, sender_id_str):
             data_path_perf.record_filtered()
             return
 
-        # Throttle BEFORE serializing. Emitting (and therefore serializing) only
-        # at acdata_interval removes the wasted per-frame work under heavy node
-        # load. traffic_data refreshes at the emit cadence, which is what the
-        # initial-data snapshot and the 0.5 s backup emit consume.
+        # Throttle BEFORE serializing: serialization is the dominant per-frame
+        # cost, so pay it only for frames that are actually emitted.
         current_time = time.time()
         if not (
             proxy.socketio
@@ -161,20 +155,11 @@ def on_acdata_received(data):
             proxy.socketio.emit("acdata", serializable_data)
             proxy.last_acdata_emit = current_time
             data_path_perf.record_emit(time.perf_counter() - t1)
-        except Exception as e:
-            logger.error(f"Error emitting ACDATA: {e}")
-            import traceback
+        except Exception:
+            logger.exception("Error emitting ACDATA")
 
-            traceback.print_exc()
-
-    except Exception as e:
-        logger.error(f"ACDATA Handler: Detailed error in on_acdata_received: {e}")
-        logger.error(f"ACDATA Handler: Error type: {type(e).__name__}")
-        logger.error(f"ACDATA Handler: Data type: {type(data)}")
-        logger.error(f"ACDATA Handler: Data content: {data}")
-        import traceback
-
-        traceback.print_exc()
+    except Exception:
+        logger.exception(f"Error in on_acdata_received (data type: {type(data)})")
     finally:
         data_path_perf.maybe_log()
 

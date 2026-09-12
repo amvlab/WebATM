@@ -48,12 +48,20 @@ class DataManager:
     def _emit_cleared_data(self):
         """Emit empty payloads to clear aircraft, sim info and shapes.
 
-        Sends empty ``acdata``, ``siminfo``, ``poly`` and ``polyline`` events
-        plus a ``server_disconnected`` event so the map fully resets when the
-        BlueSky server goes away.
+        Sends a ``server_disconnected`` event followed by empty ``acdata``,
+        ``siminfo``, ``poly`` and ``polyline`` events so the map fully resets
+        when the BlueSky server goes away. ``server_disconnected`` goes FIRST:
+        it opens the browser's deliberate-disconnect grace window, so the
+        clearing payloads that follow cannot be mistaken for live data and
+        flap the status back to connected for a moment.
         """
         if self.proxy.socketio and self.proxy.connected_clients > 0:
             try:
+                self.proxy.socketio.emit(
+                    "server_disconnected",
+                    {"timestamp": time.time(), "reason": "BlueSky server disconnected"},
+                )
+
                 self.proxy.socketio.emit("acdata", empty_traffic_data())
 
                 # Same shape the SIMINFO handler emits, so clients always see
@@ -73,16 +81,11 @@ class DataManager:
                 self.proxy.socketio.emit("poly", {"polys": {}})
                 self.proxy.socketio.emit("polyline", {"polys": {}})
 
-                self.proxy.socketio.emit(
-                    "server_disconnected",
-                    {"timestamp": time.time(), "reason": "BlueSky server disconnected"},
-                )
-
                 logger.info(
                     "Sent cleared data (aircraft, sim data, and shapes) to web clients"
                 )
             except Exception as e:
-                logger.error(f" Error emitting cleared data: {e}")
+                logger.error(f"Error emitting cleared data: {e}")
 
     def start_backup_timer(self):
         """Start (or restart) the 0.5 s backup emission timer."""
@@ -142,6 +145,24 @@ class DataManager:
         self.proxy.current_bbox = None
         self.proxy.cmddict.clear()
 
+    def _emit_disconnected_state(self, was_connected):
+        """Tell browsers the BlueSky link is gone.
+
+        Always refreshes the (now empty) node list. When the proxy had
+        actually been connected, also flips ``connection_status`` and sends
+        the map-clearing payloads, so every browser — not just the one that
+        initiated the disconnect — drops the stale traffic instead of
+        showing a frozen "connected" map until its no-data timeout fires.
+
+        Args:
+            was_connected (bool): Whether the proxy was connected before the
+                teardown began (captured before the state reset clears it).
+        """
+        if was_connected:
+            self._emit_connection_status(False)
+            self._emit_cleared_data()
+        self.proxy.node_mgr._emit_node_info()
+
     def _clear_state(self, context="disconnect"):
         """Clear all cached client state after a stop or disconnect.
 
@@ -151,21 +172,16 @@ class DataManager:
                 ``"shutdown"`` for app termination. Only affects the final
                 log message.
         """
+        was_connected = self.proxy.was_connected
         self._reset_cached_state()
-
-        # Let browsers show the (now empty) node picture.
-        if self.proxy.socketio and self.proxy.connected_clients > 0:
-            try:
-                self.proxy.node_mgr._emit_node_info()
-            except Exception:
-                pass
+        self._emit_disconnected_state(was_connected)
 
         if context == "shutdown":
-            logger.info(" Shutdown complete")
+            logger.info("Shutdown complete")
         elif context == "manual":
-            logger.info(" Disconnected from BlueSky server")
+            logger.info("Disconnected from BlueSky server")
         else:
-            logger.info(" Client stopped - Ready for new connection")
+            logger.info("Client stopped - Ready for new connection")
 
     def get_current_data(self) -> dict[str, Any]:
         """Build the simulation state snapshot for an initial page load.
@@ -198,7 +214,7 @@ class DataManager:
                     f"Including shapes from active node '{active_node_id}' in initial data: {poly_count} polygons, {polyline_count} polylines"
                 )
         else:
-            logger.debug(" No active node - not including any shapes in initial data")
+            logger.debug("No active node - not including any shapes in initial data")
 
         return {
             "traffic_data": self.proxy.traffic_data,

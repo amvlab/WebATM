@@ -49,12 +49,6 @@ class TestProxyInitialization:
         assert proxy.acdata_interval > 0
 
 
-class TestSafeDecodeHelper:
-    def test_delegates_to_module_helper(self):
-        proxy = BlueSkyProxy()
-        assert proxy._safe_decode(b"ABC") == "ABC"
-
-
 class TestGlobalProxyAccessors:
     def test_set_and_get(self):
         proxy = BlueSkyProxy()
@@ -87,6 +81,20 @@ class TestDelegation:
         monkeypatch.setattr(proxy.node_mgr, "_emit_node_info", lambda: called.append(1))
         proxy._emit_node_info()
         assert called == [1]
+
+    def test_forward_passes_target_id_through(self, monkeypatch):
+        # The removed _forward_command delegation silently dropped target_id,
+        # which would misroute node-addressed commands to the default target;
+        # forward() is the delegation that must carry it.
+        proxy = BlueSkyProxy()
+        calls = []
+        monkeypatch.setattr(
+            proxy.command_proc,
+            "forward",
+            lambda *cmdlines, target_id=None: calls.append((cmdlines, target_id)),
+        )
+        proxy.forward("OP", "FF", target_id=b"NODE1")
+        assert calls == [(("OP", "FF"), b"NODE1")]
 
     def test_get_current_data_delegates(self, monkeypatch):
         proxy = BlueSkyProxy()

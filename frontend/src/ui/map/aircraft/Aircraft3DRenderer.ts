@@ -49,10 +49,9 @@ export class Aircraft3DRenderer implements IEntityRenderer<AircraftData> {
     }
 
     /**
-     * Run `callback` once the map style is loaded, polling with
-     * requestAnimationFrame (the style.load event may have already fired).
-     * Aborts if the renderer is destroyed or re-initialized on another map
-     * while waiting, so a stale wait can't act on a dead renderer.
+     * Run `callback` once the map style is loaded (rAF polling; style.load may
+     * have already fired). Aborts if the renderer is destroyed or moved to
+     * another map while waiting.
      */
     private whenStyleLoaded(map: MapLibreMap, callback: () => void): void {
         const poll = () => {

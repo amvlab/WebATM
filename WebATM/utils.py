@@ -1,5 +1,6 @@
 """Utility functions for WebATM."""
 
+import math
 from time import gmtime, strftime
 
 import numpy as np
@@ -9,6 +10,23 @@ from .logger import get_logger
 logger = get_logger()
 
 
+def _finite_list(arr):
+    """Return ``arr.tolist()`` with non-finite floats replaced by ``None``.
+
+    NaN/Infinity must never reach ``json.dumps``: it writes them as bare
+    ``NaN``/``Infinity`` tokens, which are invalid JSON, so every browser's
+    Socket.IO parser rejects the whole packet and drops the connection (one
+    aircraft created with a NaN altitude wedged all web clients in a
+    connect/disconnect loop). The all-finite fast path stays a plain
+    ``tolist()`` — this runs per ACDATA frame.
+    """
+    if arr.dtype.kind == "f" and not np.isfinite(arr).all():
+        if arr.ndim != 1:
+            return make_json_serializable(arr.tolist())
+        return [x if math.isfinite(x) else None for x in arr.tolist()]
+    return arr.tolist()
+
+
 def make_json_serializable(obj):
     """Convert an object to a JSON-serializable format.
 
@@ -16,7 +34,10 @@ def make_json_serializable(obj):
     BlueSky's msgpack-serialized numpy arrays, identified by the ``numpy``,
     ``data``, ``type`` and ``shape`` byte keys), lists, tuples, and arbitrary
     objects (via ``vars()``) into plain Python types that ``json.dumps`` can
-    handle. Byte dictionary keys are decoded to strings.
+    handle. Byte dictionary keys are decoded to strings. Non-finite floats
+    (NaN/Infinity) become ``None``, since ``json.dumps`` would otherwise emit
+    them as invalid-JSON tokens that break every browser client (see
+    ``_finite_list``).
 
     Args:
         obj (Any): The object to convert. May be a numpy array/scalar, dict, list,
@@ -27,11 +48,12 @@ def make_json_serializable(obj):
             float, str, or the object itself if already serializable).
     """
     if isinstance(obj, np.ndarray):
-        return obj.tolist()
+        return _finite_list(obj)
     elif isinstance(obj, np.integer):
         return int(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
+    elif isinstance(obj, (float, np.floating)):
+        value = float(obj)
+        return value if math.isfinite(value) else None
     elif isinstance(obj, dict):
         if b"numpy" in obj and b"data" in obj and b"type" in obj and b"shape" in obj:
             # BlueSky msgpack-encoded numpy array; decode it the same way as
@@ -40,7 +62,7 @@ def make_json_serializable(obj):
                 dtype = obj[b"type"]
                 if isinstance(dtype, bytes):
                     dtype = dtype.decode()
-                return np.frombuffer(obj[b"data"], dtype=np.dtype(dtype)).tolist()
+                return _finite_list(np.frombuffer(obj[b"data"], dtype=np.dtype(dtype)))
             except Exception as e:
                 logger.warning(f"Utils: Error deserializing numpy array: {e}")
                 data_bytes = obj[b"data"]

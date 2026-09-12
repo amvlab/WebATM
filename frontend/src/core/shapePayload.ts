@@ -34,6 +34,30 @@ export interface ShapePayloadResult<T extends ShapeLike> {
 }
 
 /**
+ * Normalize a shape colour to a CSS color string.
+ *
+ * BlueSky publishes shape colours as [r, g, b] arrays of 0-255 ints (the
+ * COLOUR command in bluesky/tools/areafilter.py), but the client Shape
+ * types declare CSS strings. Rendering happened to work only because
+ * MapLibre's to-color coercion silently accepts 0-255 arrays; anything
+ * else consuming these fields as the strings they claim to be (CSS, canvas)
+ * would break. Convert at the payload boundary so stored shapes match
+ * their types. Returns undefined for absent or malformed values, letting
+ * callers fall back to the display-option defaults.
+ */
+export function normalizeShapeColor(color: unknown): string | undefined {
+    if (typeof color === 'string') return color;
+    if (Array.isArray(color) && color.length >= 3) {
+        const rgb = color.slice(0, 3);
+        if (rgb.every(c => typeof c === 'number' && Number.isFinite(c))) {
+            const [r, g, b] = rgb.map(c => Math.min(255, Math.max(0, Math.round(c))));
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+    }
+    return undefined;
+}
+
+/**
  * A shape is renderable only when it carries non-empty lat AND lon arrays.
  */
 export function hasValidLatLon(shape: unknown): shape is ShapeLike {

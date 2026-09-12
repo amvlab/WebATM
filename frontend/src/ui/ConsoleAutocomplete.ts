@@ -1,4 +1,4 @@
-import { Dropdown } from '../utils/dropdown';
+import { Dropdown, rankByPrefixThenContains } from '../utils/dropdown';
 import { OPENAP_AIRCRAFT_TYPES } from '../data/aircraftTypes';
 import { parseSignature, getDisplaySignature } from '../data/CommandSignature';
 import {
@@ -36,19 +36,6 @@ const PAN_MAX_NAVDATA = 6;
 
 /** Debounce for navdata searches while the user types a PAN argument. */
 const PAN_SEARCH_DEBOUNCE_MS = 200;
-
-/**
- * Rank candidates for an autocomplete slot: case-insensitive prefix matches
- * first, then substring matches. An empty query returns the full list.
- */
-function rankByPrefixThenContains(items: string[], upperPartial: string): string[] {
-    if (upperPartial.length === 0) return [...items];
-    const startsWith = items.filter(x => x.toUpperCase().startsWith(upperPartial));
-    const contains = items.filter(
-        x => !x.toUpperCase().startsWith(upperPartial) && x.toUpperCase().includes(upperPartial)
-    );
-    return [...startsWith, ...contains];
-}
 
 /**
  * True when `filtered` holds exactly the value already typed and the cursor
@@ -96,8 +83,6 @@ export interface ConsoleAutocompleteDeps {
  *   kind badge (AC/APT/HEL/WPT) since the slot accepts all of them.
  */
 export class ConsoleAutocomplete {
-    private readonly aircraftTypes: string[] = [...OPENAP_AIRCRAFT_TYPES];
-
     private acidDropdown: Dropdown<string> | null = null;
     private acidWarning: HTMLDivElement | null = null;
 
@@ -374,7 +359,7 @@ export class ConsoleAutocomplete {
         const { partialType, isMidInput } = context;
         const upperPartial = partialType.toUpperCase();
 
-        const filtered = rankByPrefixThenContains(this.aircraftTypes, upperPartial);
+        const filtered = rankByPrefixThenContains(OPENAP_AIRCRAFT_TYPES, upperPartial);
 
         if (filtered.length === 0) {
             // Non-openap type being typed - hide the dropdown so the user

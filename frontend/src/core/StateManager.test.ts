@@ -346,6 +346,29 @@ describe('StateManager server shape conversion', () => {
         ]);
     });
 
+    it('normalizes BlueSky [r, g, b] array colors to CSS strings', () => {
+        const polygon = sm.convertServerPolyToClientShape(
+            { name: 'zone1', lat: [52, 52.1], lon: [4, 4.1], color: [0, 128, 0] }
+        );
+        expect(polygon.fillColor).toBe('rgb(0, 128, 0)');
+        expect(polygon.strokeColor).toBe('rgb(0, 128, 0)');
+
+        const line = sm.convertServerPolylineToClientShape(
+            { name: 'line1', lat: [52, 53], lon: [4, 5], color: [255, 0, 0] }
+        );
+        expect(line.color).toBe('rgb(255, 0, 0)');
+    });
+
+    it('drops the unpaired tail of mismatched lat/lon arrays', () => {
+        const shape = sm.convertServerPolyToClientShape(
+            { name: 'odd', lat: [52, 53, 54], lon: [4, 5] }
+        );
+        expect(shape.coordinates).toEqual([
+            { lat: 52, lng: 4 },
+            { lat: 53, lng: 5 },
+        ]);
+    });
+
     it('converts PolylineData into a polyline shape with a default width', () => {
         const shape = sm.convertServerPolylineToClientShape(
             { name: 'line1', lat: [52, 53], lon: [4, 5], color: '#00ff00' }

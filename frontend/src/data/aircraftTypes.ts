@@ -16,12 +16,7 @@ export const OPENAP_AIRCRAFT_TYPES: readonly string[] = [
     'C550', 'CRJ9', 'E145', 'E170', 'E190', 'E195', 'E75L', 'GLF6'
 ];
 
-/**
- * Returns true when the given aircraft type string is present in the
- * openap list (case-insensitive).
- */
+/** True when the given aircraft type is in the openap list (case-insensitive). */
 export function isOpenapAircraftType(type: string): boolean {
-    if (!type) return false;
-    const upper = type.toUpperCase();
-    return OPENAP_AIRCRAFT_TYPES.some(t => t === upper);
+    return !!type && OPENAP_AIRCRAFT_TYPES.includes(type.toUpperCase());
 }

@@ -6,6 +6,7 @@ import { echoManager } from '../ui/EchoManager';
 import { logger } from '../utils/Logger';
 import { isOpenapAircraftType } from './aircraftTypes';
 import { searchNavdata } from './navdataSearch';
+import { tokenizeInput } from '../ui/consoleTokens';
 
 /**
  * Result of command processing
@@ -120,9 +121,7 @@ export class CommandHandler {
 
         // Warn (non-blocking) if CRE/MCRE uses a type not in the openap list,
         // mirroring the warning shown in the Create Aircraft modal.
-        if (cmd === 'CRE' || cmd === 'MCRE') {
-            this.warnIfUnknownAircraftType(parts);
-        }
+        this.warnIfUnknownAircraftType(trimmed);
 
         // Check if it's a local command
         if (this.LOCAL_COMMANDS.includes(cmd)) {
@@ -605,23 +604,11 @@ export class CommandHandler {
     /**
      * Handle QUIT command - disconnect this client's session from BlueSky.
      *
-     * BlueSky's real QUIT (see bluesky/network/server.py) is a *server-wide
-     * shutdown*: it stops the headless server's loop and terminates every node
-     * child process — killing a single node is the separate DELNODE message,
-     * exposed via the Simulation Nodes panel's per-node kill button. WebATM
-     * deliberately does NOT forward QUIT to BlueSky:
-     *   - The standalone build connects to a shared remote server, so forwarding
-     *     QUIT would tear it down for every other user.
-     *   - The integrated build bundles its own server, but its lifecycle is
-     *     owned by the explicit Start / Stop / Restart / Kill controls — use
-     *     those to actually shut it down.
-     *
-     * Instead, QUIT ends *this* client's BlueSky session: it disconnects
-     * WebATM's proxy from BlueSky (via /api/server/disconnect) and immediately
-     * reflects that in the shared connection status the header reads. Crucially
-     * it does NOT drop the browser↔WebATM socket (the previous behavior), so the
-     * page stays live and no manual refresh is needed to recover, and it leaves
-     * the BlueSky server itself running and untouched.
+     * Deliberately NOT forwarded to BlueSky: its real QUIT is a server-wide
+     * shutdown that would tear the server down for every user (see "QUIT
+     * semantics" in CLAUDE.md). Instead this disconnects WebATM's proxy via
+     * /api/server/disconnect and flips the shared connection status, while
+     * keeping the browser↔WebATM socket and the BlueSky server alive.
      */
     private handleQuitCommand(): CommandResult {
         // Disconnect the proxy from BlueSky server-side. Fire-and-forget: the UI
@@ -677,21 +664,25 @@ export class CommandHandler {
     /**
      * Emit a non-blocking console warning when the aircraft type argument of
      * a CRE/MCRE command is not part of the openap library. Matches the
-     * message shown by AircraftCreationManager.updateAircraftTypeWarning().
+     * message shown by the Create Aircraft modal.
      *
-     * CRE  acid  type  lat lon hdg alt spd  -> type is parts[2]
-     * MCRE count type  alt spd dest          -> type is parts[2]
+     * Tokenizes with the same comma-and-whitespace separators BlueSky uses
+     * (bluesky/stack/argparser.re_getarg), so `CRE KL1,A320,...` and
+     * `CRE KL1, A320, ...` check the actual type token. In both forms the
+     * type is the third token: CRE acid type ... / MCRE count type ...
      */
-    private warnIfUnknownAircraftType(parts: string[]): void {
-        if (parts.length < 3) return;
+    private warnIfUnknownAircraftType(command: string): void {
+        const parts = tokenizeInput(command).map(t => t.text);
+        const cmd = parts[0]?.toUpperCase();
+        if (cmd !== 'CRE' && cmd !== 'MCRE') return;
+
         const type = parts[2];
-        if (!type) return;
-        if (!isOpenapAircraftType(type)) {
-            this.sendEcho(
-                `openap library does not include "${type.toUpperCase()}"`,
-                'warning'
-            );
-        }
+        if (!type || isOpenapAircraftType(type)) return;
+
+        this.sendEcho(
+            `openap library does not include "${type.toUpperCase()}"`,
+            'warning'
+        );
     }
 
     /**

@@ -55,7 +55,7 @@ class ConnectionManager:
                 logger.debug(f"{name} signal connected")
         except Exception as e:
             # Continue without signals - basic functionality might still work.
-            logger.error(f" Error connecting signals: {e}")
+            logger.error(f"Error connecting signals: {e}")
             logger.debug(
                 f"Available attributes: {[attr for attr in dir(client) if not attr.startswith('_')]}"
             )
@@ -86,20 +86,17 @@ class ConnectionManager:
 
         # Following ZMQ pattern: create context and sockets when connecting
         if self.proxy.bluesky_client is None:
-            logger.debug(" Creating BlueSky network client...")
+            logger.debug("Creating BlueSky network client...")
             try:
                 self.proxy.bluesky_client = BlueSkyClient()
                 self._connect_bluesky_client_signals()
-                logger.info(" BlueSky network client created successfully")
+                logger.info("BlueSky network client created successfully")
             except Exception as e:
-                logger.error(f" Error creating BlueSky network client: {e}")
+                logger.error(f"Error creating BlueSky network client: {e}")
                 raise
 
         if hostname:
             self.proxy.server_ip = hostname
-        logger.info(
-            "Attempting to connect to BlueSky remote server hosted by amvlab..."
-        )
 
         try:
             # Enable reconnection for this explicit connection attempt
@@ -117,7 +114,7 @@ class ConnectionManager:
                 )
                 logger.info("Waiting for BlueSky nodes to be detected...")
             except Exception as e:
-                logger.error(f" Error in network connect(): {e}")
+                logger.error(f"Error in network connect(): {e}")
                 raise
 
             # Initialize connection monitoring; was_connected flips to True
@@ -135,7 +132,7 @@ class ConnectionManager:
             )
         except Exception as e:
             logger.error(
-                f"Failed to connect to BlueSky remote server hosted by amvlab: {e}"
+                f"Failed to connect to BlueSky server at '{self.proxy.server_ip}': {e}"
             )
             self.proxy.running = False
             self.proxy.allow_reconnection = False
@@ -237,30 +234,18 @@ class ConnectionManager:
             reason (str): Human-readable reason logged and used for
                 diagnostics (e.g. "Connection timeout").
         """
-        if self.proxy.was_connected:
+        was_connected = self.proxy.was_connected
+        if was_connected:
             logger.info(f"BlueSky server disconnected - Reason: {reason}")
-            logger.debug(" Cleaning up connection state and closing sockets")
-            self.proxy.was_connected = False
-            self.proxy._emit_connection_status(False)
 
         # Don't try to reconnect - just stop running and close
         self.proxy.running = False
         self.proxy.allow_reconnection = False
 
-        # Clear the cached state BEFORE emitting below, so browsers receive
-        # the disconnected (empty) node/traffic picture, not the stale one.
+        # Clear the cached state BEFORE emitting, so browsers receive the
+        # disconnected (empty) node/traffic picture, not the stale one.
         self.proxy.data_mgr._reset_cached_state()
-
-        if self.proxy.socketio and self.proxy.connected_clients > 0:
-            try:
-                # Emit cleared data to remove all aircraft and simulation info from screen
-                self.proxy.data_mgr._emit_cleared_data()
-                self.proxy.node_mgr._emit_node_info()
-                logger.debug(
-                    f"Sent disconnection updates to {self.proxy.connected_clients} web clients"
-                )
-            except Exception as e:
-                logger.warning(f" Error sending disconnection updates: {e}")
+        self.proxy.data_mgr._emit_disconnected_state(was_connected)
 
         # Close the network client's sockets and clear remaining state
         self.close()
@@ -281,15 +266,15 @@ class ConnectionManager:
         if client is not None:
             try:
                 client.close()
-                logger.info(" Network client closed successfully")
+                logger.info("Network client closed successfully")
             except Exception as e:
-                logger.error(f" Error closing network client: {e}")
+                logger.error(f"Error closing network client: {e}")
             # Clear the active node so no stale data can be attributed to it.
             if hasattr(client, "act_id"):
                 client.act_id = None
 
         self.proxy.data_mgr._reset_cached_state()
-        logger.debug(" Client state cleared and connections closed")
+        logger.debug("Client state cleared and connections closed")
 
     def stop_client(self, context="disconnect"):
         """Stop the client with full cleanup and proper ZMQ error handling.
@@ -319,18 +304,18 @@ class ConnectionManager:
                 self.proxy.network_timer.cancel()
                 # Wait briefly to let any active timer callback complete
                 time.sleep(0.05)
-                logger.info(" Network timer cancelled")
+                logger.info("Network timer cancelled")
             except Exception as e:
-                logger.warning(f" Warning cancelling network timer: {e}")
+                logger.warning(f"Warning cancelling network timer: {e}")
             finally:
                 self.proxy.network_timer = None
 
         if self.proxy.backup_timer:
             try:
                 self.proxy.backup_timer.cancel()
-                logger.info(" Backup timer cancelled")
+                logger.info("Backup timer cancelled")
             except Exception as e:
-                logger.warning(f" Warning cancelling backup timer: {e}")
+                logger.warning(f"Warning cancelling backup timer: {e}")
             finally:
                 self.proxy.backup_timer = None
 
@@ -338,16 +323,16 @@ class ConnectionManager:
         """Close network client following ZMQ pattern: close sockets first, then context."""
         if self.proxy.bluesky_client:
             try:
-                logger.debug(" Closing network client sockets...")
+                logger.debug("Closing network client sockets...")
                 self.proxy.bluesky_client.close()
-                logger.info(" Network client sockets closed successfully")
+                logger.info("Network client sockets closed successfully")
             except zmq.ZMQError as e:
                 if e.errno == zmq.ENOTSOCK:
-                    logger.warning(" Socket already closed, ignoring")
+                    logger.warning("Socket already closed, ignoring")
                 else:
-                    logger.warning(f" ZMQ error during client close: {e}")
+                    logger.warning(f"ZMQ error during client close: {e}")
             except Exception as e:
-                logger.warning(f" Error during client close: {e}")
+                logger.warning(f"Error during client close: {e}")
             finally:
                 # Following ZMQ pattern: destroy client instance after closing sockets
                 self.proxy.bluesky_client = None

@@ -108,7 +108,7 @@ def create_app():
     # Register basic routes (index, commands, server config, health/status)
     register_basic_routes(app, session_manager)
 
-    # Register BlueSky server control routes (start/stop/restart/status/logs)
+    # Register the BlueSky server reachability probe (/api/server/status)
     register_server_status_routes(app)
 
     # Register all Socket.IO event handlers

@@ -183,6 +183,29 @@ def _split_incomplete_utf8(data):
     return data, b""
 
 
+def _wait_for_nodes(proxy, timeout=10.0, poll_interval=0.1):
+    """Wait for a freshly connected proxy to detect BlueSky nodes.
+
+    Node detection is what confirms the server at the far end is a real,
+    responding BlueSky instance (a ZMQ connect alone always "succeeds").
+
+    Args:
+        proxy (BlueSkyProxy): Proxy whose ``tracked_nodes`` to watch.
+        timeout (float): Maximum seconds to wait.
+        poll_interval (float): Seconds between checks.
+
+    Returns:
+        bool: True once at least one node is tracked, False on timeout.
+    """
+    deadline = time.time() + timeout
+    while True:
+        if len(proxy.tracked_nodes) > 0:
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(poll_interval)
+
+
 def get_webpack_assets():
     """Read the webpack manifest and build script tags in load order.
 
@@ -315,10 +338,9 @@ def register_basic_routes(app, session_manager):
 
             # Every (re)connect gets a fresh proxy — recreating the ZMQ client
             # is the reliable way to shed half-dead connection state; only the
-            # Socket.IO wiring carries over. The old proxy is replaced in place
-            # so concurrent requests always find a usable proxy, and the swap
-            # runs under connect_lock so the integrated auto-start (or another
-            # connect request) can't revive the proxy being torn down.
+            # Socket.IO wiring carries over. The swap runs under connect_lock
+            # so the integrated auto-start (or another connect request) can't
+            # revive the proxy being torn down.
             with connect_lock:
                 old_proxy = getattr(current_app, "bluesky_proxy", None)
                 if old_proxy is not None:
@@ -341,24 +363,24 @@ def register_basic_routes(app, session_manager):
                 register_subscribers(proxy)
 
             # Confirm the server is real: wait for node detection.
-            timeout = 10.0
-            start_time = time.time()
-            while time.time() - start_time < timeout:
-                if len(proxy.tracked_nodes) > 0:
-                    logger.info("BlueSky nodes detected - connection confirmed")
-                    return jsonify(
-                        {
-                            "success": True,
-                            "server_ip": server_ip,
-                            "message": "Connected to BlueSky remote server hosted by amvlab",
-                        }
-                    )
-                time.sleep(0.1)
+            if _wait_for_nodes(proxy):
+                logger.info("BlueSky nodes detected - connection confirmed")
+                return jsonify(
+                    {
+                        "success": True,
+                        "server_ip": server_ip,
+                        "message": f"Connected to BlueSky server at {server_ip}",
+                    }
+                )
 
-            logger.info(
-                f"No BlueSky nodes detected after {timeout}s - server may be offline"
-            )
-            proxy.stop_client()
+            logger.info("No BlueSky nodes detected - server may be offline")
+            # Tear down under the same lock every other connect/disconnect path
+            # holds, and stand down if a concurrent connect already replaced
+            # (and closed) this proxy — stopping it again would run a second
+            # teardown on an object another request owns.
+            with connect_lock:
+                if current_app.bluesky_proxy is proxy:
+                    proxy.stop_client()
             return (
                 jsonify(
                     {
@@ -392,16 +414,24 @@ def register_basic_routes(app, session_manager):
             failure.
         """
         try:
-            if current_app.bluesky_proxy.running:
-                logger.info("User requested manual disconnection from BlueSky server")
-                current_app.bluesky_proxy.stop_client("manual")
-                # Wait a moment for cleanup to complete
-                time.sleep(0.5)
-                logger.info("BlueSky server disconnected successfully")
-            else:
-                logger.info(
-                    "User requested disconnection, but client was already disconnected"
-                )
+            from ..proxy import connect_lock
+
+            # Serialize with /api/server/config and the integrated auto-start
+            # (both hold this lock while connecting): a disconnect racing a
+            # connect would otherwise stop a proxy whose start_client() is
+            # still mid-flight, leaving the connect to finish on a dead proxy.
+            with connect_lock:
+                if current_app.bluesky_proxy.running:
+                    logger.info(
+                        "User requested manual disconnection from BlueSky server"
+                    )
+                    current_app.bluesky_proxy.stop_client("manual")
+                    time.sleep(0.5)  # let ZMQ teardown settle
+                    logger.info("BlueSky server disconnected successfully")
+                else:
+                    logger.info(
+                        "User requested disconnection, but client was already disconnected"
+                    )
 
             return jsonify({"success": True, "message": "Disconnected from server"})
         except Exception as e:
