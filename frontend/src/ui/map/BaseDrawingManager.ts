@@ -7,7 +7,7 @@ import { claimDrawing, releaseDrawing } from './drawingExclusion';
 
 /**
  * BaseDrawingManager - shared interactive point-drawing lifecycle for the
- * route and shape drawing managers.
+ * route, shape and aircraft-creation drawing managers.
  *
  * Owns the parts both managers used to duplicate:
  * - drawing-mode flag and isDrawing()
@@ -81,7 +81,7 @@ export abstract class BaseDrawingManager {
     /** A point was placed (already navaid-snapped when applicable). */
     protected abstract onPointAdded(point: DrawingPoint): void;
 
-    /** The cursor moved while drawing (navaid highlight already applied). */
+    /** The cursor moved while drawing (already navaid-snapped when applicable). */
     protected abstract onCursorMove(point: DrawingPoint): void;
 
     /** Finish the draw (right-click, or Enter when finishOnEnter). */
@@ -186,9 +186,16 @@ export abstract class BaseDrawingManager {
     private onMapMouseMove(e: MapMouseEvent): void {
         if (!this.drawingMode) return;
 
-        // Highlight the navaid the next click would snap to.
-        this.navaidSnapper.highlight(e);
-        this.onCursorMove({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+        // Highlight the navaid the next click would snap to, and give the
+        // subclass preview the snapped point so it matches what that click
+        // would actually commit.
+        const snapped = this.navaidSnapper.snap(e);
+        this.navaidSnapper.showHighlight(snapped);
+        this.onCursorMove(
+            snapped
+                ? { lat: snapped.lat, lng: snapped.lng }
+                : { lat: e.lngLat.lat, lng: e.lngLat.lng }
+        );
     }
 
     private onKeyDown(e: KeyboardEvent): void {

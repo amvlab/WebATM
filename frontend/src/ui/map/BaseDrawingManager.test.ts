@@ -67,7 +67,7 @@ class TestDrawingManager extends BaseDrawingManager {
 
 describe('BaseDrawingManager', () => {
     let map: ReturnType<typeof createFakeMap>;
-    let snapper: { snap: ReturnType<typeof vi.fn>; highlight: ReturnType<typeof vi.fn>; clearHighlight: ReturnType<typeof vi.fn> };
+    let snapper: { snap: ReturnType<typeof vi.fn>; showHighlight: ReturnType<typeof vi.fn>; clearHighlight: ReturnType<typeof vi.fn> };
     let manager: TestDrawingManager;
 
     const clickEvent = (lat: number, lng: number, detail = 1) =>
@@ -79,7 +79,7 @@ describe('BaseDrawingManager', () => {
     ): TestDrawingManager {
         const ownMap = createFakeMap();
         map = ownMap;
-        snapper = { snap: vi.fn(() => null), highlight: vi.fn(), clearHighlight: vi.fn() };
+        snapper = { snap: vi.fn(() => null), showHighlight: vi.fn(), clearHighlight: vi.fn() };
         const mapDisplay = { getMap: getMap ?? (() => ownMap) } as unknown as MapDisplay;
         return new TestDrawingManager(mapDisplay, snapper as unknown as NavaidSnapper, finishOnEnter);
     }
@@ -138,8 +138,18 @@ describe('BaseDrawingManager', () => {
     it('mousemove highlights navaids and reports the cursor position', () => {
         manager.start();
         map.fire('mousemove', clickEvent(51, 3));
-        expect(snapper.highlight).toHaveBeenCalledTimes(1);
+        expect(snapper.showHighlight).toHaveBeenCalledTimes(1);
         expect(manager.cursorMoves).toEqual([{ lat: 51, lng: 3 }]);
+    });
+
+    it('mousemove reports the snapped point so previews match the click commit', () => {
+        snapper.snap.mockReturnValue({ lat: 50, lng: 5, ident: 'SPY', kind: 'waypoint' });
+        manager.start();
+        map.fire('mousemove', clickEvent(51, 3));
+        expect(snapper.showHighlight).toHaveBeenCalledWith(
+            expect.objectContaining({ ident: 'SPY' })
+        );
+        expect(manager.cursorMoves).toEqual([{ lat: 50, lng: 5 }]);
     });
 
     it('right-click prevents the context menu and finishes the draw', () => {

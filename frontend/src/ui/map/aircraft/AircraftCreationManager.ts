@@ -1,9 +1,8 @@
-import type { MapMouseEvent } from 'maplibre-gl';
 import { MapDisplay } from '../MapDisplay';
 import type { NavaidSnapper } from '../navdata/NavaidSnapper';
+import { BaseDrawingManager, DrawingPoint } from '../BaseDrawingManager';
 import { logger } from '../../../utils/Logger';
 import {
-    DRAWING_CURSOR,
     ensureGeoJSONSource,
     ensureLayer,
     updateSourceFeatures,
@@ -12,8 +11,6 @@ import {
 } from '../../../utils/maplibre';
 import { pointFeature, lineStringFeature } from '../../../utils/geojson';
 import { roundedBearing } from '../../../utils/geo';
-import { isTextEntryTarget } from '../../../utils/dom';
-import { claimDrawing, releaseDrawing } from '../drawingExclusion';
 import {
     AircraftCreationForm,
     AircraftCreationData,
@@ -29,46 +26,33 @@ const GUIDE_LAYER = 'temp-aircraft-guideline-layer';
 /**
  * AircraftCreationManager - Manages map-based aircraft creation
  *
- * Owns the map drawing state machine: click to place the aircraft,
- * move/click again to set the heading, then issue the CRE command.
- * The Create Aircraft modal itself (validation, units, autocomplete,
- * manual-mode CRE generation) lives in AircraftCreationForm, which hands
- * validated form data to this manager when map mode starts.
+ * Owns the map drawing state machine on top of BaseDrawingManager: click to
+ * place the aircraft, move/click again to set the heading, then issue the
+ * CRE command. The Create Aircraft modal itself (validation, units,
+ * autocomplete, manual-mode CRE generation) lives in AircraftCreationForm,
+ * which hands validated form data to this manager when map mode starts.
  */
-export class AircraftCreationManager {
-    private mapDisplay: MapDisplay;
-    private navaidSnapper: NavaidSnapper;
+export class AircraftCreationManager extends BaseDrawingManager {
     private form: AircraftCreationForm;
-    private aircraftDrawingMode: boolean = false;
-    private aircraftDrawingPoints: [number, number][] = [];
+    private drawingPoints: [number, number][] = [];
     private currentAircraftData: AircraftCreationData | null = null;
     private aircraftPosition: [number, number] | null = null;
 
-    // Event handlers - stored as references for proper cleanup
-    private aircraftMapClickHandler: ((e: MapMouseEvent) => void) | null = null;
-    private aircraftMouseMoveHandler: ((e: MapMouseEvent) => void) | null = null;
-    private aircraftSnapHoverHandler: ((e: MapMouseEvent) => void) | null = null;
-    private aircraftEscapeHandler: ((e: KeyboardEvent) => void) | null = null;
-
     constructor(mapDisplay: MapDisplay, navaidSnapper: NavaidSnapper) {
-        this.mapDisplay = mapDisplay;
-        this.navaidSnapper = navaidSnapper;
+        super(mapDisplay, navaidSnapper);
         this.form = new AircraftCreationForm((data) => this.startAircraftDrawing(data));
     }
 
-    /**
-     * Show the aircraft creation modal
-     */
     public showModal(): void {
         this.form.showModal();
     }
 
-    /**
-     * Whether click-to-place aircraft creation is currently active. Consumed
-     * by AircraftInteractionManager to suppress empty-map-click deselection.
-     */
-    public isDrawing(): boolean {
-        return this.aircraftDrawingMode;
+    public toggleDrawing(): void {
+        if (this.drawingMode) {
+            this.cancelDrawing();
+        } else {
+            this.showModal();
+        }
     }
 
     /**
@@ -78,164 +62,69 @@ export class AircraftCreationManager {
     private startAircraftDrawing(data: AircraftCreationData): void {
         // Restart cleanly if a previous draw is still active - stale handlers
         // would double-fire each click and could never be removed again.
-        if (this.aircraftDrawingMode) {
-            this.stopAircraftDrawing();
+        if (this.drawingMode) {
+            this.cancelDrawing();
         }
 
         this.currentAircraftData = data;
-        this.aircraftDrawingMode = true;
-        this.aircraftDrawingPoints = [];
+        this.drawingMode = true;
+        this.drawingPoints = [];
 
-        this.enableAircraftMapDrawing();
+        this.enableMapDrawing();
 
         logger.debug('AircraftCreationManager', 'Started aircraft drawing mode');
     }
 
-    /**
-     * Cancel any in-progress draw and release map/document handlers.
-     * Called from App.cleanup() at page teardown.
-     */
-    public destroy(): void {
-        if (this.aircraftDrawingMode) {
-            this.stopAircraftDrawing();
-        }
-    }
-
-    /**
-     * Stop aircraft drawing mode
-     */
-    private stopAircraftDrawing(): void {
-        this.aircraftDrawingMode = false;
-        this.aircraftDrawingPoints = [];
+    protected cancelDrawing(): void {
+        this.drawingMode = false;
+        this.drawingPoints = [];
         this.currentAircraftData = null;
 
-        this.disableAircraftMapDrawing();
-        this.hideDrawingBanner();
+        this.disableMapDrawing();
 
         logger.debug('AircraftCreationManager', 'Stopped aircraft drawing mode');
     }
 
-    /**
-     * Enable aircraft map drawing
-     */
-    private enableAircraftMapDrawing(): void {
-        const map = this.mapDisplay.getMap();
-        if (!map) {
-            logger.warn('AircraftCreationManager', 'No radar map available for aircraft drawing');
-            return;
-        }
-
-        // Cancel any in-progress shape/route draw so two tools never consume
-        // the same map clicks.
-        claimDrawing(this, () => this.stopAircraftDrawing());
-
-        // A double-click during the draw is two placement clicks, not a zoom
-        // request; restored in disableAircraftMapDrawing().
-        map.doubleClickZoom.disable();
-
-        // Crosshair cursor, matching the other drawing modes.
-        map.getCanvas().style.cursor = DRAWING_CURSOR;
-
-        this.aircraftMapClickHandler = (e: MapMouseEvent) => {
-            this.handleAircraftMapClick(e);
-        };
-        map.on('click', this.aircraftMapClickHandler);
-
-        // Highlight the navaid the cursor would snap to. This runs for both
-        // phases: the first click (position) and the second click (heading
-        // direction), so the user can aim the heading at a known navaid.
-        this.aircraftSnapHoverHandler = (e: MapMouseEvent) => {
-            if (this.aircraftDrawingPoints.length < 2) {
-                this.navaidSnapper.highlight(e);
-            }
-        };
-        map.on('mousemove', this.aircraftSnapHoverHandler);
-
-        // Escape cancels the draw at any phase, matching the other drawing
-        // modes.
-        this.aircraftEscapeHandler = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && !isTextEntryTarget(e.target)) {
-                this.stopAircraftDrawing();
-            }
-        };
-        document.addEventListener('keydown', this.aircraftEscapeHandler);
-
-        this.showDrawingBanner();
-        this.updateDrawingBanner('Click on map to set aircraft position');
+    protected onDrawingEnabled(): void {
+        this.showDrawingBanner('Click on map to set aircraft position');
     }
 
-    /**
-     * Disable aircraft map drawing
-     */
-    private disableAircraftMapDrawing(): void {
-        // The map can already be gone at teardown; the document-level Escape
-        // listener and the drawing claim must be released regardless.
-        const map = this.mapDisplay.getMap();
-        if (map) {
-            map.doubleClickZoom.enable();
-            // Restore MapLibre's default cursor when leaving drawing mode.
-            map.getCanvas().style.cursor = '';
-            if (this.aircraftMapClickHandler) map.off('click', this.aircraftMapClickHandler);
-            if (this.aircraftMouseMoveHandler) map.off('mousemove', this.aircraftMouseMoveHandler);
-            if (this.aircraftSnapHoverHandler) map.off('mousemove', this.aircraftSnapHoverHandler);
-        }
-        this.aircraftMapClickHandler = null;
-        this.aircraftMouseMoveHandler = null;
-        this.aircraftSnapHoverHandler = null;
-        this.navaidSnapper.clearHighlight();
-
-        if (this.aircraftEscapeHandler) {
-            document.removeEventListener('keydown', this.aircraftEscapeHandler);
-            this.aircraftEscapeHandler = null;
-        }
-
+    protected onDrawingDisabled(): void {
         this.aircraftPosition = null;
         this.clearTemporaryAircraftDrawing();
-        releaseDrawing(this);
+        this.hideDrawingBanner();
     }
 
-    /**
-     * Handle aircraft map click
-     */
-    private handleAircraftMapClick(e: MapMouseEvent): void {
-        if (!this.aircraftDrawingMode) return;
-
-        // The second click of a double-click is a repeat of the first, not a
-        // deliberate placement - without this, double-clicking the position
-        // would instantly create the aircraft with a meaningless heading.
-        if (e.originalEvent.detail > 1) return;
-
-        // Snap both clicks to a nearby navaid when enabled: the first click sets
-        // the spawn position, the second sets the heading/direction (aim at a
-        // known navaid for a precise heading).
-        let point: [number, number] = [e.lngLat.lng, e.lngLat.lat];
-        const snapped = this.navaidSnapper.snap(e);
-        if (snapped) point = [snapped.lng, snapped.lat];
+    protected onPointAdded(point: DrawingPoint): void {
+        const p: [number, number] = [point.lng, point.lat];
 
         // A heading click on the exact spawn position (e.g. both clicks
         // snapped to the same navaid) has no direction; drop it and keep
         // waiting, mirroring the circle tool's zero-radius guard.
-        const [position] = this.aircraftDrawingPoints;
-        if (position && position[0] === point[0] && position[1] === point[1]) {
-            this.updateDrawingBanner('Click a point away from the aircraft to set its heading');
+        const [position] = this.drawingPoints;
+        if (position && position[0] === p[0] && position[1] === p[1]) {
+            this.showDrawingBanner('Click a point away from the aircraft to set its heading');
             return;
         }
 
-        this.aircraftDrawingPoints.push(point);
+        this.drawingPoints.push(p);
 
-        if (this.aircraftDrawingPoints.length === 1) {
-            // First click - set position. Keep the snap highlight active so the
-            // heading click can also snap to a navaid.
-            this.updateDrawingBanner('Move mouse to see heading guide, then click to confirm direction');
-            this.visualizeAircraftPosition(point);
-        } else if (this.aircraftDrawingPoints.length === 2) {
-            this.completeAircraftDrawing();
+        if (this.drawingPoints.length === 1) {
+            // First click - set position; the second click sets the heading.
+            this.showDrawingBanner('Move mouse to see heading guide, then click to confirm direction');
+            this.visualizeAircraftPosition(p);
+        } else if (this.drawingPoints.length === 2) {
+            this.finishDrawing();
         }
     }
 
-    /**
-     * Visualize aircraft position
-     */
+    protected onCursorMove(point: DrawingPoint): void {
+        // Phase 1 (before the position click) only shows the snap highlight,
+        // which the base class already handles.
+        if (!this.aircraftPosition) return;
+        this.updateHeadingGuideLine(point);
+    }
+
     private visualizeAircraftPosition(position: [number, number]): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
@@ -254,22 +143,10 @@ export class AircraftCreationManager {
         });
         updateSourceFeatures(map, POSITION_SOURCE, [pointFeature(position)]);
 
-        // Store position for the heading guide line.
+        // Anchor for the heading guide line drawn on cursor moves.
         this.aircraftPosition = position;
-
-        // Follow the cursor with a guide line. Snap the endpoint to a nearby
-        // navaid so the previewed heading matches what the second click will
-        // commit.
-        this.aircraftMouseMoveHandler = (e: MapMouseEvent) => {
-            const snapped = this.navaidSnapper.snap(e);
-            this.updateHeadingGuideLine(snapped ?? e.lngLat);
-        };
-        map.on('mousemove', this.aircraftMouseMoveHandler);
     }
 
-    /**
-     * Update heading guide line
-     */
     private updateHeadingGuideLine(mousePosition: { lng: number, lat: number }): void {
         const map = this.mapDisplay.getMap();
         if (!map || !this.aircraftPosition) return;
@@ -300,19 +177,17 @@ export class AircraftCreationManager {
             mousePosition.lat,
             mousePosition.lng
         );
-        this.updateDrawingBanner(`Heading: ${heading}° - Click to confirm direction`);
+        this.showDrawingBanner(`Heading: ${heading}° - Click to confirm direction`);
     }
 
-    /**
-     * Complete aircraft drawing
-     */
-    private completeAircraftDrawing(): void {
-        if (this.aircraftDrawingPoints.length < 2 || !this.currentAircraftData) {
-            logger.warn('AircraftCreationManager', 'Insufficient data for aircraft creation');
+    /** Both points placed: build and send the CRE command. */
+    protected finishDrawing(): void {
+        if (this.drawingPoints.length < 2 || !this.currentAircraftData) {
+            // Right-click before the heading click - nothing to finish yet.
             return;
         }
 
-        const [position, headingPoint] = this.aircraftDrawingPoints;
+        const [position, headingPoint] = this.drawingPoints;
         const heading = roundedBearing(
             position[1],
             position[0],
@@ -334,12 +209,9 @@ export class AircraftCreationManager {
             logger.error('AircraftCreationManager', 'Cannot send command: app not available');
         }
 
-        this.stopAircraftDrawing();
+        this.cancelDrawing();
     }
 
-    /**
-     * Clear temporary aircraft drawing
-     */
     private clearTemporaryAircraftDrawing(): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
@@ -348,31 +220,5 @@ export class AircraftCreationManager {
         safeRemoveLayer(map, GUIDE_LAYER);
         safeRemoveSource(map, POSITION_SOURCE);
         safeRemoveSource(map, GUIDE_SOURCE);
-    }
-
-    /**
-     * Show drawing banner
-     */
-    private showDrawingBanner(): void {
-        const banner = document.getElementById('drawing-banner');
-        if (banner) banner.style.display = 'flex';
-    }
-
-    /**
-     * Hide drawing banner
-     */
-    private hideDrawingBanner(): void {
-        const banner = document.getElementById('drawing-banner');
-        if (banner) banner.style.display = 'none';
-    }
-
-    /**
-     * Update drawing banner message
-     */
-    private updateDrawingBanner(message: string): void {
-        const bannerText = document.getElementById('drawing-banner-text');
-        if (bannerText) {
-            bannerText.textContent = message;
-        }
     }
 }

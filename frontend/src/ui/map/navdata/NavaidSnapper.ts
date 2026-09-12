@@ -127,10 +127,18 @@ export class NavaidSnapper {
      * Shows a ring + ident label when a candidate is found, hides it otherwise.
      */
     public highlight(e: MapMouseEvent): void {
+        this.showHighlight(this.snap(e));
+    }
+
+    /**
+     * Render the hover highlight for an already-computed snap result, so a
+     * caller that needs the result itself (e.g. BaseDrawingManager's cursor
+     * previews) doesn't pay for a second queryRenderedFeatures per mousemove.
+     */
+    public showHighlight(candidate: SnapResult | null): void {
         const map = this.mapDisplay.getMap();
         if (!map) return;
 
-        const candidate = this.snap(e);
         this.ensureHighlightLayers();
 
         const source = map.getSource(this.HIGHLIGHT_SOURCE) as GeoJSONSource | undefined;
