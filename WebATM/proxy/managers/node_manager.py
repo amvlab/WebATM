@@ -60,6 +60,21 @@ class NodeManager:
 
             self._emit_node_info()
             self._emit_active_node_poly_data()
+            self._request_active_node_cmddict(node_id)
+
+    def _request_active_node_cmddict(self, node_id):
+        """Ask the newly active node for its command dictionary.
+
+        STACKCMDS is per-node state with replace semantics (plugins register
+        extra commands per node) and its handler only accepts the active
+        node's answer, so a switch must re-request it from the new node —
+        otherwise the console keeps validating against the previous node's
+        command set.
+        """
+        try:
+            self.proxy.bluesky_client.send("REQUEST", ["STACKCMDS"], node_id)
+        except Exception as e:
+            logger.error(f" Error requesting STACKCMDS from new active node: {e}")
 
     def _emit_active_node_poly_data(self):
         """Emit POLY and POLYLINE data for the currently active node."""
@@ -70,7 +85,7 @@ class NodeManager:
                 active_node_id, self.proxy.polyline_data_by_node, "polyline"
             )
         except Exception as e:
-            logger.error(f" Error emitting active node POLY/POLYLINE data: {e}")
+            logger.error(f"Error emitting active node POLY/POLYLINE data: {e}")
             traceback.print_exc()
 
     def _emit_shapes(self, active_node_id, data_by_node, event):
@@ -129,7 +144,7 @@ class NodeManager:
                 if self.proxy.running:
                     self._emit_node_info()
         except Exception as e:
-            logger.error(f" Error in _on_node_added: {e}")
+            logger.error(f"Error in _on_node_added: {e}")
             traceback.print_exc()
 
     def _reactivate_if_active_node_gone(self, node_id):
@@ -174,7 +189,7 @@ class NodeManager:
             and self.proxy.was_connected
             and self.proxy.running
         ):
-            logger.warning(" All nodes removed - checking for server shutdown...")
+            logger.warning("All nodes removed - checking for server shutdown...")
             shutdown_check = threading.Timer(1.0, self._check_node_shutdown)
             shutdown_check.daemon = True
             shutdown_check.start()
@@ -201,7 +216,7 @@ class NodeManager:
                     client.actnode(replacement)
                     return
         except Exception as e:
-            logger.error(f" Error failing over active node: {e}")
+            logger.error(f"Error failing over active node: {e}")
 
     def _check_node_shutdown(self):
         """Check if server is really shut down after all nodes removed."""
@@ -266,7 +281,7 @@ class NodeManager:
         try:
             self.proxy.socketio.emit("node_info", self.serialize_node_info())
         except Exception as e:
-            logger.error(f" Error emitting node info: {e}")
+            logger.error(f"Error emitting node info: {e}")
             traceback.print_exc()
 
     def actnode(self, node_id):

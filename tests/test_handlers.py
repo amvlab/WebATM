@@ -348,10 +348,63 @@ class TestEchoHandler:
 
 
 class TestStackcmdsHandler:
+    def _activate(self, proxy, fake_client, active_bytes):
+        """Wire the proxy so _get_safe_active_node() resolves to active_bytes."""
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        fake_client.act_id = active_bytes
+        proxy.tracked_nodes[active_bytes.hex()] = {"status": "init", "time": "00:00:00"}
+
     def test_updates_cmddict_and_emits(self, proxy, fake_socketio):
         on_stackcmds_received({"cmddict": {"CRE": "acid,type"}})
         assert proxy.cmddict["CRE"] == "acid,type"
         assert fake_socketio.count("cmddict") == 1
+
+    def test_replace_action_drops_stale_commands(
+        self, proxy, fake_client, fake_socketio
+    ):
+        """BlueSky answers STACKCMDS REQUESTs with a full Replace of the
+        node's command set; merging instead left commands that no longer
+        exist on the node (e.g. from a previously active node's plugin) in
+        the console's autocomplete/validation dictionary forever."""
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        self._activate(proxy, fake_client, active)
+        proxy.cmddict["PASSENGERS"] = "acid,[count]"
+
+        fake_client.context.action = b"R"
+        fake_client.context.sender_id = active
+        on_stackcmds_received({"cmddict": {"CRE": "acid,type"}})
+
+        assert proxy.cmddict == {"CRE": "acid,type"}
+        assert fake_socketio.last("cmddict") == {"cmddict": {"CRE": "acid,type"}}
+
+    def test_background_node_answer_is_ignored(self, proxy, fake_client, fake_socketio):
+        """The node-added REQUEST is a broadcast, so every node answers with
+        its own command set; only the active node's answer may win — the
+        console sends commands to the active node."""
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        other = b"\xbb\xbb\xbb\xbb\x82"
+        self._activate(proxy, fake_client, active)
+        proxy.cmddict["PASSENGERS"] = "acid,[count]"
+
+        fake_client.context.action = b"R"
+        fake_client.context.sender_id = other
+        on_stackcmds_received({"cmddict": {"CRE": "acid,type"}})
+
+        assert "CRE" not in proxy.cmddict
+        assert proxy.cmddict["PASSENGERS"] == "acid,[count]"
+        assert fake_socketio.count("cmddict") == 0
+
+    def test_accepted_when_active_node_unresolved(self, proxy, fake_client):
+        """Same fallback as SIMINFO/ACDATA: with no resolvable active node
+        (early in connection setup) the answer is accepted so a single-node
+        display still works."""
+        proxy.bluesky_client = fake_client
+        fake_client.context.action = b"R"
+        fake_client.context.sender_id = b"\xaa\xaa\xaa\xaa\x81"
+        on_stackcmds_received({"cmddict": {"CRE": "acid,type"}})
+        assert proxy.cmddict == {"CRE": "acid,type"}
 
     def test_non_dict_data_does_not_raise(self, proxy):
         on_stackcmds_received("some string")

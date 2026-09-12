@@ -7,6 +7,43 @@ here keeps each handler module focused on the event it actually processes.
 
 import time
 
+# Shared-state action markers (bluesky.network.common.ActionType values,
+# decoded to str). Replace/Reset/ActChange overwrite the stored state; Delete
+# removes the named entries; anything else merges. The RESET/ACTCHANGE
+# spellings cover the client's translated context constants.
+REPLACE_ACTIONS = frozenset({"R", "X", "C", "RESET", "ACTCHANGE"})
+DELETE_ACTION = "D"
+
+
+def shared_context(proxy):
+    """Return the (sender, action) the network client recorded for this message.
+
+    The client sets ``context.sender_id`` and ``context.action`` just before
+    dispatching each shared-state message (the ``[action, payload]`` wrapper
+    itself is stripped before the handler is called).
+
+    Args:
+        proxy (BlueSkyProxy): The active proxy.
+
+    Returns:
+        tuple[str | None, str | None]: Hex sender ID and action marker, either
+        of which may be None when no context is available.
+    """
+    ctx = getattr(proxy.bluesky_client, "context", None)
+    if ctx is None:
+        return None, None
+    action = ctx.action
+    if isinstance(action, bytes):
+        action = action.decode("charmap", errors="replace")
+    # Same conversion as utils.id2str, inlined so this module stays loadable
+    # without the package (see tests/test_handler_base.py).
+    sender_id = ctx.sender_id
+    if isinstance(sender_id, bytes):
+        sender_id = sender_id.hex()
+    elif sender_id is not None:
+        sender_id = str(sender_id)
+    return sender_id, action
+
 
 def get_bluesky_proxy():
     """Return the globally registered BlueSky proxy instance.

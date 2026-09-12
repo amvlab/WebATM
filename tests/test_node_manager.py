@@ -416,6 +416,18 @@ class TestActnodeChangedTrafficClear:
         assert proxy.traffic_data == {"id": ["KEEP"], "lat": [1.0]}
         assert fake_socketio.count("acdata") == 0
 
+    def test_switch_requests_new_active_nodes_cmddict(self, proxy, fake_client):
+        """STACKCMDS is per-node state that only the active node's answer may
+        update, so a switch must re-request it from the new node — otherwise
+        the console keeps validating against the previous node's commands."""
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        new_active = b"\x01\x02\x03\x04\x81"
+
+        proxy.node_mgr._on_actnode_changed(new_active)
+
+        assert ("REQUEST", ["STACKCMDS"], new_active) in fake_client.sent
+
 
 class TestDelegationToNetworkClient:
     def test_actnode_raises_without_client(self, proxy):

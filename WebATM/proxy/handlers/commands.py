@@ -9,7 +9,7 @@ They are handled locally and never echoed back to the server.
 """
 
 from ...logger import get_logger
-from ._base import active_proxy
+from ._base import REPLACE_ACTIONS, active_proxy, is_active_node, shared_context
 
 logger = get_logger()
 
@@ -17,9 +17,13 @@ logger = get_logger()
 def on_stackcmds_received(data):
     """Process a BlueSky STACKCMDS event and emit ``cmddict`` to web clients.
 
-    When the payload is a dict, merges its ``cmddict`` mapping into the proxy's
-    command dictionary and emits the updated dictionary to connected browsers.
-    Other payload shapes are only logged.
+    BlueSky publishes STACKCMDS with replace semantics: each node answers a
+    REQUEST with a full Replace of *its own* command dictionary (plugins can
+    register extra commands per node). The console sends commands to the
+    active node, so only the active node's dictionary is accepted — a
+    background node's answer must not overwrite (or leak commands into) the
+    set the console validates against. A Replace action rebuilds the stored
+    dictionary; other actions merge. Other payload shapes are only logged.
 
     Args:
         data (dict | bytes | str): Unwrapped STACKCMDS shared-state payload; a
@@ -39,8 +43,15 @@ def on_stackcmds_received(data):
         logger.warning(f"STACKCMDS payload without a cmddict mapping: {data.keys()}")
         return
 
+    sender_id, action = shared_context(proxy)
+    if not is_active_node(proxy, sender_id):
+        logger.debug(f"STACKCMDS from background node {sender_id} ignored")
+        return
+
+    if action in REPLACE_ACTIONS:
+        proxy.cmddict.clear()
     proxy.cmddict.update(cmddict)
-    logger.debug(f"Updated cmddict with {len(cmddict)} commands")
+    logger.debug(f"Updated cmddict with {len(cmddict)} commands (action={action})")
 
     if proxy.socketio and proxy.connected_clients > 0:
         try:
