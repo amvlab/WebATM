@@ -431,5 +431,30 @@ describe('CommandHandler', () => {
             handler.handleCommand('CRE KL123 A320 52 4 90 FL100 250');
             expect(addMessage).not.toHaveBeenCalled();
         });
+
+        // BlueSky treats commas and whitespace alike as separators
+        // (bluesky/stack/argparser.re_getarg), so all these forms are valid.
+        it('warns for unknown types in the comma-separated form', () => {
+            handler.handleCommand('CRE KL123,FAKE1,52,4,90,FL100,250');
+            expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('FAKE1'), 'warning', 'webatm');
+        });
+
+        it('warns even with a comma directly after the command', () => {
+            handler.handleCommand('CRE,KL123,FAKE1,52,4,90,FL100,250');
+            expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('FAKE1'), 'warning', 'webatm');
+        });
+
+        it('does not warn for a known type in the comma+space form', () => {
+            handler.handleCommand('CRE KL123, A320, 52, 4, 90, FL100, 250');
+            expect(addMessage).not.toHaveBeenCalled();
+        });
+
+        it('warns for an unknown type in a comma-separated MCRE', () => {
+            handler.handleCommand('MCRE 5,FAKE2,FL100,250');
+            expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('FAKE2'), 'warning', 'webatm');
+        });
     });
 });
