@@ -79,6 +79,36 @@ class TestMakeJsonSerializable:
     def test_passthrough_primitives(self):
         assert make_json_serializable("hello") == "hello"
         assert make_json_serializable(42) == 42
+
+    def test_nan_and_inf_become_none(self):
+        # json.dumps writes NaN/Infinity as bare tokens that are invalid JSON,
+        # which made browsers drop the Socket.IO connection on every ACDATA
+        # frame once one aircraft carried a NaN value.
+        assert make_json_serializable(float("nan")) is None
+        assert make_json_serializable(float("inf")) is None
+        assert make_json_serializable(np.float64("nan")) is None
+
+    def test_nan_in_numpy_array_becomes_none(self):
+        arr = np.array([1.0, np.nan, np.inf, 4.0])
+        assert make_json_serializable(arr) == [1.0, None, None, 4.0]
+
+    def test_all_finite_float_array_fast_path(self):
+        arr = np.array([1.5, 2.5])
+        assert make_json_serializable(arr) == [1.5, 2.5]
+
+    def test_nan_in_msgpack_numpy_dict_becomes_none(self):
+        raw = np.array([52.3, np.nan], dtype=np.float64)
+        obj = {
+            b"numpy": True,
+            b"data": raw.tobytes(),
+            b"type": b"float64",
+            b"shape": (2,),
+        }
+        assert make_json_serializable(obj) == [52.3, None]
+
+    def test_nan_in_nested_structures_becomes_none(self):
+        obj = {"alt": [30000.0, float("nan")], "spd": float("inf")}
+        assert make_json_serializable(obj) == {"alt": [30000.0, None], "spd": None}
         assert make_json_serializable(None) is None
 
     def test_bluesky_serialized_numpy_double_array(self):
