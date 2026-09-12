@@ -7,9 +7,10 @@
  * the 3D overlay off and forced a continuous repaint loop.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as THREE from 'three';
 import type { Map as MapLibreMap } from 'maplibre-gl';
-import type { DisplayOptions } from '../../../data/types';
-import { AircraftRoute3DRenderer } from './AircraftRoute3DRenderer';
+import type { DisplayOptions, RouteData } from '../../../data/types';
+import { AircraftRoute3DRenderer, AircraftRoute3DCustomLayer } from './AircraftRoute3DRenderer';
 
 const DISPLAY_OPTIONS = { showRoutes: true } as DisplayOptions;
 
@@ -133,5 +134,108 @@ describe('AircraftRoute3DRenderer layer lifecycle', () => {
 
         expect(layers.size).toBe(0);
         expect(rafQueue.length).toBe(0);
+    });
+});
+
+/**
+ * The route scene is rebuilt on every aircraft data tick (the scene origin
+ * follows the aircraft). Waypoint sphere geometry and all materials must be
+ * shared across rebuilds instead of disposed and reallocated per tick.
+ */
+describe('AircraftRoute3DCustomLayer geometry/material reuse', () => {
+    const OPTIONS = {
+        showRoutes: true,
+        showRouteLines: true,
+        showRoutePoints: true,
+        aircraft3DScale: 2,
+    } as DisplayOptions;
+
+    const ROUTE = {
+        acid: 'AC1',
+        iactwp: 1,
+        wplat: [52.0, 52.1, 52.2],
+        wplon: [4.0, 4.1, 4.2],
+        wpalt: [-999, 3000, -999],
+        wpspd: [-999, -999, -999],
+        wpname: ['WP1', 'WP2', 'WP3'],
+    } as RouteData;
+
+    /** Layer with the scene wired up directly, bypassing onAdd (needs real GL). */
+    function makeLayer(): { layer: AircraftRoute3DCustomLayer; group: THREE.Group } {
+        const layer = new AircraftRoute3DCustomLayer(OPTIONS);
+        const group = new THREE.Group();
+        Object.assign(layer as unknown as Record<string, unknown>, {
+            scene: new THREE.Scene(),
+            mercatorGroup: group,
+            map: { triggerRepaint: vi.fn() },
+        });
+        layer.setSelectedAircraft('AC1');
+        layer.setRouteData(ROUTE);
+        layer.setAircraftState(52.0, 4.0, 2500);
+        return { layer, group };
+    }
+
+    function spheres(group: THREE.Group): THREE.Mesh[] {
+        return group.children.filter((c): c is THREE.Mesh => c instanceof THREE.Mesh);
+    }
+
+    function lines(group: THREE.Group): THREE.Line[] {
+        return group.children.filter(
+            (c): c is THREE.Line => c instanceof THREE.Line && !(c instanceof THREE.Mesh)
+        );
+    }
+
+    it('builds a sphere per waypoint and a line per segment', () => {
+        const { group } = makeLayer();
+        expect(spheres(group)).toHaveLength(3);
+        // Aircraft->active + 1 passed + 1 upcoming segment
+        expect(lines(group)).toHaveLength(3);
+    });
+
+    it('shares one sphere geometry across all waypoints and across rebuilds', () => {
+        const { layer, group } = makeLayer();
+        const firstGeometry = spheres(group)[0].geometry;
+        expect(spheres(group).every((s) => s.geometry === firstGeometry)).toBe(true);
+
+        // Next aircraft tick: full rebuild with a moved origin
+        layer.setAircraftState(52.05, 4.05, 2600);
+
+        expect(spheres(group)).toHaveLength(3);
+        expect(spheres(group).every((s) => s.geometry === firstGeometry)).toBe(true);
+    });
+
+    it('reuses sphere and line materials across rebuilds', () => {
+        const { layer, group } = makeLayer();
+        const sphereMaterials = new Set(spheres(group).map((s) => s.material));
+        const lineMaterials = new Set(lines(group).map((l) => l.material));
+
+        layer.setAircraftState(52.05, 4.05, 2600);
+
+        spheres(group).forEach((s) => expect(sphereMaterials.has(s.material)).toBe(true));
+        lines(group).forEach((l) => expect(lineMaterials.has(l.material)).toBe(true));
+    });
+
+    it('sizes the active waypoint sphere 1.5x via mesh scale', () => {
+        const { group } = makeLayer();
+        const scales = spheres(group).map((s) => s.scale.x);
+        const base = 60 * 2; // baseRadius * aircraft3DScale
+        expect(scales).toEqual([base, base * 1.5, base]);
+    });
+
+    it('disposes the shared geometry and cached materials only on cleanup', () => {
+        const { layer, group } = makeLayer();
+        const geometry = spheres(group)[0].geometry;
+        const material = spheres(group)[0].material as THREE.Material;
+        const geometryDispose = vi.spyOn(geometry, 'dispose');
+        const materialDispose = vi.spyOn(material, 'dispose');
+
+        layer.setAircraftState(52.05, 4.05, 2600);
+        expect(geometryDispose).not.toHaveBeenCalled();
+        expect(materialDispose).not.toHaveBeenCalled();
+
+        layer.cleanup();
+        expect(geometryDispose).toHaveBeenCalledTimes(1);
+        expect(materialDispose).toHaveBeenCalledTimes(1);
+        expect(group.children).toHaveLength(0);
     });
 });
