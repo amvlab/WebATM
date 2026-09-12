@@ -92,6 +92,44 @@ class TestStopClient:
         assert proxy.bluesky_client is None
         _assert_cached_state_cleared(proxy)
 
+    def test_notifies_all_browsers_of_manual_disconnect(
+        self, proxy, fake_socketio, fake_client
+    ):
+        """A manual disconnect must push the same disconnected picture the
+        timeout path pushes. Previously only an empty node_info went out, so
+        every browser except the one that clicked Disconnect kept a
+        "connected" header and a frozen map until its no-data timeout fired
+        with a misleading "connection may be lost" warning."""
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        _seed_cached_state(proxy)
+
+        proxy.connection_mgr.stop_client("manual")
+
+        assert fake_socketio.last("connection_status")["connected"] is False
+        assert fake_socketio.last("acdata")["id"] == []
+        assert fake_socketio.count("server_disconnected") == 1
+        node_info = fake_socketio.last("node_info")
+        assert node_info["total_nodes"] == 0
+        assert node_info["active_node"] is None
+
+    def test_never_connected_stop_emits_only_node_info(
+        self, proxy, fake_socketio, fake_client
+    ):
+        """Tearing down a connection attempt that never saw a node (e.g. the
+        connect route's no-nodes timeout) must not broadcast a disconnect
+        browsers never saw as connected."""
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = False
+
+        proxy.connection_mgr.stop_client()
+
+        assert fake_socketio.count("connection_status") == 0
+        assert fake_socketio.count("server_disconnected") == 0
+        assert fake_socketio.count("acdata") == 0
+        assert fake_socketio.count("node_info") == 1
+
 
 class TestMarkConnected:
     """Single implementation of the "first node appeared" transition, shared

@@ -256,6 +256,110 @@ class TestServerConfigConnect:
         # Even on failure the app keeps a usable proxy attribute.
         assert app.bluesky_proxy is created[0]
 
+    def test_success_message_names_the_actual_host(self, app_and_client, monkeypatch):
+        import WebATM.proxy as proxy_pkg
+
+        app, client = app_and_client
+        created: list = []
+        monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", _fake_proxy_class(created))
+        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda proxy: None)
+
+        resp = client.post("/api/server/config", json={"server_ip": "10.0.0.5"})
+
+        assert "10.0.0.5" in resp.get_json()["message"]
+
+    def test_node_timeout_stops_proxy_under_connect_lock(
+        self, app_and_client, monkeypatch
+    ):
+        # The failed-connect teardown must serialize on the same connect_lock
+        # every other connect/disconnect path holds; unserialized, it can run a
+        # second teardown concurrently with a connect that already replaced
+        # and closed this proxy.
+        import WebATM.proxy as proxy_pkg
+        from WebATM.proxy import connect_lock
+        from WebATM.server import routes as routes_mod
+
+        app, client = app_and_client
+        created: list = []
+        stopped: list = []
+        # start_client leaves tracked_nodes empty: connect "succeeds" but no
+        # BlueSky nodes ever appear.
+        FakeProxy = _fake_proxy_class(created, start_client=lambda p, h: None)
+        FakeProxy.stop_client = lambda self, context="disconnect": stopped.append(
+            (context, connect_lock.locked())
+        )
+        monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", FakeProxy)
+        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda proxy: None)
+        monkeypatch.setattr(routes_mod, "_wait_for_nodes", lambda proxy: False)
+
+        resp = client.post("/api/server/config", json={"server_ip": "10.0.0.5"})
+
+        assert resp.status_code == 500
+        assert "No BlueSky nodes detected" in resp.get_json()["error"]
+        assert stopped == [("disconnect", True)]
+
+    def test_node_timeout_stands_down_when_proxy_was_replaced(
+        self, app_and_client, monkeypatch
+    ):
+        # A concurrent connect that swaps in its own proxy during the node wait
+        # already stopped and closed this one; the timed-out request must not
+        # tear it down a second time.
+        import WebATM.proxy as proxy_pkg
+        from WebATM.server import routes as routes_mod
+
+        app, client = app_and_client
+        created: list = []
+        stopped: list = []
+        FakeProxy = _fake_proxy_class(created, start_client=lambda p, h: None)
+        FakeProxy.stop_client = lambda self, context="disconnect": stopped.append(
+            context
+        )
+        monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", FakeProxy)
+        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda proxy: None)
+
+        def replace_proxy_then_time_out(proxy):
+            app.bluesky_proxy = object()  # a newer connect took over
+            return False
+
+        monkeypatch.setattr(routes_mod, "_wait_for_nodes", replace_proxy_then_time_out)
+
+        resp = client.post("/api/server/config", json={"server_ip": "10.0.0.5"})
+
+        assert resp.status_code == 500
+        assert stopped == []
+
+
+class TestWaitForNodes:
+    def test_returns_true_immediately_when_nodes_present(self):
+        from WebATM.server.routes import _wait_for_nodes
+
+        class Proxy:
+            tracked_nodes = {"node-1": {}}
+
+        assert _wait_for_nodes(Proxy(), timeout=0.0) is True
+
+    def test_returns_false_after_timeout(self):
+        from WebATM.server.routes import _wait_for_nodes
+
+        class Proxy:
+            tracked_nodes: dict = {}
+
+        assert _wait_for_nodes(Proxy(), timeout=0.05, poll_interval=0.01) is False
+
+    def test_picks_up_nodes_appearing_mid_wait(self):
+        from WebATM.server.routes import _wait_for_nodes
+
+        class Proxy:
+            def __init__(self):
+                self.polls = 0
+
+            @property
+            def tracked_nodes(self):
+                self.polls += 1
+                return {"node-1": {}} if self.polls >= 3 else {}
+
+        assert _wait_for_nodes(Proxy(), timeout=5.0, poll_interval=0.01) is True
+
 
 class TestCommandRoute:
     def test_send_command_returns_result(self, client):
@@ -502,3 +606,63 @@ class TestDisconnect:
         resp = client.post("/api/server/disconnect")
         assert resp.status_code == 200
         assert resp.get_json()["success"] is True
+
+    def test_disconnect_stops_running_proxy_under_connect_lock(
+        self, app_and_client, monkeypatch
+    ):
+        # A disconnect must serialize on the same connect_lock the
+        # /api/server/config route and the integrated auto-start hold while
+        # connecting; otherwise it can stop a proxy whose start_client() is
+        # still mid-flight (the connect then completes on a dead proxy).
+        from WebATM.proxy import connect_lock
+        from WebATM.server import routes as routes_mod
+
+        app, client = app_and_client
+        monkeypatch.setattr(routes_mod.time, "sleep", lambda s: None)
+
+        stopped: list[tuple[str, bool]] = []
+        proxy = app.bluesky_proxy
+        proxy.running = True
+        # Record that the lock is actually held when stop_client runs.
+        proxy.stop_client = lambda context="disconnect": stopped.append(
+            (context, connect_lock.locked())
+        )
+
+        resp = client.post("/api/server/disconnect")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["success"] is True
+        assert stopped == [("manual", True)]
+
+    def test_disconnect_waits_for_inflight_connect(self, app_and_client, monkeypatch):
+        # With connect_lock held (a connect in progress), the disconnect
+        # must block until the lock is released instead of interleaving.
+        import threading
+
+        from WebATM.proxy import connect_lock
+        from WebATM.server import routes as routes_mod
+
+        app, client = app_and_client
+        monkeypatch.setattr(routes_mod.time, "sleep", lambda s: None)
+
+        events: list[str] = []
+        proxy = app.bluesky_proxy
+        proxy.running = True
+        proxy.stop_client = lambda context="disconnect": events.append("stopped")
+
+        # A fresh client for the thread: the fixture's context-managed client
+        # must not be driven from another thread.
+        thread_client = app.test_client()
+        connect_lock.acquire()  # simulate an in-flight connect
+        try:
+            t = threading.Thread(
+                target=lambda: thread_client.post("/api/server/disconnect")
+            )
+            t.start()
+            t.join(timeout=0.3)
+            assert events == []  # still waiting on the lock
+        finally:
+            events.append("connect finished")
+            connect_lock.release()
+        t.join(timeout=2)
+        assert events == ["connect finished", "stopped"]

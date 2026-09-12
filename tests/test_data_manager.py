@@ -85,6 +85,25 @@ class TestClearState:
             proxy.data_mgr._clear_state(context)
 
 
+class TestEmitDisconnectedState:
+    def test_connected_teardown_emits_full_picture(self, proxy, fake_socketio):
+        proxy.data_mgr._emit_disconnected_state(was_connected=True)
+
+        assert fake_socketio.last("connection_status")["connected"] is False
+        assert fake_socketio.last("acdata")["id"] == []
+        assert fake_socketio.last("siminfo")["scenname"] == "disconnected"
+        assert fake_socketio.count("server_disconnected") == 1
+        assert fake_socketio.last("node_info")["total_nodes"] == 0
+
+    def test_never_connected_teardown_only_refreshes_nodes(self, proxy, fake_socketio):
+        proxy.data_mgr._emit_disconnected_state(was_connected=False)
+
+        assert fake_socketio.count("connection_status") == 0
+        assert fake_socketio.count("server_disconnected") == 0
+        assert fake_socketio.count("acdata") == 0
+        assert fake_socketio.count("node_info") == 1
+
+
 class TestGetCurrentData:
     def test_structure(self, proxy):
         proxy.sim_data = {"scenname": "demo"}
