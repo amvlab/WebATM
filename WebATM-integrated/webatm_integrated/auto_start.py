@@ -1,24 +1,14 @@
 """Auto-start the bundled BlueSky server and connect the proxy on first boot.
 
-Shipped ONLY in the ``webatm-integrated`` build. In this variant BlueSky runs
-inside the same container as the WebATM backend, so there is no reason to make
-the user open Settings and click Start/Connect before anything works: on
-start-up we spawn the ``bluesky --headless`` process tree and, once its
-command/data ports accept connections, connect the WebATM proxy to it. The user
-then lands on a live, already-connected map.
+Integrated build only: BlueSky runs in the same container, so on start-up we
+spawn the ``bluesky --headless`` process tree and, once its ports accept
+connections, run the same connect sequence as the manual ``/api/server/config``
+route. The user lands on a live, already-connected map. If a manual connect
+wins the race, auto-start stands down (see ``connect_proxy_when_ready``).
 
-This mirrors -- server-side and automatically -- the exact connect sequence the
-manual ``/api/server/config`` route performs (``start_client`` then
-``register_subscribers``; subscribers can only attach once the client exists).
-If the user connects manually while auto-start is still waiting for BlueSky's
-ports, the manual route wins: auto-start detects that the global proxy was
-replaced and stands down instead of reviving the stale boot-time proxy (see
-``connect_proxy_when_ready``).
-
-Opt out with ``WEBATM_AUTO_START=0`` (e.g. for tests, or deployments that want
-the manual Start button to drive the lifecycle). The core ``webatm`` package
-never imports this module; it is reached only via ``webatm_integrated.register``
-(env-guarded on ``WEBATM_INTEGRATED=1``).
+Opt out with ``WEBATM_AUTO_START=0``. The core ``webatm`` package never imports
+this module; it is reached only via ``webatm_integrated.register`` (env-guarded
+on ``WEBATM_INTEGRATED=1``).
 """
 
 from __future__ import annotations
@@ -56,21 +46,18 @@ def claim_first_boot(marker_path: str | None = None) -> bool:
     """Atomically claim the one-shot auto-start for this boot.
 
     Creates the marker file with ``O_CREAT | O_EXCL`` so only the first caller
-    per boot wins; every later caller (e.g. a replaced gunicorn worker re-running
-    ``register()``) stands down, and auto-start never fights the manual
-    Start/Stop controls. The default marker lives on tmpfs (``/dev/shm``) so it
-    survives worker replacement but clears on a fresh container start.
+    per boot wins — a replaced gunicorn worker re-running ``register()`` stands
+    down instead of resurrecting a manually-stopped server. The default marker
+    lives on tmpfs so it clears on a fresh container start.
 
     Args:
-        marker_path (str | None): Marker file location. Defaults to the
-            ``WEBATM_AUTOSTART_MARKER`` environment variable, falling back to
-            ``/dev/shm/webatm_autostart.done``.
+        marker_path (str | None): Marker file location. Defaults to
+            ``WEBATM_AUTOSTART_MARKER``, then ``/dev/shm/webatm_autostart.done``.
 
     Returns:
         bool: True for the first caller to create the marker file, False
             thereafter. If the marker cannot be created at all (e.g. no
-            ``/dev/shm`` on a dev box) it degrades to True, proceeding without
-            the once-per-boot guard.
+            ``/dev/shm``), degrades to True and skips the once-per-boot guard.
     """
     path = marker_path or os.environ.get("WEBATM_AUTOSTART_MARKER", _DEFAULT_MARKER)
     try:
@@ -148,52 +135,35 @@ def connect_proxy_when_ready(
     """Wait for BlueSky to accept connections, then connect the WebATM proxy.
 
     Polls BlueSky's command/data ports until one is listening (or the timeout
-    elapses), then performs the same connect sequence as the manual route:
-    ``start_client`` followed by ``register_subscribers`` (subscribers attach to
-    the client created by ``start_client``).
+    elapses), then performs the same ``start_client`` → ``register_subscribers``
+    sequence as the manual ``/api/server/config`` route. The connect step runs
+    under the shared ``WebATM.proxy.connect_lock`` and stands down if a manual
+    connect replaced the global proxy during the port wait — connecting the
+    stale boot-time proxy would leave a second, subscriber-less ZMQ client
+    alive to broadcast a bogus disconnect later.
 
-    The port wait can span many seconds on a cold start, and during it the user
-    may connect manually: the ``/api/server/config`` route replaces the global
-    proxy with a fresh one and closes the boot-time proxy captured here. The
-    connect step therefore runs under the shared ``WebATM.proxy.connect_lock``
-    and first re-checks that the global proxy is still ``bluesky_proxy``; if a
-    manual connect took over, auto-start stands down. Without this, connecting
-    the stale proxy would leave a second ZMQ client alive with no subscribers
-    (``register_subscribers`` resolves the *global* proxy), whose data-flow
-    timeout would later broadcast a bogus disconnect and blank the map while
-    the real proxy streams fine. Subscribers are likewise registered on
-    ``bluesky_proxy`` explicitly, never on whatever the global happens to be.
-
-    The port probe, subscriber registration, proxy getter, lock and sleep are
-    injectable so this can be unit-tested without a real BlueSky server or
-    wall-clock delays.
+    The collaborators are injectable so this can be unit-tested without a real
+    BlueSky server or wall-clock delays.
 
     Args:
         bluesky_proxy (BlueSkyProxy): Core proxy to connect.
         host (str | None): BlueSky server host. Defaults to the proxy's
-            ``server_ip``, then the ``BLUESKY_SERVER_HOST`` environment
-            variable, then ``"localhost"``.
-        ready_timeout (float): Maximum seconds to wait for a BlueSky port to
-            start listening.
+            ``server_ip``, then ``BLUESKY_SERVER_HOST``, then ``"localhost"``.
+        ready_timeout (float): Maximum seconds to wait for a port to listen.
         poll_interval (float): Seconds to sleep between port probes.
-        is_port_listening (Callable | None): Port probe taking
-            ``(port, timeout, host)``. Defaults to
-            ``WebATM.server.bluesky_server_status.is_port_listening``.
-        register_subscribers (Callable | None): Subscriber-registration hook
-            taking the proxy to attach to. Defaults to
-            ``WebATM.proxy.register_subscribers``.
-        get_proxy (Callable | None): Returns the current global proxy, used to
-            detect a manual connect having replaced it. Defaults to
-            ``WebATM.proxy.get_bluesky_proxy``.
+        is_port_listening (Callable | None): Port probe ``(port, timeout,
+            host)``; defaults to the core implementation.
+        register_subscribers (Callable | None): Subscriber-registration hook;
+            defaults to ``WebATM.proxy.register_subscribers``.
+        get_proxy (Callable | None): Returns the current global proxy;
+            defaults to ``WebATM.proxy.get_bluesky_proxy``.
         lock (AbstractContextManager | None): Lock held around the connect
-            step. Defaults to ``WebATM.proxy.connect_lock``, shared with the
-            manual ``/api/server/config`` route.
-        sleep (Callable | None): Sleep function. Defaults to ``time.sleep``.
+            step; defaults to ``WebATM.proxy.connect_lock``.
+        sleep (Callable | None): Sleep function; defaults to ``time.sleep``.
 
     Returns:
         bool: True if the proxy connect succeeded, False if BlueSky never came
-            up within the timeout, the connect attempt raised, or a manual
-            connect replaced the proxy first.
+            up in time, the connect raised, or a manual connect won the race.
     """
     # Deferred imports: keep this module light for unit tests and avoid pulling
     # the Flask/ZMQ-laden core packages unless we actually connect.

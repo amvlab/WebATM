@@ -3,7 +3,6 @@
 import time
 from typing import Any
 
-from ..bluesky_client import safe_decode
 from ..logger import get_logger
 from .managers import CommandProcessor, ConnectionManager, DataManager, NodeManager
 
@@ -15,7 +14,11 @@ class BlueSkyProxy:
 
     Owns the network client lifecycle, caches incoming simulation data, and
     relays it to connected web clients over Socket.IO. The actual work is
-    delegated to four focused managers following a composition pattern.
+    delegated to four focused managers following a composition pattern; only
+    the methods that routes, Socket.IO handlers, network-event handlers or
+    tests actually call through the proxy are re-exposed here — manager
+    internals are reached via ``connection_mgr``/``node_mgr``/
+    ``command_proc``/``data_mgr`` directly.
 
     Attributes:
         bluesky_client (BlueSkyClient | None): Active network client; created
@@ -29,7 +32,7 @@ class BlueSkyProxy:
         tracked_servers (dict): Known servers keyed by raw server ID.
         cmddict (dict): Command dictionary mapping command names to their
             comma-separated argument signatures (seeded locally, replaced by
-            BlueSky's STACKCMDS broadcast).
+            the active node's STACKCMDS answer).
         connection_mgr (ConnectionManager): Connection lifecycle manager.
         node_mgr (NodeManager): Node/server tracking manager.
         command_proc (CommandProcessor): Command processing manager.
@@ -40,8 +43,7 @@ class BlueSkyProxy:
         """Initialize the proxy with empty caches and its manager modules."""
         logger.debug("Initializing BlueSkyProxy()...")
 
-        # Don't initialize BlueSky client in __init__ - create when needed
-        # Following ZMQ pattern: create context and sockets only when connecting
+        # ZMQ pattern: the client is created on connect and destroyed on close.
         self.bluesky_client = None
 
         self.running = False
@@ -63,10 +65,8 @@ class BlueSkyProxy:
         self.sim_data = {}
         self.echo_data = {}
 
-        # Store POLY data by node ID
+        # Per-node shape stores (only the active node's shapes are displayed)
         self.poly_data_by_node = {}
-
-        # Store POLYLINE data by node ID
         self.polyline_data_by_node = {}
 
         # Throttling for data emission (echo messages are never throttled)
@@ -90,29 +90,21 @@ class BlueSkyProxy:
         # Store current map bounds
         self.current_bbox = None
 
-        # Store server IP address (default to localhost, will be set by main.py if configured)
+        # Server IP address (overridden by main.py / the connect routes)
         self.server_ip = "localhost"
 
-        # Stack command processing (BlueSky client pattern). Values use the
-        # comma-separated arg-signature format that BlueSky's STACKCMDS
-        # broadcast ships (e.g. "acid,type,lat,lon,hdg,alt,spd"); these
-        # seeds get overwritten the moment STACKCMDS arrives.
+        # Command dictionary seeds, in the arg-signature format BlueSky's
+        # STACKCMDS answers ship; replaced by the active node's STACKCMDS.
         self.cmddict = {
             "HELP": "[command]",
             "?": "[command]",
-        }  # Local command dictionary (like Command.cmddict)
+        }
 
         # Initialize managers
         self.connection_mgr = ConnectionManager(self)
         self.node_mgr = NodeManager(self)
         self.command_proc = CommandProcessor(self)
         self.data_mgr = DataManager(self)
-
-        # Connection callbacks will be set up when BlueSky client is initialized
-
-    def _safe_decode(self, data):
-        """Safely decode bytes to a string."""
-        return safe_decode(data)
 
     # ========================================================================
     # Connection Management - Delegate to ConnectionManager
@@ -156,22 +148,6 @@ class BlueSkyProxy:
         """
         return self.connection_mgr.stop_client(context)
 
-    def _start_network_timer(self):
-        """Start the network update timer (exactly like web client's timer does)."""
-        return self.connection_mgr._start_network_timer()
-
-    def _handle_disconnection(self, reason="Unknown"):
-        """Handle disconnection - close connections and clean up state."""
-        return self.connection_mgr._handle_disconnection(reason)
-
-    def _cancel_timers(self):
-        """Cancel all timers with proper cleanup."""
-        return self.connection_mgr._cancel_timers()
-
-    def _close_bluesky_client(self):
-        """Close network client following ZMQ pattern: close sockets first, then context."""
-        return self.connection_mgr._close_bluesky_client()
-
     def close(self):
         """Close all network connections and clear state like BlueSky's close() method."""
         return self.connection_mgr.close()
@@ -183,30 +159,6 @@ class BlueSkyProxy:
     def _get_safe_active_node(self):
         """Get the active node ID safely, returning None if disconnected or invalid."""
         return self.node_mgr._get_safe_active_node()
-
-    def _on_actnode_changed(self, node_id):
-        """Callback when active node changes."""
-        return self.node_mgr._on_actnode_changed(node_id)
-
-    def _on_node_added(self, node_id):
-        """Callback when a new node is discovered."""
-        return self.node_mgr._on_node_added(node_id)
-
-    def _on_server_added(self, server_id):
-        """Callback when a server is discovered."""
-        return self.node_mgr._on_server_added(server_id)
-
-    def _on_node_removed(self, node_id):
-        """Callback when a node is removed."""
-        return self.node_mgr._on_node_removed(node_id)
-
-    def _check_node_shutdown(self):
-        """Check if server is really shut down after all nodes removed."""
-        return self.node_mgr._check_node_shutdown()
-
-    def _on_server_removed(self, server_id):
-        """Callback when a server is removed."""
-        return self.node_mgr._on_server_removed(server_id)
 
     def _emit_node_info(self):
         """Emit current node and server information to connected clients."""
@@ -232,14 +184,6 @@ class BlueSkyProxy:
         """Send a command to the simulation using stack processing."""
         return self.command_proc.send_command(command)
 
-    def _process_stack_commands(self):
-        """Process stack commands from users/GUI following BlueSky client pattern exactly."""
-        return self.command_proc._process_stack_commands()
-
-    def _forward_command(self, cmdline):
-        """Forward command to BlueSky server for validation and execution."""
-        return self.command_proc._forward_command(cmdline)
-
     def forward(self, *cmdlines, target_id=None):
         """Forward one or more stack commands to BlueSky server."""
         return self.command_proc.forward(*cmdlines, target_id=target_id)
@@ -259,22 +203,6 @@ class BlueSkyProxy:
     def _emit_connection_status(self, connected):
         """Emit connection status to connected web clients."""
         return self.data_mgr._emit_connection_status(connected)
-
-    def _emit_cleared_data(self):
-        """Emit cleared data to remove all aircraft and simulation info from the map."""
-        return self.data_mgr._emit_cleared_data()
-
-    def start_backup_timer(self):
-        """Start backup timer to ensure data gets sent regularly."""
-        return self.data_mgr.start_backup_timer()
-
-    def backup_data_emit(self):
-        """Backup method to emit data if subscribers haven't."""
-        return self.data_mgr.backup_data_emit()
-
-    def _clear_state(self, context="disconnect"):
-        """Clear all client state data."""
-        return self.data_mgr._clear_state(context)
 
     def get_current_data(self) -> dict[str, Any]:
         """Get current simulation data for initial page load."""
