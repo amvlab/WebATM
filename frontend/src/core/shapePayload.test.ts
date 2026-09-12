@@ -3,10 +3,37 @@
  * uses for both shape socket events.
  */
 import { describe, it, expect } from 'vitest';
-import { parseShapePayload, hasValidLatLon } from './shapePayload';
+import { parseShapePayload, hasValidLatLon, normalizeShapeColor } from './shapePayload';
 
 const shape = (name: string) => ({ name, lat: [52, 53], lon: [4, 5] });
 type TestShape = ReturnType<typeof shape>;
+
+describe('normalizeShapeColor', () => {
+    it('passes CSS strings through untouched', () => {
+        expect(normalizeShapeColor('#ff0000')).toBe('#ff0000');
+        expect(normalizeShapeColor('rgb(1, 2, 3)')).toBe('rgb(1, 2, 3)');
+    });
+
+    it('converts BlueSky [r, g, b] arrays to rgb() strings', () => {
+        expect(normalizeShapeColor([255, 0, 0])).toBe('rgb(255, 0, 0)');
+        expect(normalizeShapeColor([0, 128, 0])).toBe('rgb(0, 128, 0)');
+        // Extra entries (e.g. an alpha channel) are ignored.
+        expect(normalizeShapeColor([0, 0, 255, 128])).toBe('rgb(0, 0, 255)');
+    });
+
+    it('rounds and clamps array components into 0-255', () => {
+        expect(normalizeShapeColor([12.6, -5, 300])).toBe('rgb(13, 0, 255)');
+    });
+
+    it('returns undefined for absent or malformed values', () => {
+        expect(normalizeShapeColor(undefined)).toBeUndefined();
+        expect(normalizeShapeColor(null)).toBeUndefined();
+        expect(normalizeShapeColor([255, 0])).toBeUndefined();
+        expect(normalizeShapeColor([255, 0, NaN])).toBeUndefined();
+        expect(normalizeShapeColor(['r', 'g', 'b'])).toBeUndefined();
+        expect(normalizeShapeColor(42)).toBeUndefined();
+    });
+});
 
 describe('hasValidLatLon', () => {
     it('accepts shapes with non-empty lat and lon arrays', () => {

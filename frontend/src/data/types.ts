@@ -151,8 +151,7 @@ export interface PolyData {
   name: string;
   lat: number[];
   lon: number[];
-  color?: string;
-  fill?: boolean;
+  color?: string | number[];  // BlueSky COLOUR sends [r, g, b] 0-255 arrays
   top?: number;      // Top altitude in metres (POLYALT/BOX/CIRCLE; amvlab BlueSky only)
   bottom?: number;   // Bottom altitude in metres (POLYALT/BOX/CIRCLE; amvlab BlueSky only)
 }
@@ -165,7 +164,7 @@ export interface PolylineData {
   name: string;
   lat: number[];
   lon: number[];
-  color?: string;
+  color?: string | number[];  // BlueSky COLOUR sends [r, g, b] 0-255 arrays
   width?: number;
 }
 

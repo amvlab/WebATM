@@ -1,11 +1,25 @@
 import { Shape, PolygonShape, PolylineShape, PolyData, PolylineData } from '../data/types';
-import { hasValidLatLon } from './shapePayload';
+import { hasValidLatLon, normalizeShapeColor } from './shapePayload';
 import { logger } from '../utils/Logger';
 
 export type ShapeChangeListener = (shapes: Map<string, Shape>) => void;
 
 /**
- * Convert server PolyData ({name, lat[], lon[], color?, fill?}) to a client
+ * Pair server lat/lon arrays into {lat, lng} points. A malformed payload
+ * with unequal lengths would otherwise produce undefined lng values that
+ * poison the whole GeoJSON source; the unpaired tail is dropped instead.
+ */
+function zipLatLon(lat: number[], lon: number[]): Array<{ lat: number; lng: number }> {
+    const n = Math.min(lat.length, lon.length);
+    const coordinates = new Array<{ lat: number; lng: number }>(n);
+    for (let i = 0; i < n; i++) {
+        coordinates[i] = { lat: lat[i], lng: lon[i] };
+    }
+    return coordinates;
+}
+
+/**
+ * Convert server PolyData ({name, lat[], lon[], color?}) to a client
  * PolygonShape ({type, name, coordinates: {lat, lng}[], ...styling}).
  */
 export function polyDataToShape(data: PolyData, nodeId?: string): PolygonShape {
@@ -13,36 +27,20 @@ export function polyDataToShape(data: PolyData, nodeId?: string): PolygonShape {
     const valid: boolean = hasValidLatLon(data);
     if (!valid) {
         logger.warn('ShapeStore', 'Invalid PolyData received - missing or empty lat/lon arrays:', data);
-        // Minimal valid shape with empty coordinates so callers never crash.
-        return {
-            type: 'polygon',
-            name: data.name || 'unnamed',
-            visible: true,
-            nodeId,
-            coordinates: [],
-            fillColor: data.color,
-            fillOpacity: 0.2,
-            strokeColor: data.color,
-            strokeWidth: 2
-        };
     }
-
-    const coordinates = data.lat.map((lat, i) => ({
-        lat,
-        lng: data.lon[i]
-    }));
+    const color = normalizeShapeColor(data.color);
 
     return {
         type: 'polygon',
-        name: data.name,
+        name: data.name || 'unnamed',
         visible: true,
         nodeId,
-        coordinates,
-        topAltitude: data.top,
-        bottomAltitude: data.bottom,
-        fillColor: data.color,
+        // Invalid input keeps a minimal empty-coordinate shape so callers never crash.
+        coordinates: valid ? zipLatLon(data.lat, data.lon) : [],
+        ...(valid && { topAltitude: data.top, bottomAltitude: data.bottom }),
+        fillColor: color,
         fillOpacity: 0.2,  // Always set visible opacity - display toggle controls visibility
-        strokeColor: data.color,
+        strokeColor: color,
         strokeWidth: 2
     };
 }
@@ -56,30 +54,16 @@ export function polylineDataToShape(data: PolylineData, nodeId?: string): Polyli
     const valid: boolean = hasValidLatLon(data);
     if (!valid) {
         logger.warn('ShapeStore', 'Invalid PolylineData received - missing or empty lat/lon arrays:', data);
-        // Minimal valid shape with empty coordinates so callers never crash.
-        return {
-            type: 'polyline',
-            name: data.name || 'unnamed',
-            visible: true,
-            nodeId,
-            coordinates: [],
-            color: data.color,
-            width: data.width || 2
-        };
     }
-
-    const coordinates = data.lat.map((lat, i) => ({
-        lat,
-        lng: data.lon[i]
-    }));
 
     return {
         type: 'polyline',
-        name: data.name,
+        name: data.name || 'unnamed',
         visible: true,
         nodeId,
-        coordinates,
-        color: data.color,
+        // Invalid input keeps a minimal empty-coordinate shape so callers never crash.
+        coordinates: valid ? zipLatLon(data.lat, data.lon) : [],
+        color: normalizeShapeColor(data.color),
         width: data.width || 2
     };
 }
