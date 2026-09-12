@@ -5,6 +5,22 @@
  * and aircraft-type suggestions; this class captures the shared structure while
  * leaving rendering and selection behaviour to the caller.
  */
+/**
+ * Rank candidates for an autocomplete slot: case-insensitive prefix matches
+ * first, then substring matches. An empty query returns the full list.
+ */
+export function rankByPrefixThenContains(
+    items: readonly string[],
+    upperPartial: string
+): string[] {
+    if (upperPartial.length === 0) return [...items];
+    const startsWith = items.filter(x => x.toUpperCase().startsWith(upperPartial));
+    const contains = items.filter(
+        x => !x.toUpperCase().startsWith(upperPartial) && x.toUpperCase().includes(upperPartial)
+    );
+    return [...startsWith, ...contains];
+}
+
 export interface DropdownOptions<T> {
     /** Parent the dropdown element is appended to. */
     container: HTMLElement;
