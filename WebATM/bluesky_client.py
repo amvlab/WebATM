@@ -423,15 +423,10 @@ class BlueSkyClient:
         self.sock_send = None
         self.poller = None
 
-        # ZMQ sockets are NOT thread-safe, and WebATM drives them from two
-        # threads at once: the network-timer thread (receive()/subscription
-        # discovery) and the Socket.IO command threads (send(), running under
-        # the "threading" async mode). Concurrent access to the same socket
-        # corrupts its internal state and can tear the connection down — exactly
-        # what happens when GUI commands (rapid ADDWPT, FF…) are sent while data
-        # streams in. This reentrant lock serialises every socket operation.
-        # It is reentrant because subscription callbacks fired during receive()
-        # (e.g. on_node_added_request_data → send()) re-enter the guarded path.
+        # ZMQ sockets are NOT thread-safe, but the network-timer thread
+        # (receive) and Socket.IO command threads (send) share them, so every
+        # socket operation is serialised here. Reentrant because callbacks
+        # fired during receive() (e.g. node discovery → send) re-enter it.
         self._sock_lock = threading.RLock()
 
         # Network state tracking
@@ -680,14 +675,18 @@ class BlueSkyClient:
             # Emit to subscribers (follow BlueSky's calling conventions)
             if topic:
                 # Special handling for known BlueSky topics with specific signatures
-                if (
-                    topic == "SIMINFO"
-                    and isinstance(data, (list, tuple))
-                    and len(data) >= 7
-                ):
-                    # SIMINFO expects: speed, simdt, simt, simutc, ntraf, state, scenname
-                    # Pass sender_id as additional parameter to our custom handler
-                    self.subscriber.emit(topic, *data, sender_id=sender_id)
+                if topic == "SIMINFO" and isinstance(data, (list, tuple)):
+                    # SIMINFO carries exactly (speed, simdt, simt, simutc, ntraf,
+                    # state, scenname). Slice to those seven so a newer server
+                    # appending fields cannot break the handler with a TypeError
+                    # on every frame; drop shorter (malformed) payloads instead
+                    # of letting the generic dispatch below misfire on them.
+                    if len(data) >= 7:
+                        self.subscriber.emit(topic, *data[:7], sender_id=sender_id)
+                    else:
+                        logger.debug(
+                            f"Ignoring malformed SIMINFO payload ({len(data)} fields)"
+                        )
                 elif topic in SHAREDSTATE_TOPICS:
                     # Shared-state payloads are [action, data, ...]: record each
                     # wire action ('R', 'U', ...) and the sender on the context,

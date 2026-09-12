@@ -330,6 +330,50 @@ class TestDataMessageDispatch:
         header = b"*" * IDLEN + topic.encode() + sender
         return [header, msgpack.packb(data, use_bin_type=True)]
 
+    def test_siminfo_dispatches_seven_fields_with_header_sender(self):
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe(
+            "SIMINFO", lambda *args, sender_id=None: received.append((args, sender_id))
+        )
+
+        payload = [1.0, 0.05, 12.0, "utc", 3, 1, "demo"]
+        client._process_data_message(self._frame("SIMINFO", payload))
+
+        assert received == [((1.0, 0.05, 12.0, "utc", 3, 1, "demo"), b"NODE\x81")]
+
+    def test_siminfo_extra_fields_from_newer_server_are_sliced_off(self):
+        # A server that appends SIMINFO fields must not break a handler with
+        # the exact seven-parameter signature (TypeError on every frame would
+        # freeze the header clock): only the seven known fields are passed on.
+        client = BlueSkyClient()
+        received = []
+
+        def strict_handler(
+            speed, simdt, simt, simutc, ntraf, state, scenname, sender_id=None
+        ):
+            received.append((speed, scenname, sender_id))
+
+        client.subscriber.subscribe("SIMINFO", strict_handler)
+
+        payload = [1.0, 0.05, 12.0, "utc", 3, 1, "demo", "future-field"]
+        client._process_data_message(self._frame("SIMINFO", payload))
+
+        assert received == [(1.0, "demo", b"NODE\x81")]
+
+    def test_siminfo_short_payload_is_dropped(self):
+        # Fewer than seven fields cannot satisfy the handler signature; the
+        # frame is dropped instead of being misdispatched generically.
+        client = BlueSkyClient()
+        received = []
+        client.subscriber.subscribe(
+            "SIMINFO", lambda *a, **kw: received.append((a, kw))
+        )
+
+        client._process_data_message(self._frame("SIMINFO", [1.0, 0.05]))
+
+        assert received == []
+
     def test_reset_threads_sender_from_header(self):
         # RESET must carry WHICH node reset: the sender comes from the message
         # header, not from the shared context (which still holds the sender of
