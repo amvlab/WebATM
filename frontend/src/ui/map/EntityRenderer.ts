@@ -688,10 +688,9 @@ export abstract class EntityRenderer<T extends EntityData> {
             );
         }
 
-        // Refresh display with new colors
-        if (this.entityData) {
-            this.updateEntityDisplay(this.entityData);
-        }
+        // No feature rebuild here: colors live in sprites (replaced above in
+        // place) and paint expressions keyed on the selected/in_conflict
+        // properties, which don't change with the palette.
     }
 
     /**
