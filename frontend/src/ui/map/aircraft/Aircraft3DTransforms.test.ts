@@ -85,6 +85,23 @@ describe('Aircraft3DTransforms scene origin vs invalid coordinates', () => {
         expect(Math.abs(mesh.position.z)).toBeLessThan(50_000);
     });
 
+    it('traffic straddling the antimeridian keeps the origin near the traffic', () => {
+        const t = makeTransforms();
+        t.updateSceneOrigin(acData([[-17.72, 179.93]]));
+        // The second aircraft is ~20 km away across ±180, forcing a
+        // reposition. A naive longitude mean would put the centroid near
+        // lon 0 — the far side of the planet — and both meshes ~20,000 km
+        // from the origin.
+        t.updateSceneOrigin(acData([[-17.72, 179.93], [-17.87, -179.93]]));
+
+        for (const [lat, lon] of [[-17.72, 179.93], [-17.87, -179.93]] as const) {
+            const mesh = new THREE.Object3D();
+            t.updateMeshTransform(mesh, meshData(lat, lon));
+            expect(Math.abs(mesh.position.x)).toBeLessThan(50_000);
+            expect(Math.abs(mesh.position.z)).toBeLessThan(50_000);
+        }
+    });
+
     it('still repositions onto the centroid of valid traffic', () => {
         const t = makeTransforms();
         t.updateSceneOrigin(acData([[52, 4]]));

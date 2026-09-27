@@ -281,8 +281,8 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
                 this.transforms.applyGlobeCamera(args);
             }
             this.fleet.applyGlobeTransforms();
-        } else if (args && this.transforms.applyMercatorCamera(args)) {
-            this.fleet.enableMatrixAutoUpdate();
+        } else if (args) {
+            this.transforms.applyMercatorCamera(args);
         }
     }
 

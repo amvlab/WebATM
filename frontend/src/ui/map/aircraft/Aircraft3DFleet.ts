@@ -283,16 +283,6 @@ export class Aircraft3DFleet {
     }
 
     /**
-     * Make sure all aircraft use relative positioning (matrixAutoUpdate)
-     * after the mercator camera projection has been applied.
-     */
-    enableMatrixAutoUpdate(): void {
-        this.aircraft.forEach((aircraftMesh) => {
-            aircraftMesh.mesh.matrixAutoUpdate = true;
-        });
-    }
-
-    /**
      * Switch all aircraft meshes between globe and mercator groups
      */
     switchGroups(toGlobe: boolean): void {

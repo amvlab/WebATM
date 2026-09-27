@@ -26,8 +26,13 @@ export function relativePositionMeters(
     const targetMercator = MercatorCoordinate.fromLngLat([target.lng, target.lat]);
 
     const mercatorPerMeter = originMercator.meterInMercatorCoordinateUnits();
+    // Wrap the east offset to the nearest world copy (world width = 1 in
+    // mercator units) so a target just across the antimeridian is meters
+    // away, not a full world width.
+    let dx = targetMercator.x - originMercator.x;
+    dx -= Math.round(dx);
     return {
-        east: (targetMercator.x - originMercator.x) / mercatorPerMeter,
+        east: dx / mercatorPerMeter,
         // Mercator y grows southward; scene north is positive.
         north: (originMercator.y - targetMercator.y) / mercatorPerMeter,
     };
@@ -57,15 +62,25 @@ export function altitudeScaledForOrigin(
  * Expects the scene group to map its local (east, up, north) frame into
  * mercator axes with a plain rotateX(PI/2) and no mirror — keeping every
  * scale positive avoids flipping texture content (e.g. fuselage text).
+ *
+ * When `viewCenterLng` is given, the scene is anchored in the world copy
+ * nearest that longitude: with the view just across the antimeridian from
+ * the origin, the unshifted anchor would be a full world width off screen.
  */
 export function mercatorCameraMatrix(
     mainMatrix: ArrayLike<number>,
-    origin: LngLatPoint
+    origin: LngLatPoint,
+    viewCenterLng?: number
 ): THREE.Matrix4 {
     const originMercator = MercatorCoordinate.fromLngLat([origin.lng, origin.lat]);
+    let originX = originMercator.x;
+    if (viewCenterLng !== undefined) {
+        const centerX = MercatorCoordinate.fromLngLat([viewCenterLng, 0]).x;
+        originX += Math.round(centerX - originX);
+    }
     const scale = originMercator.meterInMercatorCoordinateUnits();
     const local = new THREE.Matrix4()
-        .makeTranslation(originMercator.x, originMercator.y, originMercator.z)
+        .makeTranslation(originX, originMercator.y, originMercator.z)
         .scale(new THREE.Vector3(scale, scale, scale));
     return new THREE.Matrix4().fromArray(mainMatrix).multiply(local);
 }

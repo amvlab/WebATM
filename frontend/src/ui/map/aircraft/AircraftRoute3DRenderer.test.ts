@@ -167,7 +167,7 @@ describe('AircraftRoute3DCustomLayer geometry/material reuse', () => {
         Object.assign(layer as unknown as Record<string, unknown>, {
             scene: new THREE.Scene(),
             mercatorGroup: group,
-            map: { triggerRepaint: vi.fn() },
+            map: { triggerRepaint: vi.fn(), getCenter: () => ({ lng: 4.0, lat: 52.0 }) },
         });
         layer.setSelectedAircraft('AC1');
         layer.setRouteData(ROUTE);

@@ -158,6 +158,27 @@ describe('StateManager display options and overrides', () => {
     });
 });
 
+describe('StateManager.updateAircraftData longitude normalization', () => {
+    // BlueSky only wraps longitude at creation; update_pos integrates it
+    // unbounded, so a crossing aircraft reports e.g. lon 180.067.
+    it('wraps out-of-range longitudes into [-180, 180]', () => {
+        const sm = new StateManager();
+        const data = aircraftData();
+        data.lon = [180.067, 2.3];
+        sm.updateAircraftData(data);
+        const lon = sm.getState().aircraftData!.lon;
+        expect(lon[0]).toBeCloseTo(-179.933, 6);
+        expect(lon[1]).toBe(2.3);
+    });
+
+    it('passes fully in-range frames through untouched', () => {
+        const sm = new StateManager();
+        const data = aircraftData();
+        sm.updateAircraftData(data);
+        expect(sm.getState().aircraftData!.lon).toBe(data.lon);
+    });
+});
+
 describe('StateManager aircraft lookups', () => {
     let sm: StateManager;
 

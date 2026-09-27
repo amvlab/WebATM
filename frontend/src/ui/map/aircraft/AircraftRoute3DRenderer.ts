@@ -438,7 +438,8 @@ export class AircraftRoute3DCustomLayer extends CustomLayer3D {
 
         this.camera.projectionMatrix = mercatorCameraMatrix(
             args.defaultProjectionData.mainMatrix,
-            this.sceneOrigin
+            this.sceneOrigin,
+            this.map.getCenter().lng
         );
     }
 }

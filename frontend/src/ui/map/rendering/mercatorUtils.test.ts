@@ -47,6 +47,41 @@ describe('relativePositionMeters', () => {
     });
 });
 
+describe('antimeridian handling', () => {
+    const WEST = { lng: 179.9, lat: -17.8 };   // just west of ±180
+    const EAST = { lng: -179.9, lat: -17.8 };  // just east of ±180
+
+    it('relativePositionMeters wraps to the nearest world copy across ±180', () => {
+        const rel = relativePositionMeters(WEST, EAST);
+        // 0.2° of longitude at lat -17.8 is ~21 km east — not a world away
+        expect(rel.east).toBeGreaterThan(15_000);
+        expect(rel.east).toBeLessThan(30_000);
+        expect(Math.abs(rel.north)).toBeLessThan(1);
+    });
+
+    it('relativePositionMeters stays antisymmetric across the line', () => {
+        const fwd = relativePositionMeters(WEST, EAST);
+        const back = relativePositionMeters(EAST, WEST);
+        expect(back.east + fwd.east).toBeCloseTo(0, 6);
+        expect(back.north + fwd.north).toBeCloseTo(0, 6);
+    });
+
+    it('mercatorCameraMatrix anchors the origin in the world copy nearest the view', () => {
+        const projected = new THREE.Vector3(0, 0, 0)
+            .applyMatrix4(mercatorCameraMatrix(IDENTITY, WEST, EAST.lng));
+        const viewX = MercatorCoordinate.fromLngLat([EAST.lng, 0]).x;
+        // Anchored next to the view (~0.00056 world units away), not a
+        // full world width to the west.
+        expect(Math.abs(projected.x - viewX)).toBeLessThan(0.001);
+    });
+
+    it('mercatorCameraMatrix keeps the canonical world without a view hint', () => {
+        const projected = new THREE.Vector3(0, 0, 0)
+            .applyMatrix4(mercatorCameraMatrix(IDENTITY, WEST));
+        expect(projected.x).toBeCloseTo(MercatorCoordinate.fromLngLat([WEST.lng, WEST.lat]).x, 12);
+    });
+});
+
 describe('altitudeScaledForOrigin', () => {
     it('returns the altitude unchanged when point and origin coincide', () => {
         expect(altitudeScaledForOrigin(1000, AMS, AMS)).toBeCloseTo(1000, 6);

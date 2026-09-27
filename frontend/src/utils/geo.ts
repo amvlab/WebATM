@@ -3,6 +3,17 @@
  */
 
 /**
+ * Wrap a longitude (or longitude delta) into [-180, 180]. BlueSky only
+ * normalizes longitude at aircraft creation (`cre` in
+ * bluesky/traffic/traffic.py); `update_pos` integrates it unbounded, so an
+ * aircraft that crosses the antimeridian keeps reporting lon beyond ±180.
+ */
+export function normalizeLongitude(lon: number): number {
+    if (lon >= -180 && lon <= 180) return lon;
+    return lon - 360 * Math.round(lon / 360);
+}
+
+/**
  * Aviation bearing from (lat1, lon1) to (lat2, lon2). 0° = North,
  * clockwise. Returns a value in [0, 360).
  */
