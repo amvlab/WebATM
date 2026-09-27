@@ -462,6 +462,69 @@ class TestOutputContent:
         assert body["content"] == log.read_text()
 
 
+class TestBoundedTail:
+    """The tail load scans backwards in blocks instead of reading the whole
+    file (readlines() held an entire multi-hundred-MB CRELOG log in memory
+    on every initial/plot load)."""
+
+    @staticmethod
+    def _write_log(client, text, name="tail.log"):
+        output_dir = client.base_path / "output"
+        output_dir.mkdir(exist_ok=True)
+        log = output_dir / name
+        log.write_bytes(text if isinstance(text, bytes) else text.encode())
+        return log
+
+    @pytest.fixture
+    def small_blocks(self, monkeypatch):
+        # Force multi-block scans with ordinary test files.
+        from WebATM.server import routes
+
+        monkeypatch.setattr(routes, "TAIL_BLOCK_SIZE", 16)
+
+    def test_tail_spanning_multiple_blocks(self, client, small_blocks):
+        lines = [f"row-{i:04d}" for i in range(40)]
+        log = self._write_log(client, "\n".join(lines) + "\n")
+        body = client.get("/api/bluesky/output/content/tail.log?lines=7").get_json()
+        assert body["content"] == "\n".join(lines[-7:]) + "\n"
+        assert body["offset"] == log.stat().st_size
+
+    def test_tail_without_trailing_newline(self, client, small_blocks):
+        log = self._write_log(client, "aaaa\nbbbb\ncccc\ndddd")
+        body = client.get("/api/bluesky/output/content/tail.log?lines=2").get_json()
+        assert body["content"] == "cccc\ndddd"
+        assert body["offset"] == log.stat().st_size
+
+    def test_tail_of_single_unterminated_line(self, client, small_blocks):
+        self._write_log(client, "one long line with no newline at all")
+        body = client.get("/api/bluesky/output/content/tail.log?lines=5").get_json()
+        assert body["content"] == "one long line with no newline at all"
+
+    def test_tail_larger_than_file_returns_everything(self, client, small_blocks):
+        self._write_log(client, "a\nb\nc\n")
+        body = client.get("/api/bluesky/output/content/tail.log?lines=50").get_json()
+        assert body["content"] == "a\nb\nc\n"
+
+    def test_header_still_prepended_across_blocks(self, client, small_blocks):
+        header = "# experiment\n# simt, id, lat\n"
+        rows = "".join(f"{i}.0,KL{i:03d},52.0\n" for i in range(30))
+        log = self._write_log(client, header + rows)
+        body = client.get(
+            "/api/bluesky/output/content/tail.log?lines=4&include_header=1"
+        ).get_json()
+        assert body["content"] == header + "".join(
+            f"{i}.0,KL{i:03d},52.0\n" for i in range(26, 30)
+        )
+        assert body["offset"] == log.stat().st_size
+
+    def test_empty_file(self, client, small_blocks):
+        log = self._write_log(client, b"")
+        body = client.get("/api/bluesky/output/content/tail.log").get_json()
+        assert body["content"] == ""
+        assert body["offset"] == 0
+        assert log.stat().st_size == 0
+
+
 class TestFileStatusConfigured:
     def test_filestatus_after_configuration(self, client):
         resp = client.get("/api/bluesky/filestatus")
