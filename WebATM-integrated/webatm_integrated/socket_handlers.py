@@ -25,6 +25,13 @@ def register_integrated_socket_handlers(socketio, streamer):
 
         Emits the log history to the requesting client only (flask_socketio's
         ``emit`` defaults to the sender's room), marked with ``replay: True``;
-        clients de-duplicate by ``seq``.
+        clients de-duplicate by ``seq`` within the payload's ``stream``.
         """
-        emit(EVENT, {"lines": streamer.history(), "replay": True})
+        emit(
+            EVENT,
+            {
+                "stream": streamer.stream_id,
+                "lines": streamer.history(),
+                "replay": True,
+            },
+        )

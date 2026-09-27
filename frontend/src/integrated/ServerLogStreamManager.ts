@@ -40,6 +40,8 @@ export class ServerLogStreamManager {
     private items: ServerLogLine[] = [];
     private seqSet = new Set<number>();
     private historyRequested = false;
+    /** Backend stream id the buffered seqs belong to (null until first batch). */
+    private streamId: string | null = null;
 
     constructor(socket: Socket | null) {
         this.socket = socket;
@@ -123,6 +125,7 @@ export class ServerLogStreamManager {
         }
         this.socket.on('server_log', (data: ServerLogBatch) => {
             if (data && Array.isArray(data.lines)) {
+                this.trackStream(data.stream);
                 this.ingest(data.lines);
             }
         });
@@ -161,6 +164,18 @@ export class ServerLogStreamManager {
     private deactivate(): void {
         if (this.container) this.container.style.display = 'none';
         this.tabBtn?.classList.remove('active');
+    }
+
+    /**
+     * A changed stream id means the backend restarted: the new boot's seqs
+     * restart at 1 and would all collide with the previous session's, so drop
+     * the stale buffer (its process tree is gone server-side too) before
+     * ingesting the new stream.
+     */
+    private trackStream(stream: string | undefined): void {
+        if (typeof stream !== 'string' || stream === this.streamId) return;
+        if (this.streamId !== null) this.clear();
+        this.streamId = stream;
     }
 
     private ingest(incoming: ServerLogLine[]): void {

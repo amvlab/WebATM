@@ -15,6 +15,7 @@ class FakeStreamer:
 
     def __init__(self, items):
         self._items = items
+        self.stream_id = "boot-1"
 
     def history(self):
         return list(self._items)
@@ -43,6 +44,7 @@ def test_request_log_history_replays_buffered_lines_to_requester():
     payloads = _replay_payloads(client)
     assert len(payloads) == 1
     assert payloads[0]["replay"] is True
+    assert payloads[0]["stream"] == "boot-1"
     assert payloads[0]["lines"] == items
 
 
