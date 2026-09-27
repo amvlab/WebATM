@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as THREE from 'three';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import type { DisplayOptions, RouteData } from '../../../data/types';
+import type { Render3DArgs } from '../rendering/CustomLayer3D';
 import { AircraftRoute3DRenderer, AircraftRoute3DCustomLayer } from './AircraftRoute3DRenderer';
 
 const DISPLAY_OPTIONS = { showRoutes: true } as DisplayOptions;
@@ -220,6 +221,63 @@ describe('AircraftRoute3DCustomLayer geometry/material reuse', () => {
         const scales = spheres(group).map((s) => s.scale.x);
         const base = 60 * 2; // baseRadius * aircraft3DScale
         expect(scales).toEqual([base, base * 1.5, base]);
+    });
+
+    it('survives an aircraft position beyond the poles and hides the route', () => {
+        // BlueSky delivers out-of-range positions (e.g. after MOVE beyond
+        // lat 90); MercatorCoordinate.fromLngLat throws on them.
+        const { layer, group } = makeLayer();
+
+        expect(() => layer.setAircraftState(91, 4.0, 2500)).not.toThrow();
+        expect(group.children).toHaveLength(0);
+    });
+
+    it('does not poison the per-frame camera origin with an invalid position', () => {
+        const { layer } = makeLayer();
+        Object.assign(layer as unknown as Record<string, unknown>, {
+            camera: new THREE.Camera(),
+        });
+
+        try {
+            layer.setAircraftState(91, 4.0, 2500);
+        } catch {
+            // The unfixed layer throws here; either way the render loop
+            // below must keep working.
+        }
+
+        const renderTick = layer as unknown as { updateScene(args: Render3DArgs): void };
+        const mainMatrix = new THREE.Matrix4().toArray();
+        expect(() => renderTick.updateScene({ defaultProjectionData: { mainMatrix } })).not.toThrow();
+    });
+
+    it('rebuilds the route once the aircraft position is valid again', () => {
+        const { layer, group } = makeLayer();
+
+        try {
+            layer.setAircraftState(91, 4.0, 2500);
+        } catch {
+            // Unfixed layer throws; recovery below is what matters.
+        }
+        layer.setAircraftState(52.0, 4.0, 2500);
+
+        expect(spheres(group)).toHaveLength(3);
+        expect(lines(group)).toHaveLength(3);
+    });
+
+    it('skips waypoints with invalid coordinates and keeps the rest', () => {
+        const { layer, group } = makeLayer();
+
+        expect(() =>
+            layer.setRouteData({
+                ...ROUTE,
+                wplat: [52.0, 52.1, 91],
+            } as RouteData)
+        ).not.toThrow();
+
+        // Sphere for the invalid waypoint and both segments touching it
+        // are dropped; everything else still renders.
+        expect(spheres(group)).toHaveLength(2);
+        expect(lines(group)).toHaveLength(2);
     });
 
     it('disposes the shared geometry and cached materials only on cleanup', () => {
