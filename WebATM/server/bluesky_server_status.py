@@ -96,9 +96,9 @@ def register_server_status_routes(app):
                 hostname = request.args.get("hostname")
 
             if not hostname:
-                hostname = getattr(current_app.bluesky_proxy, "server_ip", None)
-            if not hostname:
-                hostname = "localhost"
+                # Same guarded lookup as /status: never assume the proxy exists.
+                proxy = getattr(current_app, "bluesky_proxy", None)
+                hostname = getattr(proxy, "server_ip", None) or "localhost"
 
             listening, message = probe_bluesky_ports(hostname)
             return jsonify(

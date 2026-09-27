@@ -14,7 +14,6 @@ def _seed_cached_state(proxy):
     proxy.tracked_servers[b"SRV\x80\x80"] = {"server_id": b"SRV\x80\x80"}
     proxy.traffic_data = {"id": ["AC1"]}
     proxy.sim_data = {"scenname": "demo"}
-    proxy.echo_data = {"text": "hello"}
     proxy.poly_data_by_node["n1"] = {"polys": {}}
     proxy.polyline_data_by_node["n1"] = {"polys": {}}
     proxy.last_siminfo_emit = 123.0
@@ -30,7 +29,6 @@ def _assert_cached_state_cleared(proxy):
     assert proxy.tracked_servers == {}
     assert proxy.traffic_data == {}
     assert proxy.sim_data == {}
-    assert proxy.echo_data == {}
     assert proxy.poly_data_by_node == {}
     assert proxy.polyline_data_by_node == {}
     assert proxy.last_siminfo_emit == 0

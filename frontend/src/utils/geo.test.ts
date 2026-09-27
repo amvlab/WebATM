@@ -3,7 +3,32 @@
  * modes (ConsoleMapPicker heading picks, aircraft map-draw creation).
  */
 import { describe, it, expect } from 'vitest';
-import { computeBearing, roundedBearing } from './geo';
+import { computeBearing, roundedBearing, normalizeLongitude } from './geo';
+
+describe('normalizeLongitude', () => {
+    it('leaves in-range longitudes untouched (including the ±180 edges)', () => {
+        expect(normalizeLongitude(0)).toBe(0);
+        expect(normalizeLongitude(179.99)).toBe(179.99);
+        expect(normalizeLongitude(180)).toBe(180);
+        expect(normalizeLongitude(-180)).toBe(-180);
+    });
+
+    it('wraps longitudes just past the antimeridian (BlueSky post-crossing values)', () => {
+        expect(normalizeLongitude(180.067)).toBeCloseTo(-179.933, 10);
+        expect(normalizeLongitude(-180.5)).toBeCloseTo(179.5, 10);
+    });
+
+    it('wraps multi-revolution longitudes', () => {
+        expect(normalizeLongitude(540.5)).toBeCloseTo(-179.5, 10);
+        expect(normalizeLongitude(-361)).toBeCloseTo(-1, 10);
+    });
+
+    it('wraps deltas toward the nearest direction (centroid unwrapping)', () => {
+        // -179.9 is 0.2° east of 179.9, not 359.8° west
+        expect(normalizeLongitude(-179.9 - 179.9)).toBeCloseTo(0.2, 10);
+        expect(normalizeLongitude(200)).toBeCloseTo(-160, 10);
+    });
+});
 
 describe('computeBearing', () => {
     it('returns 0 for due north', () => {

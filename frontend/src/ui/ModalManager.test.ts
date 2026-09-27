@@ -131,8 +131,36 @@ describe('ModalManager', () => {
 
     it('clicking the modal backdrop closes it', () => {
         manager.open('alpha-modal');
-        manager.getModal('alpha-modal')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const backdrop = manager.getModal('alpha-modal')!;
+        backdrop.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
+        expect(manager.isOpen('alpha-modal')).toBe(false);
+    });
+
+    it('a drag that starts inside the modal and ends on the backdrop does not close it', () => {
+        manager.open('alpha-modal');
+        const backdrop = manager.getModal('alpha-modal')!;
+        const content = backdrop.querySelector('.modal-content')!;
+
+        // Text selection drag: mousedown on the content, mouseup over the
+        // backdrop — the browser then fires `click` on the common ancestor,
+        // i.e. the backdrop itself.
+        content.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+        expect(manager.isOpen('alpha-modal')).toBe(true);
+    });
+
+    it('re-registering an already-registered modal is a no-op (state survives)', () => {
+        manager.open('alpha-modal');
+        manager.registerModal('alpha-modal');
+
+        expect(manager.isOpen('alpha-modal')).toBe(true);
+        expect(manager.getOpenModal()).toBe('alpha-modal');
+
+        // Escape still works: the open state was not clobbered.
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
         expect(manager.isOpen('alpha-modal')).toBe(false);
     });
 

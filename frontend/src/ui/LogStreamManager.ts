@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { onDOMReady } from '../utils/dom';
 
 interface StreamContentResponse {
     success: boolean;
@@ -58,12 +59,7 @@ export class LogStreamManager {
 
     private init(): void {
         if (this.isInitialized) return;
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initializeElements());
-        } else {
-            this.initializeElements();
-        }
+        onDOMReady(() => this.initializeElements());
     }
 
     private initializeElements(): void {

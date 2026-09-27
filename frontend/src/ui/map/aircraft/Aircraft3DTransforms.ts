@@ -3,6 +3,7 @@ import type { Map as MapLibreMap } from 'maplibre-gl';
 import { altitudeScaledForOrigin, mercatorCameraMatrix, relativePositionMeters } from '../rendering/mercatorUtils';
 import type { LngLatPoint } from '../rendering/mercatorUtils';
 import { isValidCoordinate } from '../../../utils/maplibre';
+import { normalizeLongitude } from '../../../utils/geo';
 import { getGlobeModelMatrix } from '../rendering/globeMatrix';
 import type { Render3DArgs } from '../rendering/CustomLayer3D';
 import type { AircraftData, DisplayOptions } from '../../../data/types';
@@ -118,14 +119,18 @@ export class Aircraft3DTransforms {
     private repositionSceneOrigin(coords: LngLatPoint[]): boolean {
         if (coords.length === 0) return false;
 
+        // Average longitudes unwrapped around the current origin: a naive
+        // mean of traffic straddling the antimeridian (179.9 and -179.9)
+        // would land on the far side of the planet.
+        const refLng = this.sceneOrigin!.lng;
         let sumLat = 0;
         let sumLng = 0;
         for (const c of coords) {
             sumLat += c.lat;
-            sumLng += c.lng;
+            sumLng += refLng + normalizeLongitude(c.lng - refLng);
         }
         const newOrigin = {
-            lng: sumLng / coords.length,
+            lng: normalizeLongitude(sumLng / coords.length),
             lat: sumLat / coords.length
         };
 
@@ -277,18 +282,15 @@ export class Aircraft3DTransforms {
             const lateralMirrorFix = new THREE.Matrix4().makeScale(1, 1, -1);
             l.multiply(lateralMirrorFix);
 
-            // Rebase onto the globe origin so the mesh matrix keeps small
-            // translations (precision; see globeOriginMatrixInverse). The
-            // origin matrix is reapplied via the camera projection, so the
-            // product is mathematically unchanged. When the inverse isn't
-            // available yet (first globe frame), the absolute matrix pairs
-            // with the mainMatrix-only camera fallback in applyGlobeCamera.
+            // Rebase onto the globe origin (see globeOriginMatrixInverse);
+            // the origin matrix is reapplied via the camera projection, so
+            // the product is unchanged. On the first globe frame the inverse
+            // is not set yet and the absolute matrix pairs with the
+            // mainMatrix-only camera fallback in applyGlobeCamera.
             if (this.globeOriginMatrixInverse) {
                 l.premultiply(this.globeOriginMatrixInverse);
             }
 
-            // Set the transform - the camera projection matrix is set per
-            // frame in applyGlobeCamera
             mesh.matrix = l;
             mesh.matrixAutoUpdate = false;
 
@@ -324,12 +326,9 @@ export class Aircraft3DTransforms {
     }
 
     /**
-     * Per-frame camera projection for globe mode. Each aircraft mesh gets an
-     * origin-relative globe model transform, and the shared origin matrix is
-     * folded into the camera projection here. Both factors are combined on
-     * the CPU in double precision, so the GPU only ever sees small mesh
-     * translations — this is what keeps small aircraft from collapsing into
-     * stringy float32 artifacts.
+     * Per-frame camera projection for globe mode: folds the shared origin
+     * matrix into the projection in double precision so the GPU only sees
+     * small mesh translations (large ones collapse into float32 artifacts).
      */
     applyGlobeCamera(args: Render3DArgs): void {
         const mainMatrix = new THREE.Matrix4().fromArray(
@@ -352,15 +351,16 @@ export class Aircraft3DTransforms {
     }
 
     /**
-     * Per-frame camera projection for mercator mode. Returns false when no
-     * scene origin exists yet (nothing to project against).
+     * Per-frame camera projection for mercator mode. A no-op before a scene
+     * origin exists (no meshes exist then either; the default mainMatrix
+     * projection set in render() stays in effect).
      */
-    applyMercatorCamera(args: Render3DArgs): boolean {
-        if (!this.sceneOrigin) return false;
+    applyMercatorCamera(args: Render3DArgs): void {
+        if (!this.sceneOrigin) return;
         this.deps.getCamera().projectionMatrix = mercatorCameraMatrix(
             args.defaultProjectionData.mainMatrix,
-            this.sceneOrigin
+            this.sceneOrigin,
+            this.deps.getMap()?.getCenter().lng
         );
-        return true;
     }
 }

@@ -69,6 +69,22 @@ def test_burst_coalesces_into_one_task_and_chunks_by_batch_max():
     assert all(event == EVENT for event, _ in sio.emitted)
 
 
+def test_every_payload_carries_this_streamers_stream_id():
+    """Seqs restart at 1 when the backend (and its streamer) is replaced, so
+    the stream id is what lets a client with an old session's seqs tell a
+    fresh stream from a replay instead of de-duplicating the new boot away."""
+    sio = FakeSocketIO()
+    streamer = LogStreamer(sio)
+
+    for line in ("one", "two"):
+        streamer.feed_line(line)
+    sio.run_all()
+
+    assert streamer.stream_id
+    assert all(payload["stream"] == streamer.stream_id for _, payload in sio.emitted)
+    assert LogStreamer(FakeSocketIO()).stream_id != streamer.stream_id
+
+
 def test_history_is_bounded_to_max_history():
     sio = FakeSocketIO()
     streamer = LogStreamer(sio, max_history=3)

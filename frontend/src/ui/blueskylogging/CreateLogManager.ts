@@ -221,11 +221,9 @@ export class CreateLogManager {
     }
 
     public openDialog(): void {
-        // The modal auto-registers on DOM ready, but make sure (cheap and
-        // idempotent) so open() cannot fail on ordering.
-        if (!modalManager.getRegisteredModals().includes(CreateLogManager.MODAL_ID)) {
-            modalManager.registerModal(CreateLogManager.MODAL_ID);
-        }
+        // The modal auto-registers on DOM ready, but make sure (idempotent)
+        // so open() cannot fail on ordering.
+        modalManager.registerModal(CreateLogManager.MODAL_ID);
         this.showError(null);
         this.setCustomStatus(null);
         this.updatePreview();

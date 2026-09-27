@@ -29,6 +29,7 @@ export interface EntityData {
  * Extends EntityData with aircraft-specific properties
  */
 export interface AircraftData extends EntityData {
+    simt?: number;          // Sim time the frame was sampled at (seconds)
     tas: number[];          // True Airspeed
     cas?: number[];         // Calibrated Airspeed (optional - may not be sent by backend yet)
     gs?: number[];          // Ground Speed (optional - may not be sent by backend yet)
@@ -302,7 +303,6 @@ export interface AppState {
 export interface InitialData {
   sim_data?: SimInfo;
   traffic_data?: AircraftData;
-  echo_data?: Record<string, unknown>;
   cmddict?: CommandDict;
   poly_data?: ShapeBatchData<PolyData>;
   polyline_data?: ShapeBatchData<PolylineData>;
@@ -391,6 +391,7 @@ export interface LogUpdateData {
  * One line of live server-process log output (integrated build only).
  * `seq` is a monotonic, gap-free sequence number assigned server-side at
  * ingest; the client renders in `seq` order and de-duplicates replays by it.
+ * `seq` is only meaningful within one `ServerLogBatch.stream`.
  */
 export interface ServerLogLine {
   seq: number;
@@ -400,11 +401,15 @@ export interface ServerLogLine {
 
 /**
  * Batch of server log lines pushed over the `server_log` Socket.IO event.
- * `replay` marks a history replay sent to a late-joining client.
+ * `replay` marks a history replay sent to a late-joining client. `stream`
+ * identifies the backend boot that produced the lines: it changes when the
+ * backend restarts (seqs restart at 1), telling the client to reset its
+ * buffer instead of de-duplicating the new boot's lines away.
  */
 export interface ServerLogBatch {
   lines: ServerLogLine[];
   replay?: boolean;
+  stream?: string;
 }
 
 // Settings Modal Types

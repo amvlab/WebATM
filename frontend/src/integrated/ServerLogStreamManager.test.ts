@@ -113,6 +113,31 @@ describe('ServerLogStreamManager', () => {
         expect(renderedLines()).toEqual(['line 1', 'line 2', 'line 3', 'line 4']);
     });
 
+    it('resets the pane when the stream id changes (backend restarted)', () => {
+        const emit = serverLogListener(socket);
+        emit({ lines: lines(1, 2, 3), stream: 'boot-1' });
+        expect(renderedLines()).toEqual(['line 1', 'line 2', 'line 3']);
+
+        // New backend boot: seqs restart at 1 and all collide with boot-1's.
+        // The stream id change must reset the buffer, not drop the lines.
+        emit({
+            lines: [
+                { seq: 1, t: 0, line: 'boot-2 banner' },
+                { seq: 2, t: 0, line: 'boot-2 ready' },
+            ],
+            stream: 'boot-2',
+            replay: true,
+        });
+        expect(renderedLines()).toEqual(['boot-2 banner', 'boot-2 ready']);
+    });
+
+    it('still de-duplicates replay overlap within one stream', () => {
+        const emit = serverLogListener(socket);
+        emit({ lines: lines(1, 2), stream: 'boot-1' });
+        emit({ lines: lines(1, 2, 3), stream: 'boot-1', replay: true });
+        expect(renderedLines()).toEqual(['line 1', 'line 2', 'line 3']);
+    });
+
     it('merges an out-of-order history replay into seq order', () => {
         const emit = serverLogListener(socket);
         emit({ lines: lines(5, 6) });

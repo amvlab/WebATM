@@ -5,7 +5,7 @@ import type { Render3DArgs } from '../rendering/CustomLayer3D';
 import { altitudeScaledForOrigin, mercatorCameraMatrix, relativePositionMeters } from '../rendering/mercatorUtils';
 import type { RouteData, DisplayOptions } from '../../../data/types';
 import { logger } from '../../../utils/Logger';
-import { safeRemoveLayer } from '../../../utils/maplibre';
+import { isValidCoordinate, safeRemoveLayer } from '../../../utils/maplibre';
 import { clampActiveWaypoint } from '../../../utils/route';
 
 /**
@@ -256,15 +256,22 @@ export class AircraftRoute3DCustomLayer extends CustomLayer3D {
         const iactwp = clampActiveWaypoint(data.iactwp, data.wplat.length);
 
         const altFor = (i: number): number => {
-            const wpalt = data.wpalt && data.wpalt[i] !== undefined ? data.wpalt[i] : -1;
+            const wpalt = data.wpalt?.[i] ?? -1;
             return wpalt > 0 ? wpalt : aircraft.alt;
         };
 
         const aircraftPos = this.toScenePos(aircraft.lat, aircraft.lon, aircraft.alt);
 
-        const waypointPositions: THREE.Vector3[] = [];
+        // Invalid waypoints (BlueSky delivers out-of-range positions, and
+        // MercatorCoordinate.fromLngLat throws on them) leave holes so
+        // indices stay aligned with iactwp; lines and spheres skip them.
+        const waypointPositions: Array<THREE.Vector3 | undefined> = [];
         for (let i = 0; i < data.wplat.length; i++) {
-            waypointPositions.push(this.toScenePos(data.wplat[i], data.wplon[i], altFor(i)));
+            waypointPositions.push(
+                isValidCoordinate(data.wplat[i], data.wplon[i])
+                    ? this.toScenePos(data.wplat[i], data.wplon[i], altFor(i))
+                    : undefined
+            );
         }
 
         const showLines = this.displayOptions.showRoutes && this.displayOptions.showRouteLines;
@@ -287,6 +294,9 @@ export class AircraftRoute3DCustomLayer extends CustomLayer3D {
         if (!this.selectedAircraftId) return false;
         if (this.routeData.acid !== this.selectedAircraftId) return false;
         if (!this.aircraftState) return false;
+        // Hide the route while the aircraft position is invalid, mirroring
+        // the 3D aircraft layer (which drops the mesh in that state).
+        if (!isValidCoordinate(this.aircraftState.lat, this.aircraftState.lon)) return false;
         if (!this.routeData.wplat || this.routeData.wplat.length === 0) return false;
         if (this.routeData.wplon?.length !== this.routeData.wplat.length) return false;
         return true;
@@ -294,7 +304,7 @@ export class AircraftRoute3DCustomLayer extends CustomLayer3D {
 
     private buildLines(
         aircraftPos: THREE.Vector3,
-        waypointPositions: THREE.Vector3[],
+        waypointPositions: Array<THREE.Vector3 | undefined>,
         iactwp: number
     ): void {
         if (!this.mercatorGroup) return;
@@ -302,10 +312,9 @@ export class AircraftRoute3DCustomLayer extends CustomLayer3D {
         const activeColor = this.parseColor(this.displayOptions.routeLinesColor, 0x00aaff);
 
         // Aircraft -> active waypoint (solid, active color)
-        if (waypointPositions[iactwp]) {
-            this.lineObjects.push(
-                this.makeLine([aircraftPos, waypointPositions[iactwp]], activeColor)
-            );
+        const activePos = waypointPositions[iactwp];
+        if (activePos) {
+            this.lineObjects.push(this.makeLine([aircraftPos, activePos], activeColor));
         }
 
         // Passed segments: waypoint[i] -> waypoint[i+1] for i < iactwp (grey)
@@ -327,7 +336,7 @@ export class AircraftRoute3DCustomLayer extends CustomLayer3D {
         }
     }
 
-    private buildSpheres(waypointPositions: THREE.Vector3[], iactwp: number): void {
+    private buildSpheres(waypointPositions: Array<THREE.Vector3 | undefined>, iactwp: number): void {
         if (!this.mercatorGroup) return;
 
         const baseRadius = 60 * (this.displayOptions.aircraft3DScale || 2.0);
@@ -336,6 +345,9 @@ export class AircraftRoute3DCustomLayer extends CustomLayer3D {
         this.unitSphereGeometry ??= new THREE.SphereGeometry(1, 16, 12);
 
         for (let i = 0; i < waypointPositions.length; i++) {
+            const position = waypointPositions[i];
+            if (!position) continue;
+
             const isActive = i === iactwp;
             const isPassed = i < iactwp;
 
@@ -348,7 +360,7 @@ export class AircraftRoute3DCustomLayer extends CustomLayer3D {
 
             const mesh = new THREE.Mesh(this.unitSphereGeometry, this.sphereMaterial(color));
             mesh.scale.setScalar(radius);
-            mesh.position.copy(waypointPositions[i]);
+            mesh.position.copy(position);
             mesh.frustumCulled = false;
 
             this.mercatorGroup.add(mesh);
@@ -411,10 +423,12 @@ export class AircraftRoute3DCustomLayer extends CustomLayer3D {
     /**
      * Scene origin tracks the current aircraft position when available,
      * so the route geometry stays close to the origin and matches the
-     * aircraft 3D layer's relative-positioning scheme.
+     * aircraft 3D layer's relative-positioning scheme. Only valid positions
+     * are adopted: the origin feeds mercatorCameraMatrix every render
+     * frame, so a poisoned origin would throw inside MapLibre's render loop.
      */
     private updateSceneOrigin(): void {
-        if (this.aircraftState) {
+        if (this.aircraftState && isValidCoordinate(this.aircraftState.lat, this.aircraftState.lon)) {
             this.sceneOrigin = {
                 lng: this.aircraftState.lon,
                 lat: this.aircraftState.lat
@@ -438,7 +452,8 @@ export class AircraftRoute3DCustomLayer extends CustomLayer3D {
 
         this.camera.projectionMatrix = mercatorCameraMatrix(
             args.defaultProjectionData.mainMatrix,
-            this.sceneOrigin
+            this.sceneOrigin,
+            this.map.getCenter().lng
         );
     }
 }

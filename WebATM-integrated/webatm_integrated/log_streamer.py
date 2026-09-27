@@ -5,6 +5,12 @@ browsers over the ``server_log`` Socket.IO event. Ordering is guaranteed by a
 monotonic sequence number assigned under a lock at ingest, before any async
 hop. Bursts (for example, creating many nodes at once) are coalesced into
 batches so a flood of lines cannot overwhelm Socket.IO.
+
+Every payload also carries a per-streamer ``stream`` id. Sequence numbers
+restart at 1 whenever the backend (and with it this streamer) is replaced --
+a container restart, a recycled gunicorn worker -- while an open browser tab
+keeps the old session's seqs and de-duplicates on them. Without the stream id
+the new boot's lines would collide and be silently dropped client-side.
 """
 
 from __future__ import annotations
@@ -12,6 +18,7 @@ from __future__ import annotations
 import collections
 import threading
 import time
+import uuid
 
 EVENT = "server_log"
 
@@ -35,6 +42,9 @@ class LogStreamer:
             batch_max (int): Maximum lines per emitted batch chunk.
         """
         self._sio = socketio
+        # Identifies this streamer (and thus this backend boot) in every
+        # payload, so clients can tell a fresh stream from a replay.
+        self.stream_id = uuid.uuid4().hex
         self._lock = threading.Lock()
         self._history: collections.deque[dict] = collections.deque(maxlen=max_history)
         self._pending: list[dict] = []
@@ -84,7 +94,7 @@ class LogStreamer:
                         return
                 for start in range(0, len(batch), self._batch_max):
                     chunk = batch[start : start + self._batch_max]
-                    self._sio.emit(EVENT, {"lines": chunk})
+                    self._sio.emit(EVENT, {"stream": self.stream_id, "lines": chunk})
         except BaseException:
             # A raising emit/sleep must not leave the flag stuck True: feed_line
             # only schedules while it is False, so the stream would go silent

@@ -139,6 +139,7 @@ export class ShapeRenderer {
             type: 'symbol',
             layout: {
                 'text-field': ['get', 'name'],
+                'text-font': ['Open Sans Regular'],
                 'text-size': 12,
                 'text-anchor': 'center',
                 visibility: (displayOptions.showShapes && displayOptions.showShapeLabels) ? 'visible' : 'none'

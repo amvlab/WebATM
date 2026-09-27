@@ -330,16 +330,29 @@ class TestStatechangeActiveNodeFiltering:
 
 
 class TestEchoHandler:
-    def test_stores_and_emits_echo(self, proxy, fake_socketio):
+    def test_emits_echo_with_hex_sender(self, proxy, fake_socketio):
         echo("hello world", flags=1, sender_id=b"NODE1")
-        assert proxy.echo_data["text"] == "hello world"
-        assert proxy.echo_data["flags"] == 1
-        assert proxy.echo_data["sender"] == "NODE1"
+        payload = fake_socketio.last("echo")
+        assert payload["text"] == "hello world"
+        assert payload["flags"] == 1
+        # Same hex form as node_info payloads and the nodes panel.
+        assert payload["sender"] == b"NODE1".hex()
         assert fake_socketio.count("echo") == 1
 
-    def test_none_text_becomes_empty_string(self, proxy):
+    def test_bluesky_error_bitmask_maps_to_error_level(self, proxy, fake_socketio):
+        # BS_ARGERR=1, BS_FUNERR=2, BS_CMDERR=4: all mark failed commands, so
+        # each must render as an error (1), never warning (2) or info (0).
+        for bs_flags in (1, 2, 4):
+            echo("command failed", flags=bs_flags)
+            assert fake_socketio.last("echo")["flags"] == 1
+
+    def test_ok_flags_stay_info(self, proxy, fake_socketio):
+        echo("all good", flags=0)
+        assert fake_socketio.last("echo")["flags"] == 0
+
+    def test_none_text_becomes_empty_string(self, proxy, fake_socketio):
         echo(None)
-        assert proxy.echo_data["text"] == ""
+        assert fake_socketio.last("echo")["text"] == ""
 
     def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
         proxy.allow_reconnection = False
@@ -428,17 +441,17 @@ class TestStackReceivedHandler:
         on_stack_received("HELP")
         # Bare HELP is answered locally -> info echo emitted.
         assert fake_socketio.count("echo") == 1
-        assert proxy.echo_data["flags"] == 0
-        assert "bluesky web client" in proxy.echo_data["text"].lower()
+        echo_payload = fake_socketio.last("echo")
+        assert echo_payload["flags"] == 0
+        assert "bluesky web client" in echo_payload["text"].lower()
 
-    def test_gui_only_command_reports_warning_not_error(self, proxy):
+    def test_gui_only_command_reports_warning_not_error(self, proxy, fake_socketio):
         # A scenario-file GUI command (e.g. PAN) forwarded by the server is a
         # benign no-op for the web client: warning (flags=2), never an error.
         on_stack_received("PAN EHAM")
-        assert (
-            proxy.echo_data["text"] == "PAN: not supported by the web client (ignored)"
-        )
-        assert proxy.echo_data["flags"] == 2
+        echo_payload = fake_socketio.last("echo")
+        assert echo_payload["text"] == "PAN: not supported by the web client (ignored)"
+        assert echo_payload["flags"] == 2
 
     def test_list_of_commands(self, proxy, fake_socketio):
         on_stack_received(["HELP", "?"])

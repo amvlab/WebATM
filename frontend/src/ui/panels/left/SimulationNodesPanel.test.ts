@@ -201,6 +201,96 @@ describe('SimulationNodesPanel', () => {
 
             expect(emitted).toEqual([['set_active_node', { node_id: 'b' }]]);
         });
+
+        it('clicking the already-active node is a no-op', () => {
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+
+            items()[0].click();
+            items()[0].click();
+
+            expect(emitted).toEqual([]);
+        });
+
+        it('clicking the target of a pending switch does not re-emit', () => {
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+
+            items()[1].click();
+            items()[1].click();
+
+            expect(emitted).toEqual([['set_active_node', { node_id: 'b' }]]);
+        });
+    });
+
+    describe('pending node switch', () => {
+        const emitted: Array<[string, unknown]> = [];
+        const fakeSocket = {
+            connected: true,
+            on: vi.fn(),
+            off: vi.fn(),
+            emit: (event: string, payload: unknown) => emitted.push([event, payload]),
+        };
+        const fakeSocketManager = {
+            getSocket: () => fakeSocket,
+        } as unknown as SocketManager;
+
+        beforeEach(() => {
+            emitted.length = 0;
+            panel.setSocketManager(fakeSocketManager);
+        });
+
+        it('keeps the selector on the requested node while the switch is unconfirmed', () => {
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+
+            items()[1].click();
+            // A periodic node_info still reporting the old active node must
+            // not snap the selector back to it.
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+
+            expect(selector.value).toBe('b');
+        });
+
+        it('clears the pending switch once the server confirms it', () => {
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+            items()[1].click();
+
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'b'));
+            expect(selector.value).toBe('b');
+
+            // Pending is resolved: a later change of the active node is
+            // followed again.
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+            expect(selector.value).toBe('a');
+        });
+
+        it('gives up on an unanswered switch after the timeout', () => {
+            const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+            items()[1].click();
+
+            nowSpy.mockReturnValue(1_000_000 + 5000);
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+
+            expect(selector.value).toBe('a');
+            nowSpy.mockRestore();
+        });
+
+        it('abandons the pending switch when the target node disappears', () => {
+            panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+            items()[1].click();
+
+            panel.update(nodeInfo({ a: node(1) }, 'a'));
+
+            expect(selector.value).toBe('a');
+        });
+    });
+
+    it('destroy() removes the rendered node cards', () => {
+        panel.update(nodeInfo({ a: node(1), b: node(2) }, 'a'));
+        expect(items()).toHaveLength(2);
+
+        panel.destroy();
+
+        expect(items()).toEqual([]);
     });
 
     describe('socket wiring', () => {

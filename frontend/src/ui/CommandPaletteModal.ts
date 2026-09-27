@@ -50,12 +50,9 @@ export class CommandPaletteModal {
             onSelect: () => this.close(),
         });
 
-        // ModalManager auto-registers any element matching `[id$="-modal"]`
-        // during its DOMContentLoaded pass, but if the element is absent at
-        // that moment we re-register here to be safe.
-        if (!modalManager.getModal(COMMAND_PALETTE_MODAL_ID)) {
-            modalManager.registerModal(COMMAND_PALETTE_MODAL_ID);
-        }
+        // In case the element was absent during ModalManager's DOM-ready
+        // auto-registration pass (registerModal is idempotent).
+        modalManager.registerModal(COMMAND_PALETTE_MODAL_ID);
 
         modalManager.on(COMMAND_PALETTE_MODAL_ID, (event) => {
             if (event === 'open') {

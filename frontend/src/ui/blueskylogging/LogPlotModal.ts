@@ -134,9 +134,7 @@ export class LogPlotModal {
 
     /** Open the modal and plot the output file at `filepath`. */
     public open(filepath: string): void {
-        if (!modalManager.getRegisteredModals().includes(LogPlotModal.MODAL_ID)) {
-            modalManager.registerModal(LogPlotModal.MODAL_ID);
-        }
+        modalManager.registerModal(LogPlotModal.MODAL_ID);
         this.filepath = filepath;
         this.hiddenSeries.clear();
         if (this.filenameEl) {

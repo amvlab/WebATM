@@ -73,7 +73,7 @@ class BlueSkyProcessManager:
         self._on_exit = on_exit
         self._spawn = spawn or _default_spawn
         self._cmd = cmd or ["bluesky", "--headless"]
-        self._state = "stopped"  # stopped | starting | running | stopping
+        self._state = "stopped"  # stopped | running | stopping
 
     # ---- lifecycle ------------------------------------------------------
 
@@ -94,10 +94,9 @@ class BlueSkyProcessManager:
         with self._lock:
             stopping_proc = self._proc if self._state == "stopping" else None
         if stopping_proc is not None:
-            # A concurrent stop() owns this process's shutdown; treating it as
-            # "already running" would return a pid that is about to die. Wait
-            # out the stop (its worst case is escalate_after + the 5s SIGKILL
-            # wait), then start fresh below.
+            # A concurrent stop() owns this process's shutdown; wait it out
+            # (worst case escalate_after + the 5s SIGKILL wait) rather than
+            # report a pid that is about to die as "already running".
             try:
                 stopping_proc.wait(timeout=15)
             except subprocess.TimeoutExpired:
@@ -115,7 +114,6 @@ class BlueSkyProcessManager:
                     "pid": self._proc.pid,
                     "message": "BlueSky server already running",
                 }
-            self._state = "starting"
             # PYTHONUNBUFFERED keeps the server's (and inherited children's)
             # stdout line-buffered so log lines arrive promptly and in order.
             env = dict(os.environ, PYTHONUNBUFFERED="1")
@@ -201,9 +199,8 @@ class BlueSkyProcessManager:
         try:
             return self._terminate(proc, sig, escalate_after)
         except BaseException:
-            # Never leave the state stranded at "stopping": start() waits out a
-            # shutdown in that state, so it would block for 15s and then refuse
-            # to start, with no control surface able to clear it.
+            # Never leave the state stranded at "stopping": start() would wait
+            # 15s and then refuse, with no control surface able to clear it.
             self._settle(proc)
             raise
 

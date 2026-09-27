@@ -177,6 +177,38 @@ describe('BlueSkyFileManager upload uses the stored filename', () => {
     });
 });
 
+describe('BlueSkyFileManager status toast escaping', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        buildDom();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({ json: async () => ({ configured: false }) }),
+        );
+    });
+
+    afterEach(() => {
+        document.body.innerHTML = '';
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    it('renders an HTML-named file inertly in the "Selected:" toast', async () => {
+        await import('./BlueSkyFileManager');
+
+        const fileInput = document.getElementById('file-input') as HTMLInputElement;
+        const evilName = '<img src=x onerror=window.close()>.scn';
+        const file = new File(['x'], evilName, { type: 'text/plain' });
+        Object.defineProperty(fileInput, 'files', { get: () => [file], configurable: true });
+        fileInput.dispatchEvent(new Event('change'));
+
+        const status = document.getElementById('upload-status') as HTMLElement;
+        // The filename must land as text, not as parsed markup.
+        expect(status.querySelector('img')).toBeNull();
+        expect(status.textContent).toContain(`Selected: ${evilName}`);
+    });
+});
+
 describe('BlueSkyFileManager drop zone highlight', () => {
     beforeEach(() => {
         vi.resetModules();

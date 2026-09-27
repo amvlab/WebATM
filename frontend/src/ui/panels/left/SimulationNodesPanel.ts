@@ -28,11 +28,20 @@ interface NodeItemRefs {
     idLine: HTMLElement;
 }
 
+/** How long an unconfirmed node switch may keep the selector on its target. */
+const PENDING_SWITCH_TIMEOUT_MS = 4000;
+
 export class SimulationNodesPanel extends BasePanel {
     private socketManager: SocketManager | null = null;
     private nodeData: NodeInfo | null = null;
     private nodeItems: Map<string, NodeItemRefs> = new Map();
     private readonly nodeInfoHandler = (data: NodeInfo): void => this.handleNodeInfo(data);
+
+    // A switch the user requested that the server has not confirmed yet.
+    // Periodic node_info updates still report the old active node until the
+    // switch lands; without this the selector snaps back to the old node for
+    // a moment on every switch (worse on high-latency servers).
+    private pendingSwitch: { nodeId: string; expires: number } | null = null;
 
     // DOM elements
     private totalNodesSpan: HTMLElement | null = null;
@@ -50,7 +59,6 @@ export class SimulationNodesPanel extends BasePanel {
      * Initialize the panel and set up event listeners
      */
     protected onInit(): void {
-        // Get DOM elements
         this.totalNodesSpan = this.getElementById('total-nodes');
         this.activeNodeSpan = this.getElementById('active-node-display');
         this.nodeSelector = this.getElementById('node-selector') as HTMLSelectElement;
@@ -58,7 +66,6 @@ export class SimulationNodesPanel extends BasePanel {
         this.refreshButton = this.getElementById('refresh-nodes');
         this.addNodeButton = this.getElementById('add-node');
 
-        // Set up event listeners
         this.setupEventListeners();
 
         logger.debug('SimulationNodesPanel', 'SimulationNodesPanel initialized');
@@ -68,7 +75,6 @@ export class SimulationNodesPanel extends BasePanel {
      * Set up event listeners for panel controls
      */
     private setupEventListeners(): void {
-        // Node selector dropdown
         if (this.nodeSelector) {
             this.addEventListener(this.nodeSelector, 'change', (e) => {
                 const target = e.target as HTMLSelectElement;
@@ -76,14 +82,12 @@ export class SimulationNodesPanel extends BasePanel {
             });
         }
 
-        // Refresh button
         if (this.refreshButton) {
             this.addEventListener(this.refreshButton, 'click', () => {
                 this.refreshNodes();
             });
         }
 
-        // Add node button
         if (this.addNodeButton) {
             this.addEventListener(this.addNodeButton, 'click', () => {
                 this.requestAddNode();
@@ -107,11 +111,26 @@ export class SimulationNodesPanel extends BasePanel {
     private handleNodeInfo(data: NodeInfo): void {
         logger.debug('SimulationNodesPanel', 'Received node info:', data);
 
-        // Store node data
         this.nodeData = data;
-
-        // Update display
+        this.resolvePendingSwitch(data);
         this.updateNodeDisplay();
+    }
+
+    /**
+     * Drop the pending switch once the server confirms it, the target node
+     * disappears, or the request goes unanswered for too long.
+     */
+    private resolvePendingSwitch(data: NodeInfo): void {
+        if (!this.pendingSwitch) return;
+
+        const { nodeId, expires } = this.pendingSwitch;
+        if (
+            data.active_node === nodeId ||
+            !(nodeId in data.nodes) ||
+            Date.now() > expires
+        ) {
+            this.pendingSwitch = null;
+        }
     }
 
     /**
@@ -120,18 +139,12 @@ export class SimulationNodesPanel extends BasePanel {
     private updateNodeDisplay(): void {
         if (!this.nodeData) return;
 
-        // Update total nodes count
         if (this.totalNodesSpan) {
             this.totalNodesSpan.textContent = String(this.nodeData.total_nodes || 0);
         }
 
-        // Update active node display
         this.updateActiveNodeDisplay();
-
-        // Update node selector dropdown
         this.updateNodeSelector();
-
-        // Update detailed node list
         this.updateNodeList();
     }
 
@@ -189,9 +202,12 @@ export class SimulationNodesPanel extends BasePanel {
             selector.remove(selector.options.length - 1);
         }
 
+        // While a switch awaits confirmation, keep the selector on its
+        // target instead of snapping back to the still-reported old node.
         const activeNode = hasNodes ? this.nodeData.active_node || '' : '';
-        if (activeNode && selector.value !== activeNode) {
-            selector.value = activeNode;
+        const displayed = this.pendingSwitch?.nodeId ?? activeNode;
+        if (displayed && selector.value !== displayed) {
+            selector.value = displayed;
         }
     }
 
@@ -325,6 +341,13 @@ export class SimulationNodesPanel extends BasePanel {
             return;
         }
 
+        // Clicking the node that is already (or about to become) active is a
+        // no-op: don't re-emit the switch or spam the console with
+        // "Switching to node" messages.
+        if (nodeId === (this.pendingSwitch?.nodeId ?? this.nodeData?.active_node)) {
+            return;
+        }
+
         const socket = this.socketManager.getSocket();
         if (!socket || !socket.connected) {
             logger.warn('SimulationNodesPanel', 'Cannot switch node: not connected');
@@ -336,7 +359,10 @@ export class SimulationNodesPanel extends BasePanel {
 
         logger.info('SimulationNodesPanel', 'Switching to node:', friendlyName);
 
-        // Emit node switch event to backend
+        this.pendingSwitch = {
+            nodeId,
+            expires: Date.now() + PENDING_SWITCH_TIMEOUT_MS,
+        };
         socket.emit('set_active_node', { node_id: nodeId });
 
         // Log to console (if available)
@@ -391,7 +417,7 @@ export class SimulationNodesPanel extends BasePanel {
      */
     private killNode(nodeId: string): void {
         if (!nodeId || !this.socketManager) {
-            logger.warn('SimulationNodesPanel', 'Cannot kill node: SocketManager not set');
+            logger.warn('SimulationNodesPanel', 'Cannot kill node: no node ID or SocketManager not set');
             return;
         }
 
@@ -449,6 +475,10 @@ export class SimulationNodesPanel extends BasePanel {
 
         this.nodeData = null;
         this.socketManager = null;
+        this.pendingSwitch = null;
+        // Also remove the rendered cards so a re-initialized panel doesn't
+        // render duplicates next to stale, dead ones.
+        this.nodeItems.forEach((item) => item.root.remove());
         this.nodeItems.clear();
     }
 }

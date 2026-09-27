@@ -128,31 +128,34 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
 
     /**
      * ID of the 3D aircraft custom layer (kept in sync with Aircraft3DRenderer).
-     * When the 3D overlay is active, we must keep this layer at the top of the
+     * When the 3D overlay is active, this layer must stay at the top of the
      * MapLibre layer stack so the flat 2D icons don't occlude the 3D models.
      */
     private static readonly AIRCRAFT_3D_LAYER_ID = 'aircraft-3d-layer';
 
-    /**
-     * Restore the 3D aircraft layer to the top of the MapLibre layer stack.
-     * Safe to call any time — does nothing if the 3D overlay isn't enabled.
-     */
+    /** Move the 3D aircraft layer back to the top; no-op when 3D is off. */
     private raise3DLayerIfPresent(): void {
         if (this.map.getLayer(AircraftRenderer.AIRCRAFT_3D_LAYER_ID)) {
             this.map.moveLayer(AircraftRenderer.AIRCRAFT_3D_LAYER_ID);
         }
     }
 
-    /**
-     * Override setupLayers so that whenever the 2D aircraft sprite/label layers
-     * are (re-)added, the 3D aircraft custom layer is moved back to the top.
-     * Without this, a lazy 2D init (e.g. after a style change or when aircraft
-     * data arrives before the map is fully ready) can leave the 2D icons
-     * stacked above the 3D models.
-     */
     protected override setupLayers(): void {
         super.setupLayers();
+        // A lazy 2D (re-)init — style change, or data arriving before the map
+        // is ready — would otherwise leave the 2D icons above the 3D models.
         this.raise3DLayerIfPresent();
+    }
+
+    /**
+     * Redraw everything, trails included. The base class calls this on
+     * selection, shape, and style changes, so overriding it here keeps the
+     * trail features' selected/conflict state in sync with the icons instead
+     * of lagging until the next data frame.
+     */
+    public override updateEntityDisplay(aircraftData: AircraftData): void {
+        super.updateEntityDisplay(aircraftData);
+        this.updateTrailLayer(aircraftData);
     }
 
     /**
@@ -175,79 +178,75 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
             }
         }
 
-        this.updateEntityDisplay(aircraftData);
         this.updateAircraftTrails(aircraftData);
+        this.updateEntityDisplay(aircraftData);
 
-        // Some code paths (style reloads, first-frame lazy init) can leave the
-        // 2D sprites stacked above the 3D layer; raising here is cheap and keeps
-        // the 3D models on top regardless of ordering.
+        // Style reloads and first-frame lazy init can leave the 2D sprites
+        // stacked above the 3D layer; raising here is cheap.
         this.raise3DLayerIfPresent();
     }
 
     /**
-     * Update aircraft trails based on current positions and simulation time
+     * Maintain per-aircraft trail points from the incoming frame.
+     *
+     * Sampling uses the frame's own `simt` — the sim time BlueSky paired with
+     * these positions. The SIMINFO clock (the fallback for servers that omit
+     * `simt`) only ticks ~1 Hz, so sampling against it drifts the interval by
+     * up to a second and, under DTMULT/FF, thins trails to one point per
+     * SIMINFO tick instead of one per `trailSaveInterval` sim seconds.
      */
     private updateAircraftTrails(aircraftData: AircraftData): void {
-        // If no aircraft data, clear all trails
         if (!aircraftData.id || aircraftData.id.length === 0) {
             this.clearTrails();
             return;
         }
 
-        const currentSimTime = this.stateManager.getSimulationTime();
+        const currentSimTime = aircraftData.simt ?? this.stateManager.getSimulationTime();
         const ids = aircraftData.id;
         const lats = aircraftData.lat;
         const lons = aircraftData.lon;
 
-        // Update trails for each aircraft
         for (let i = 0; i < ids.length; i++) {
             const id = ids[i];
             const lat = lats[i];
             const lon = lons[i];
 
-            // Validate coordinates
             if (!isValidCoordinate(lat, lon)) {
                 continue;
             }
 
-            // Get or create trail data for this aircraft
-            let trailData = this.aircraftTrails.get(id);
+            const trailData = this.aircraftTrails.get(id);
             if (!trailData) {
-                trailData = {
-                    coordinates: [],
+                // Seed with the current position so the trail starts where the
+                // aircraft first appeared instead of one interval later.
+                this.aircraftTrails.set(id, {
+                    coordinates: [[lon, lat]],
                     lastSavedTime: currentSimTime
-                };
-                this.aircraftTrails.set(id, trailData);
+                });
+                continue;
             }
 
-            // Check if enough simulation time has passed to save a new point
-            const timeSinceLastSave = currentSimTime - trailData.lastSavedTime;
-            if (timeSinceLastSave >= this.trailSaveInterval) {
-                const newPoint: [number, number] = [lon, lat];
-
-                // Only add point if it's different from the last one (avoid duplicates)
+            if (currentSimTime - trailData.lastSavedTime >= this.trailSaveInterval) {
+                // Skip duplicate points (aircraft not moving)
                 const lastPoint = trailData.coordinates[trailData.coordinates.length - 1];
                 if (!lastPoint || lastPoint[0] !== lon || lastPoint[1] !== lat) {
-                    trailData.coordinates.push(newPoint);
+                    trailData.coordinates.push([lon, lat]);
                     trailData.lastSavedTime = currentSimTime;
                 }
             }
         }
 
-        // Remove trails for aircraft that no longer exist
+        // Drop trails of aircraft that no longer exist
         const currentIds = new Set(ids);
         for (const trailId of this.aircraftTrails.keys()) {
             if (!currentIds.has(trailId)) {
                 this.aircraftTrails.delete(trailId);
             }
         }
-
-        // Update the trail layer
-        this.updateTrailLayer(aircraftData);
     }
 
     /**
-     * Update the trail layer with current trail data
+     * Redraw the trail layer from the stored trail points
      */
     private updateTrailLayer(aircraftData: AircraftData): void {
         const trailSource = this.map.getSource('aircraft-trails') as GeoJSONSource;
@@ -255,33 +254,23 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
             return;
         }
 
+        const indexById = new Map((aircraftData.id ?? []).map((id, index) => [id, index]));
         const trailFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-        const currentIds = new Set(aircraftData.id);
 
         for (const [id, trailData] of this.aircraftTrails.entries()) {
-            // Only render trail if aircraft still exists
-            if (!currentIds.has(id)) {
+            const index = indexById.get(id);
+            // A line needs 2 points; skip trails of aircraft absent from this frame
+            if (index === undefined || trailData.coordinates.length < 2) {
                 continue;
             }
-
-            // Only create trail if we have at least 2 points
-            if (trailData.coordinates.length < 2) {
-                continue;
-            }
-
-            // Get aircraft index for conflict status
-            const index = aircraftData.id.indexOf(id);
-            const inConflict = index >= 0 ? this.getConflictStatus(aircraftData, index) : false;
-            const isSelected = id === this.selectedEntity;
 
             trailFeatures.push(lineStringFeature(trailData.coordinates, {
                 aircraftId: id,
-                selected: isSelected,
-                in_conflict: inConflict
+                selected: id === this.selectedEntity,
+                in_conflict: this.getConflictStatus(aircraftData, index)
             }));
         }
 
-        // Update the trail source
         trailSource.setData(featureCollection(trailFeatures));
     }
 
@@ -330,12 +319,9 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
 
     /**
      * Apply changed display options. Callers pass the full DisplayOptions
-     * object (MapOverlay always does), so each side effect must be gated on
-     * an actual value change against the previous options. The old
-     * `options.x !== undefined` checks were always true with a full object:
-     * every option change — each input event of a slider drag included —
-     * took the color path, regenerating all sprites and rebuilding every
-     * feature.
+     * object (MapOverlay always does), so each side effect is gated on an
+     * actual value change against the previous options — an `!== undefined`
+     * check would fire every side effect on every call.
      */
     public updateDisplayOptions(options: Partial<DisplayOptions>): void {
         const previous = this.displayOptions;
@@ -362,8 +348,7 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         }
 
         // Label text lives in the feature properties, so a content change
-        // rebuilds the features here, explicitly — previously that happened
-        // only as a side effect of the always-taken color path.
+        // must rebuild the features.
         if (AircraftRenderer.LABEL_CONTENT_KEYS.some(changed) && this.entityData) {
             this.updateAircraftDisplay(this.entityData);
         }

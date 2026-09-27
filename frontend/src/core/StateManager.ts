@@ -2,6 +2,7 @@ import { AppState, SimInfo, AircraftData, ShapeDisplayOptions, ServerStatus, Dis
 import { AUTO_MODEL_SENTINEL } from '../data/aircraftCategories';
 import { ShapeStore, ShapeChangeListener, polyDataToShape, polylineDataToShape } from './ShapeStore';
 import { logger } from '../utils/Logger';
+import { normalizeLongitude } from '../utils/geo';
 
 type StateListener<T> = (newValue: T, oldValue: T) => void;
 
@@ -229,6 +230,13 @@ export class StateManager {
     }
 
     updateAircraftData(aircraftData: AircraftData): void {
+        // BlueSky stops wrapping longitude after creation, so an aircraft
+        // crossing the antimeridian reports lon beyond ±180 forever — which
+        // every isValidCoordinate consumer would then drop (frozen 2D icon,
+        // removed 3D mesh). Wrap once here so all consumers see [-180, 180].
+        if (aircraftData.lon?.some((lon) => lon > 180 || lon < -180)) {
+            aircraftData = { ...aircraftData, lon: aircraftData.lon.map(normalizeLongitude) };
+        }
         this.updateState('aircraftData', aircraftData);
     }
 

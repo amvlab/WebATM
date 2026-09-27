@@ -1,14 +1,7 @@
 /**
- * Tests for AircraftRenderer.updateDisplayOptions change detection.
- *
- * MapOverlay always passes the FULL DisplayOptions object, so every side
- * effect must be gated on an actual value change against the previous
- * options. The old `options.x !== undefined` checks were always true with a
- * full object: every option change (each input event of a slider drag
- * included) took the color path — regenerating all sprites, repainting the
- * label/zone/trail layers, and rebuilding every feature via updateColors'
- * unconditional refresh — while the intended non-color refresh branch was
- * dead code.
+ * Tests for AircraftRenderer: updateDisplayOptions change detection (side
+ * effects must be gated on actual value changes, since MapOverlay always
+ * passes the full DisplayOptions object) and trail sampling/highlighting.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Map as MapLibreMap } from 'maplibre-gl';
@@ -45,15 +38,20 @@ interface FakeSource {
 function fakeMap() {
     const images = new Map<string, object>();
     const pointsSource: FakeSource = { setData: vi.fn() };
+    const trailsSource: FakeSource = { setData: vi.fn() };
     const layoutCalls: Array<[string, string, unknown]> = [];
     return {
         images,
         pointsSource,
+        trailsSource,
         layoutCalls,
         hasImage: (name: string) => images.has(name),
         addImage: (name: string, image: object) => images.set(name, image),
         removeImage: (name: string) => images.delete(name),
-        getSource: (id: string) => (id === 'aircraft-points' ? pointsSource : undefined),
+        getSource: (id: string) =>
+            id === 'aircraft-points' ? pointsSource
+            : id === 'aircraft-trails' ? trailsSource
+            : undefined,
         addSource: vi.fn(),
         getLayer: (id: string) => (id.startsWith('aircraft-') ? { id } : undefined),
         addLayer: vi.fn(),
@@ -100,8 +98,12 @@ const DATA = {
 
 const STATE_MANAGER = { getSimulationTime: () => 0 } as unknown as StateManager;
 
-function makeRenderer(map: ReturnType<typeof fakeMap>, options: DisplayOptions) {
-    return new AircraftRenderer(map as unknown as MapLibreMap, options, () => undefined, STATE_MANAGER);
+function makeRenderer(
+    map: ReturnType<typeof fakeMap>,
+    options: DisplayOptions,
+    stateManager: StateManager = STATE_MANAGER
+) {
+    return new AircraftRenderer(map as unknown as MapLibreMap, options, () => undefined, stateManager);
 }
 
 /** Label text of the single feature in the last points setData call. */
@@ -206,5 +208,86 @@ describe('AircraftRenderer.updateDisplayOptions', () => {
 
         expect(map.layoutCalls).toContainEqual(['aircraft-points', 'visibility', 'none']);
         expect(map.layoutCalls).toContainEqual(['aircraft-labels', 'visibility', 'none']);
+    });
+});
+
+/** A single-aircraft ACDATA frame at the given sim time and longitude. */
+function frame(simt: number | undefined, lon: number): AircraftData {
+    return { ...DATA, simt, lon: [lon] } as AircraftData;
+}
+
+/** Feature collection of the last trails setData call. */
+function lastTrails(map: ReturnType<typeof fakeMap>): GeoJSON.FeatureCollection {
+    const calls = map.trailsSource.setData.mock.calls;
+    return calls[calls.length - 1][0] as GeoJSON.FeatureCollection;
+}
+
+describe('AircraftRenderer trails', () => {
+    it('samples with the frame simt and seeds the trail at the spawn position', () => {
+        const map = fakeMap();
+        const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: true });
+
+        // STATE_MANAGER's SIMINFO clock stays at 0 throughout: only the
+        // per-frame simt can drive the sampling here.
+        renderer.updateAircraftDisplay(frame(0, 4.0));
+        expect(lastTrails(map).features).toHaveLength(0); // one point is not a line yet
+
+        renderer.updateAircraftDisplay(frame(5, 4.1));
+
+        const trails = lastTrails(map).features;
+        expect(trails).toHaveLength(1);
+        expect((trails[0].geometry as GeoJSON.LineString).coordinates).toEqual([
+            [4.0, 52.0],
+            [4.1, 52.0],
+        ]);
+    });
+
+    it('does not add a point before the save interval has elapsed', () => {
+        const map = fakeMap();
+        const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: true });
+
+        renderer.updateAircraftDisplay(frame(0, 4.0));
+        renderer.updateAircraftDisplay(frame(4.9, 4.05));
+
+        expect(lastTrails(map).features).toHaveLength(0);
+    });
+
+    it('falls back to the SIMINFO clock when the frame has no simt', () => {
+        const map = fakeMap();
+        let simInfoTime = 0;
+        const stateManager = { getSimulationTime: () => simInfoTime } as unknown as StateManager;
+        const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: true }, stateManager);
+
+        renderer.updateAircraftDisplay(frame(undefined, 4.0));
+        simInfoTime = 5;
+        renderer.updateAircraftDisplay(frame(undefined, 4.1));
+
+        expect(lastTrails(map).features).toHaveLength(1);
+    });
+
+    it('refreshes the trail selected state on selection change without new data', () => {
+        const map = fakeMap();
+        const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: true });
+        renderer.updateAircraftDisplay(frame(0, 4.0));
+        renderer.updateAircraftDisplay(frame(5, 4.1));
+        expect(lastTrails(map).features[0].properties!.selected).toBe(false);
+
+        renderer.setSelectedAircraft('KL204');
+        expect(lastTrails(map).features[0].properties!.selected).toBe(true);
+
+        renderer.setSelectedAircraft(null);
+        expect(lastTrails(map).features[0].properties!.selected).toBe(false);
+    });
+
+    it('drops the trail when the aircraft disappears', () => {
+        const map = fakeMap();
+        const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: true });
+        renderer.updateAircraftDisplay(frame(0, 4.0));
+        renderer.updateAircraftDisplay(frame(5, 4.1));
+        expect(lastTrails(map).features).toHaveLength(1);
+
+        renderer.updateAircraftDisplay({ ...frame(10, 5.0), id: ['XX1'] } as AircraftData);
+
+        expect(lastTrails(map).features).toHaveLength(0);
     });
 });

@@ -713,9 +713,11 @@ export class BlueSkyFileManager {
             info: '#2196F3'
         };
 
+        // Escape: messages embed untrusted names (picked/stored filenames,
+        // backend error text) and this is an innerHTML sink.
         statusDiv.innerHTML = `
             <div style="padding: 8px; border-radius: 4px; background-color: ${colors[type]}20; border: 1px solid ${colors[type]}; color: ${colors[type]};">
-                ${message}
+                ${escapeHtml(message)}
             </div>
         `;
 

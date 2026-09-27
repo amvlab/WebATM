@@ -157,6 +157,83 @@ def _dir_entries(target_dir, extension):
     return sorted(folders, key=by_name) + sorted(files, key=by_name)
 
 
+# Tail reads scan backwards in blocks of this size; monkeypatched smaller in
+# tests to exercise multi-block tails.
+TAIL_BLOCK_SIZE = 64 * 1024
+
+# Upper bound on the leading '#' comment block include_header will scan.
+# BlueSky datalog headers are a handful of lines; this only caps pathology.
+MAX_HEADER_BYTES = 64 * 1024
+
+
+def _tail_start_offset(f, file_size, max_lines):
+    """Find the byte offset where the last ``max_lines`` lines begin.
+
+    Scans the file backwards in ``TAIL_BLOCK_SIZE`` blocks so only the tail
+    itself is ever held in memory — BlueSky CRELOG output logs grow without
+    bound during long runs, and reading one whole (``readlines``-style) per
+    poll held hundreds of MB per request. A trailing chunk without a newline
+    counts as a line, matching ``readlines`` semantics.
+
+    Args:
+        f: File object opened in binary mode.
+        file_size (int): Size of the file in bytes.
+        max_lines (int): Number of lines the tail should contain (> 0).
+
+    Returns:
+        int: Offset of the tail's first line; 0 when the whole file has at
+            most ``max_lines`` lines.
+    """
+    buf = b""
+    newlines = 0
+    pos = file_size
+    while pos > 0 and newlines <= max_lines:
+        step = min(TAIL_BLOCK_SIZE, pos)
+        pos -= step
+        f.seek(pos)
+        block = f.read(step)
+        newlines += block.count(b"\n")
+        buf = block + buf
+
+    end = len(buf)
+    if buf.endswith(b"\n"):
+        end -= 1  # the final newline terminates the last line
+    for _ in range(max_lines):
+        cut = buf.rfind(b"\n", 0, end)
+        if cut < 0:
+            return 0  # buf covers the whole file and it fits in max_lines
+        end = cut
+    return pos + end + 1
+
+
+def _leading_header_block(f, tail_start):
+    """Return the leading ``#`` comment lines that a tail load dropped.
+
+    BlueSky's datalog writes a log's header (ending with the column-names
+    line) once at the top of the file, so a tail of a long log loses it.
+    Only complete header lines that lie entirely before ``tail_start`` are
+    returned — a header line still inside the tail is never duplicated.
+
+    Args:
+        f: File object opened in binary mode.
+        tail_start (int): Byte offset where the tail begins.
+
+    Returns:
+        bytes: The dropped header lines (empty when nothing was dropped).
+    """
+    if tail_start <= 0:
+        return b""
+    f.seek(0)
+    chunk = f.read(min(tail_start, MAX_HEADER_BYTES))
+    end = 0
+    while chunk.startswith(b"#", end):
+        nl = chunk.find(b"\n", end)
+        if nl < 0:
+            break
+        end = nl + 1
+    return chunk[:end]
+
+
 def _split_incomplete_utf8(data):
     """Split off an incomplete trailing UTF-8 sequence from ``data``.
 
@@ -1116,22 +1193,19 @@ def register_basic_routes(app, session_manager):
                 if offset > 0:
                     f.seek(offset)
                     data = f.read()
+                    new_offset = f.tell()
                 elif max_lines > 0:
-                    # Initial (or post-truncation) load: tail the last N lines.
-                    all_lines = f.readlines()
-                    data = b"".join(all_lines[-max_lines:])
-                    cut = len(all_lines) - max_lines
-                    if include_header and cut > 0:
-                        header = []
-                        for line in all_lines[:cut]:
-                            if not line.startswith(b"#"):
-                                break
-                            header.append(line)
-                        data = b"".join(header) + data
+                    # Initial (or post-truncation) load: tail the last N lines
+                    # via a bounded backwards scan, never the whole file.
+                    tail_start = _tail_start_offset(f, file_size, max_lines)
+                    f.seek(tail_start)
+                    data = f.read(file_size - tail_start)
+                    if include_header:
+                        data = _leading_header_block(f, tail_start) + data
+                    new_offset = file_size
                 else:
-                    f.seek(0, os.SEEK_END)
                     data = b""
-                new_offset = f.tell()
+                    new_offset = file_size
 
             data, held_back = _split_incomplete_utf8(data)
             new_offset -= len(held_back)

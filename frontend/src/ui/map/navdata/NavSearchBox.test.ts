@@ -144,6 +144,90 @@ describe('NavSearchBox stale-response handling', () => {
         expect(items[0].textContent).toContain('LFPG');
     });
 
+    it('does not reopen the dropdown when a result is selected during the debounce window', async () => {
+        await type('EH');
+        pending[0].resolve({ success: true, results: [result('EHAM')] });
+        await flush();
+        expect(results().style.display).toBe('block');
+
+        // User keeps typing (debounce timer pending, no fetch yet) and then
+        // selects from the still-visible results before the timer fires.
+        input().value = 'EHAM';
+        input().dispatchEvent(new Event('input'));
+        input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        expect(mapDisplay.setCenter).toHaveBeenCalledTimes(1);
+        expect(results().style.display).toBe('none');
+
+        // The pending debounced search must have been cancelled.
+        await vi.advanceTimersByTimeAsync(300);
+        expect(pending).toHaveLength(1);
+        expect(results().style.display).toBe('none');
+    });
+
+    it('drops an in-flight response once a result has been selected', async () => {
+        await type('EH');
+        pending[0].resolve({ success: true, results: [result('EHAM')] });
+        await flush();
+
+        // A newer search is in flight when the user selects a result.
+        await type('EHRD');
+        expect(pending).toHaveLength(2);
+        input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        expect(results().style.display).toBe('none');
+
+        pending[1].resolve({ success: true, results: [result('EHRD')] });
+        await flush();
+        expect(results().style.display).toBe('none');
+    });
+
+    it('Escape closes the dropdown and cancels pending searches', async () => {
+        await type('EH');
+        pending[0].resolve({ success: true, results: [result('EHAM')] });
+        await flush();
+
+        // Debounced follow-up search is pending when the user hits Escape.
+        input().value = 'EHAM';
+        input().dispatchEvent(new Event('input'));
+        input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        expect(results().style.display).toBe('none');
+
+        await vi.advanceTimersByTimeAsync(300);
+        expect(pending).toHaveLength(1);
+        expect(results().style.display).toBe('none');
+    });
+
+    it('Escape closes a message-only dropdown (no selectable results)', async () => {
+        await type('ZZZZ');
+        pending[0].resolve({ success: true, results: [] });
+        await flush();
+        expect(results().style.display).toBe('block');
+        expect(results().textContent).toContain('No matches.');
+
+        input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        expect(results().style.display).toBe('none');
+    });
+
+    it('renders HTML-significant characters in results as inert text', async () => {
+        await type('evil');
+        pending[0].resolve({
+            success: true,
+            results: [{
+                kind: 'airport',
+                ident: '<img src=x onerror=window.close()>',
+                name: 'A & B "field"',
+                lat: 52,
+                lon: 4,
+                iata: '',
+            }],
+        });
+        await flush();
+
+        const item = results().querySelector('.nav-search-item') as HTMLElement;
+        expect(results().querySelector('img')).toBeNull();
+        expect(item.textContent).toContain('<img src=x onerror=window.close()>');
+        expect(item.textContent).toContain('A & B "field"');
+    });
+
     it('clears stale results on a failed search so Enter cannot select one', async () => {
         await type('EHAM');
         pending[0].resolve({ success: true, results: [result('EHAM')] });

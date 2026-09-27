@@ -81,16 +81,42 @@ vi.mock('./Aircraft3DTransforms', () => ({
 }));
 
 import { Aircraft3DCustomLayer } from './Aircraft3DCustomLayer';
+import type { StateManager } from '../../../core/StateManager';
 import {
     AUTO_MODEL_SENTINEL,
     DEFAULT_FALLBACK_MODEL,
     MODEL_DIR,
 } from '../../../data/aircraftCategories';
 
-function makeLayer(selectedModel: string = AUTO_MODEL_SENTINEL): Aircraft3DCustomLayer {
+/**
+ * Minimal StateManager stand-in covering the per-aircraft override
+ * accessors the layer uses.
+ */
+function makeFakeStateManager() {
+    const modelOverrides = new Map<string, string>();
+    const scaleOverrides = new Map<string, number>();
+    const fake = {
+        getAircraftModelOverride: (id: string) => modelOverrides.get(id) ?? null,
+        setAircraftModelOverride: (id: string, value: string | null) => {
+            if (value === null) modelOverrides.delete(id);
+            else modelOverrides.set(id, value);
+        },
+        getAircraftScaleOverride: (id: string) => scaleOverrides.get(id) ?? null,
+        setAircraftScaleOverride: (id: string, value: number | null) => {
+            if (value === null) scaleOverrides.delete(id);
+            else scaleOverrides.set(id, value);
+        },
+    };
+    return { fake: fake as unknown as StateManager, modelOverrides, scaleOverrides };
+}
+
+function makeLayer(
+    selectedModel: string = AUTO_MODEL_SENTINEL,
+    stateManager: StateManager | null = null
+): Aircraft3DCustomLayer {
     const layer = new Aircraft3DCustomLayer(
         { selectedAircraftModel: selectedModel } as DisplayOptions,
-        null
+        stateManager
     );
     // Mark the scene ready so updateAircraft processes instead of queuing.
     (layer as unknown as { scene: object }).scene = {};
@@ -147,6 +173,46 @@ describe('Aircraft3DCustomLayer.updateAircraft removal', () => {
         // The existing aircraft is left untouched (guarded before removal).
         expect(fleetState.has('AC1')).toBe(true);
         expect(removeCalls).not.toContain('AC1');
+    });
+});
+
+describe('Aircraft3DCustomLayer per-aircraft override lifecycle', () => {
+    beforeEach(() => {
+        fleetState.clear();
+        removeCalls.length = 0;
+        failedPaths.clear();
+    });
+
+    it('keeps overrides across a transient invalid position, and clears them on real deletion', () => {
+        const { fake, modelOverrides, scaleOverrides } = makeFakeStateManager();
+        const layer = makeLayer(AUTO_MODEL_SENTINEL, fake);
+
+        layer.updateAircraft(batch(['AC1', 'AC2']));
+        modelOverrides.set('AC1', 'A380.glb');
+        scaleOverrides.set('AC1', 5);
+
+        // AC1 drifts to an invalid latitude (e.g. MOVE beyond lat 90). Its
+        // mesh must go (unrenderable), but it is still in the simulation,
+        // so the user's overrides must survive.
+        const invalid = batch(['AC1', 'AC2']);
+        invalid.lat[0] = 91;
+        layer.updateAircraft(invalid);
+
+        expect(removeCalls).toContain('AC1');
+        expect(fleetState.has('AC1')).toBe(false);
+        expect(modelOverrides.get('AC1')).toBe('A380.glb');
+        expect(scaleOverrides.get('AC1')).toBe(5);
+
+        // Back at a valid position: the mesh is rebuilt with the override.
+        layer.updateAircraft(batch(['AC1', 'AC2']));
+        expect(fleetState.get('AC1')?.modelPath).toBe(`${MODEL_DIR}A380.glb`);
+
+        // Actually deleted from the simulation: overrides are cleared so a
+        // future aircraft reusing the acid doesn't inherit them.
+        layer.updateAircraft(batch(['AC2']));
+        expect(fleetState.has('AC1')).toBe(false);
+        expect(modelOverrides.has('AC1')).toBe(false);
+        expect(scaleOverrides.has('AC1')).toBe(false);
     });
 });
 
