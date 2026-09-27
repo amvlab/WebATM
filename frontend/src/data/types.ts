@@ -29,6 +29,7 @@ export interface EntityData {
  * Extends EntityData with aircraft-specific properties
  */
 export interface AircraftData extends EntityData {
+    simt?: number;          // Sim time the frame was sampled at (seconds)
     tas: number[];          // True Airspeed
     cas?: number[];         // Calibrated Airspeed (optional - may not be sent by backend yet)
     gs?: number[];          // Ground Speed (optional - may not be sent by backend yet)
