@@ -20,6 +20,7 @@ interface FakeSource {
 class FakeMap {
     public sources = new Map<string, FakeSource>();
     private layers = new Set<string>();
+    public layerSpecs = new Map<string, { id: string; layout?: Record<string, unknown> }>();
 
     getSource(id: string): FakeSource | undefined {
         return this.sources.get(id);
@@ -33,8 +34,9 @@ class FakeMap {
     getLayer(id: string): { id: string } | undefined {
         return this.layers.has(id) ? { id } : undefined;
     }
-    addLayer(spec: { id: string }): void {
+    addLayer(spec: { id: string; layout?: Record<string, unknown> }): void {
         this.layers.add(spec.id);
+        this.layerSpecs.set(spec.id, spec);
     }
     removeLayer(id: string): void {
         this.layers.delete(id);
@@ -91,6 +93,16 @@ describe('ShapeRenderer subscription lifecycle', () => {
         const fc = fakeMap.sources.get('shapes-polygons')!.setData.mock.calls[0][0];
         expect(fc.features).toHaveLength(1);
         expect(fc.features[0].properties.name).toBe('AREA1');
+    });
+
+    it('gives the label layer an explicit font the bundled glyphs serve', () => {
+        // Without text-font MapLibre requests its default stack
+        // ("Open Sans Regular,Arial Unicode MS Regular"), which the offline
+        // glyph bundle lacks, so shape labels silently never render.
+        const renderer = new ShapeRenderer(mapDisplay, stateManager);
+        renderer.initialize();
+
+        expect(fakeMap.layerSpecs.get('shapes-labels')?.layout?.['text-font']).toEqual(['Open Sans Regular']);
     });
 
     it('does not stack duplicate subscriptions across style changes', () => {
