@@ -110,7 +110,6 @@ class TestForward:
         echoed a confusing 'NoneType' error to the web console."""
         proxy.bluesky_client = None
         proxy.command_proc.forward("OP")  # must not raise
-        assert proxy.echo_data == {}
         assert fake_socketio.count("echo") == 0
 
     def test_send_failure_reports_dropped_command(
@@ -150,19 +149,20 @@ class TestExecuteLocalCommand:
 
 
 class TestEchoResponse:
-    def test_stores_and_emits_echo(self, proxy, fake_socketio):
+    def test_emits_echo(self, proxy, fake_socketio):
         proxy.command_proc._echo_response("hello", 0)
-        assert proxy.echo_data["text"] == "hello"
-        assert proxy.echo_data["flags"] == 0
+        payload = fake_socketio.last("echo")
+        assert payload["text"] == "hello"
+        assert payload["flags"] == 0
+        # Locally generated messages carry no sender node.
+        assert payload["sender"] is None
         assert fake_socketio.count("echo") == 1
 
     def test_flags_coerced_to_int(self, proxy, fake_socketio):
         proxy.command_proc._echo_response("warn", "2")
-        assert proxy.echo_data["flags"] == 2
+        assert fake_socketio.last("echo")["flags"] == 2
 
     def test_no_emit_without_clients(self, proxy, fake_socketio):
         proxy.connected_clients = 0
         proxy.command_proc._echo_response("hi", 0)
-        # Still stored, just not emitted.
-        assert proxy.echo_data["text"] == "hi"
         assert fake_socketio.count("echo") == 0

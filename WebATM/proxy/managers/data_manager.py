@@ -134,7 +134,6 @@ class DataManager:
 
         self.proxy.traffic_data = {}
         self.proxy.sim_data = {}
-        self.proxy.echo_data = {}
         self.proxy.poly_data_by_node.clear()
         self.proxy.polyline_data_by_node.clear()
 
@@ -191,7 +190,7 @@ class DataManager:
 
         Returns:
             dict[str, Any]: Snapshot with ``traffic_data``, ``sim_data``,
-                ``echo_data``, ``poly_data``, ``polyline_data``, ``cmddict``,
+                ``poly_data``, ``polyline_data``, ``cmddict``,
                 ``connection_status``, ``node_info`` and a ``timestamp``.
         """
         active_node_id = self.proxy.node_mgr._get_safe_active_node()
@@ -219,7 +218,6 @@ class DataManager:
         return {
             "traffic_data": self.proxy.traffic_data,
             "sim_data": self.proxy.sim_data,
-            "echo_data": self.proxy.echo_data,
             "poly_data": poly_data,
             "polyline_data": polyline_data,
             "cmddict": self.proxy.cmddict,

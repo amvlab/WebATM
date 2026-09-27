@@ -27,7 +27,6 @@ class BlueSkyProxy:
         socketio: Flask-SocketIO instance used to emit events to web clients.
         traffic_data (dict): Latest ACDATA payload, cached for new clients.
         sim_data (dict): Latest SIMINFO payload, cached for new clients.
-        echo_data (dict): Latest echo message, cached for new clients.
         tracked_nodes (dict): Known simulation nodes keyed by hex node ID.
         tracked_servers (dict): Known servers keyed by raw server ID.
         cmddict (dict): Command dictionary mapping command names to their
@@ -63,7 +62,6 @@ class BlueSkyProxy:
         # Data caches for web client
         self.traffic_data = {}
         self.sim_data = {}
-        self.echo_data = {}
 
         # Per-node shape stores (only the active node's shapes are displayed)
         self.poly_data_by_node = {}
@@ -192,9 +190,9 @@ class BlueSkyProxy:
         """Execute local client command (like BlueSky Command.cmddict does)."""
         return self.command_proc._execute_local_command(cmd, argstring)
 
-    def _echo_response(self, text, flags):
+    def _echo_response(self, text, flags, sender=None):
         """Send echo response to web proxy."""
-        return self.command_proc._echo_response(text, flags)
+        return self.command_proc._echo_response(text, flags, sender=sender)
 
     # ========================================================================
     # Data Management - Delegate to DataManager

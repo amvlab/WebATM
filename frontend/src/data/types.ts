@@ -302,7 +302,6 @@ export interface AppState {
 export interface InitialData {
   sim_data?: SimInfo;
   traffic_data?: AircraftData;
-  echo_data?: Record<string, unknown>;
   cmddict?: CommandDict;
   poly_data?: ShapeBatchData<PolyData>;
   polyline_data?: ShapeBatchData<PolylineData>;
