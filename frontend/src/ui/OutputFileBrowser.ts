@@ -1,5 +1,5 @@
 import { logger } from '../utils/Logger';
-import { escapeHtml } from '../utils/dom';
+import { escapeHtml, onDOMReady } from '../utils/dom';
 
 interface OutputFile {
     filename: string;
@@ -55,12 +55,7 @@ export class OutputFileBrowser {
 
     private init(): void {
         if (this.isInitialized) return;
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initializeElements());
-        } else {
-            this.initializeElements();
-        }
+        onDOMReady(() => this.initializeElements());
     }
 
     private initializeElements(): void {
