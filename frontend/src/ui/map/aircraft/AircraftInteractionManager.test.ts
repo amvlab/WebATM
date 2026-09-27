@@ -16,16 +16,20 @@ import type { AircraftData } from '../../../data/types';
 
 // `once` invokes its callback immediately so the zoom/follow animation
 // chain completes synchronously under fake timers.
-const stubMap = () => ({
-    on: vi.fn(),
-    once: vi.fn((_event: string, cb: () => void) => cb()),
-    getLayer: vi.fn(() => ({ id: 'aircraft-points' })),
-    queryRenderedFeatures: vi.fn((): unknown[] => []),
-    getZoom: vi.fn(() => 8),
-    easeTo: vi.fn(),
-    flyTo: vi.fn(),
-    getCanvas: vi.fn(() => ({ style: {} })),
-});
+const stubMap = () => {
+    const canvas = { style: { cursor: '' } };
+    return {
+        on: vi.fn(),
+        once: vi.fn((_event: string, cb: () => void) => cb()),
+        getLayer: vi.fn(() => ({ id: 'aircraft-points' })),
+        queryRenderedFeatures: vi.fn((): unknown[] => []),
+        getZoom: vi.fn(() => 8),
+        easeTo: vi.fn(),
+        flyTo: vi.fn(),
+        canvas,
+        getCanvas: vi.fn(() => canvas),
+    };
+};
 type StubMap = ReturnType<typeof stubMap>;
 
 // The generic (non-layer) handler registered for a map event.
@@ -35,6 +39,15 @@ const mapHandler = (map: StubMap, event: string): ((e: unknown) => void) => {
     );
     if (!call) throw new Error(`no generic ${event} handler registered`);
     return call[1] as (e: unknown) => void;
+};
+
+// The handler delegated to the aircraft-points layer for a map event.
+const layerHandler = (map: StubMap, event: string): ((e: unknown) => void) => {
+    const call = map.on.mock.calls.find(
+        (c: unknown[]) => c[0] === event && c[1] === 'aircraft-points'
+    );
+    if (!call) throw new Error(`no aircraft-points ${event} handler registered`);
+    return call[2] as (e: unknown) => void;
 };
 
 const panelEvent = (type: 'aircraft-single-click' | 'aircraft-double-click' | 'aircraft-unselect', aircraftId: string) =>
@@ -161,5 +174,50 @@ describe('AircraftInteractionManager', () => {
         mapHandler(map, 'click')({ point: { x: 10, y: 10 } });
 
         expect(stateManager.getState().selectedAircraft).toBe('KL123');
+    });
+
+    it('aircraft-icon click selects the aircraft and flies to it when no draw is active', () => {
+        stateManager.updateAircraftData(aircraft(['KL123', 'PH456']));
+        stateManager.setSelectedAircraft('KL123');
+
+        layerHandler(map, 'click')({ features: [{ properties: { entity_id: 'PH456' } }] });
+
+        expect(stateManager.getState().selectedAircraft).toBe('PH456');
+        expect(map.flyTo).toHaveBeenCalled();
+    });
+
+    it('ignores aircraft-icon clicks while a drawing tool is active (the click is a point placement)', () => {
+        stateManager.updateAircraftData(aircraft(['KL123', 'PH456']));
+        stateManager.setSelectedAircraft('KL123');
+        manager.setDrawingToolActiveCheck(() => true);
+        sendCommand.mockClear();
+
+        // Clicking another aircraft must not steal the selection or move the camera...
+        layerHandler(map, 'click')({ features: [{ properties: { entity_id: 'PH456' } }] });
+        // ...and clicking the selected route target must not unselect it.
+        layerHandler(map, 'click')({ features: [{ properties: { entity_id: 'KL123' } }] });
+        layerHandler(map, 'dblclick')({ features: [{ properties: { entity_id: 'PH456' } }] });
+
+        expect(stateManager.getState().selectedAircraft).toBe('KL123');
+        expect(map.flyTo).not.toHaveBeenCalled();
+        expect(map.easeTo).not.toHaveBeenCalled();
+        expect(sendCommand).not.toHaveBeenCalled();
+    });
+
+    it('keeps the drawing crosshair cursor when hovering an aircraft mid-draw', () => {
+        manager.setDrawingToolActiveCheck(() => true);
+        map.canvas.style.cursor = 'crosshair';
+
+        layerHandler(map, 'mouseenter')({});
+        expect(map.canvas.style.cursor).toBe('crosshair');
+        layerHandler(map, 'mouseleave')({});
+        expect(map.canvas.style.cursor).toBe('crosshair');
+    });
+
+    it('swaps the hover cursor normally when no draw is active', () => {
+        layerHandler(map, 'mouseenter')({});
+        expect(map.canvas.style.cursor).toBe('pointer');
+        layerHandler(map, 'mouseleave')({});
+        expect(map.canvas.style.cursor).toBe('');
     });
 });

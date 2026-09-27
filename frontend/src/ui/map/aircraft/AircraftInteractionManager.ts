@@ -83,13 +83,12 @@ export class AircraftInteractionManager {
     }
 
     /**
-     * Set up map event handlers for aircraft clicks
-     * Always sets up 2D layer handlers since 2D layer is always active
+     * Set up map event handlers for aircraft clicks. The 2D layer handlers
+     * are always registered since the 2D layer is always active.
      */
     private setupMapEventHandlers(): void {
         if (!this.map) return;
 
-        // Always set up 2D layer click handlers since the 2D layer is always active
         this.setup2DLayerHandlers();
         // Prevent default map zoom on aircraft double-click
         this.map.on('dblclick', (e: MapMouseEvent) => {
@@ -112,7 +111,7 @@ export class AircraftInteractionManager {
         this.map.on('click', (e: MapMouseEvent) => {
             // With a drawing tool active, an empty-map click is a point
             // placement, not a request to unselect the aircraft.
-            if (this.isDrawingToolActive && this.isDrawingToolActive()) {
+            if (this.drawingToolActive()) {
                 return;
             }
 
@@ -138,13 +137,15 @@ export class AircraftInteractionManager {
             this.isUserInteracting = false;
         });
 
-        // Set up cursor changes for hover effects
+        // Pointer cursor while hovering an aircraft - but not during a draw,
+        // where it would stomp the drawing tool's crosshair (mouseleave would
+        // then blank the cursor for the rest of the draw).
         this.map.on('mouseenter', 'aircraft-points', () => {
-            if (this.map) this.map.getCanvas().style.cursor = 'pointer';
+            if (this.map && !this.drawingToolActive()) this.map.getCanvas().style.cursor = 'pointer';
         });
 
         this.map.on('mouseleave', 'aircraft-points', () => {
-            if (this.map) this.map.getCanvas().style.cursor = '';
+            if (this.map && !this.drawingToolActive()) this.map.getCanvas().style.cursor = '';
         });
 
         logger.debug('AircraftInteractionManager', 'Map event handlers set up for 2D aircraft layer');
@@ -158,6 +159,12 @@ export class AircraftInteractionManager {
 
         for (const [event, isDoubleClick] of [['click', false], ['dblclick', true]] as const) {
             this.map.on(event, 'aircraft-points', (e) => {
+                // During a draw, a click that lands on an aircraft icon is a
+                // point placement (BaseDrawingManager's map handler consumes
+                // it): selecting the aircraft here would also fly the camera
+                // away mid-draw, or unselect the route target being drawn for.
+                if (this.drawingToolActive()) return;
+
                 const properties = e.features?.[0]?.properties;
                 const aircraftId = properties?.entity_id || properties?.callsign;
                 if (aircraftId) {
@@ -466,12 +473,17 @@ export class AircraftInteractionManager {
 
     /**
      * Register a predicate that reports whether any interactive drawing tool
-     * (route, shape, aircraft placement) is in progress. When true, empty-map
-     * clicks are suppressed from the "unselect aircraft" path so they can be
-     * consumed as point drops.
+     * (route, shape, aircraft placement) is in progress. While true, map
+     * clicks are point placements: the empty-map unselect, the aircraft-icon
+     * select/unselect (with its camera flyTo), and the hover cursor swap are
+     * all suppressed.
      */
     public setDrawingToolActiveCheck(check: () => boolean): void {
         this.isDrawingToolActive = check;
+    }
+
+    private drawingToolActive(): boolean {
+        return this.isDrawingToolActive?.() ?? false;
     }
 
     /**
