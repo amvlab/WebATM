@@ -1,5 +1,6 @@
 import type { MapDisplay } from '../MapDisplay';
 import { logger } from '../../../utils/Logger';
+import { escapeHtml } from '../../../utils/dom';
 
 interface NavSearchResult {
     kind: 'airport' | 'heliport' | 'waypoint';
@@ -69,21 +70,35 @@ export class NavSearchBox {
     public setVisible(visible: boolean): void {
         if (!this.container) return;
         this.container.style.display = visible ? '' : 'none';
-        if (!visible) this.hideResults();
+        if (!visible) {
+            this.cancelPendingSearch();
+            this.hideResults();
+        }
+    }
+
+    /**
+     * Cancel the debounced search (if it hasn't fired yet) and invalidate any
+     * in-flight request, so a late response can't re-open the dropdown after
+     * the user has selected a result, pressed Escape, or cleared the input.
+     */
+    private cancelPendingSearch(): void {
+        if (this.debounceTimer !== null) {
+            window.clearTimeout(this.debounceTimer);
+            this.debounceTimer = null;
+        }
+        this.searchSeq++;
     }
 
     private onInput(): void {
         const query = this.input?.value.trim() ?? '';
-        if (this.debounceTimer !== null) {
-            window.clearTimeout(this.debounceTimer);
-        }
         if (query.length < 1) {
-            // Invalidate any in-flight request so its late response can't
-            // re-open the dropdown over the now-empty input.
-            this.searchSeq++;
+            this.cancelPendingSearch();
             this.current = [];
             this.hideResults();
             return;
+        }
+        if (this.debounceTimer !== null) {
+            window.clearTimeout(this.debounceTimer);
         }
         this.debounceTimer = window.setTimeout(() => this.search(query), 200);
     }
@@ -131,9 +146,9 @@ export class NavSearchBox {
                 r.kind === 'airport' ? 'APT' : r.kind === 'heliport' ? 'HEL' : 'WPT';
             item.innerHTML =
                 `<span class="nav-search-badge nav-search-badge-${r.kind}">${badge}</span>` +
-                `<span class="nav-search-ident">${this.escape(r.ident)}</span>` +
-                (r.iata ? `<span class="nav-search-iata">${this.escape(r.iata)}</span>` : '') +
-                (r.name ? `<span class="nav-search-name">${this.escape(r.name)}</span>` : '');
+                `<span class="nav-search-ident">${escapeHtml(r.ident)}</span>` +
+                (r.iata ? `<span class="nav-search-iata">${escapeHtml(r.iata)}</span>` : '') +
+                (r.name ? `<span class="nav-search-name">${escapeHtml(r.name)}</span>` : '');
             // mousedown (not click) so it fires before the input's blur handler.
             item.addEventListener('mousedown', (e) => {
                 e.preventDefault();
@@ -146,11 +161,19 @@ export class NavSearchBox {
 
     private renderMessage(message: string): void {
         if (!this.results) return;
-        this.results.innerHTML = `<div class="nav-search-message">${this.escape(message)}</div>`;
+        this.results.innerHTML = `<div class="nav-search-message">${escapeHtml(message)}</div>`;
         this.showResults();
     }
 
     private onKeyDown(e: KeyboardEvent): void {
+        // Escape works even when the dropdown only shows a message
+        // ("No matches." / "Search failed."), where current is empty.
+        if (e.key === 'Escape') {
+            this.cancelPendingSearch();
+            this.hideResults();
+            this.input?.blur();
+            return;
+        }
         if (this.current.length === 0) return;
         if (e.key === 'ArrowDown') {
             e.preventDefault();
@@ -163,9 +186,6 @@ export class NavSearchBox {
         } else if (e.key === 'Enter') {
             e.preventDefault();
             this.select(this.activeIndex >= 0 ? this.activeIndex : 0);
-        } else if (e.key === 'Escape') {
-            this.hideResults();
-            this.input?.blur();
         }
     }
 
@@ -180,6 +200,7 @@ export class NavSearchBox {
     private select(index: number): void {
         const r = this.current[index];
         if (!r) return;
+        this.cancelPendingSearch();
         const zoom = r.kind === 'waypoint' ? this.WAYPOINT_ZOOM : this.AIRPORT_ZOOM;
         this.mapDisplay.setCenter(r.lon, r.lat, zoom);
         if (this.input) {
@@ -194,11 +215,5 @@ export class NavSearchBox {
 
     private hideResults(): void {
         if (this.results) this.results.style.display = 'none';
-    }
-
-    private escape(text: string): string {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
     }
 }
