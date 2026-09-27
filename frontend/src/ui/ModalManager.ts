@@ -12,6 +12,7 @@ export class ModalManager {
     private initialized = false;
     private openModalId: string | null = null; // At most one modal is open at a time
     private listenerAbort = new AbortController();
+    private lastMouseDownTarget: EventTarget | null = null;
 
     constructor() {
         this.init();
@@ -39,14 +40,24 @@ export class ModalManager {
     private setupGlobalEventHandlers(): void {
         const { signal } = this.listenerAbort;
 
-        // Close modals when clicking on backdrop
+        // Close modals when clicking on the backdrop. A click that merely
+        // *ends* on the backdrop must not count: when a drag starts inside the
+        // modal (e.g. selecting text in an input) and the mouse is released
+        // over the backdrop, the browser fires `click` on their common
+        // ancestor — the backdrop — so require the press to start there too.
+        document.addEventListener('mousedown', (event) => {
+            this.lastMouseDownTarget = event.target;
+        }, { signal });
+
         document.addEventListener('click', (event) => {
             const target = event.target as HTMLElement;
-            if (target.classList.contains('modal') && target.id.endsWith('-modal')) {
-                const modalId = target.id;
-                if (this.isOpen(modalId)) {
-                    this.close(modalId);
-                }
+            if (
+                target.classList.contains('modal') &&
+                target.id.endsWith('-modal') &&
+                this.lastMouseDownTarget === target &&
+                this.isOpen(target.id)
+            ) {
+                this.close(target.id);
             }
         }, { signal });
 
@@ -69,12 +80,18 @@ export class ModalManager {
     }
 
     /**
-     * Register a modal for management
+     * Register a modal for management. Idempotent: re-registering the same
+     * element is a no-op, so callers don't need to guard against the
+     * DOM-ready auto-registration having already run.
      */
     public registerModal(modalId: string): void {
         const element = document.getElementById(modalId);
         if (!element) {
             logger.warn('ModalManager', `Modal element with id "${modalId}" not found`);
+            return;
+        }
+
+        if (this.modals.get(modalId)?.element === element) {
             return;
         }
 
