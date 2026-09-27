@@ -114,9 +114,8 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
             return;
         }
 
-        // An empty batch (last aircraft deleted) must still fall through to
-        // the removal loop below, or the deleted aircraft's mesh lingers as
-        // a ghost — only bail when the id array is missing entirely.
+        // Only bail when the id array is missing entirely: an empty batch
+        // (last aircraft deleted) must still reach the removal loop below.
         if (!aircraftData.id) {
             return;
         }
@@ -130,7 +129,12 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
             });
         }
 
+        // activeIds = renderable aircraft (valid coordinates); presentIds = every
+        // aircraft in the batch. Meshes are keyed on activeIds, but override
+        // cleanup must key on presentIds: an aircraft with a momentarily invalid
+        // position still exists in the simulation.
         const activeIds = new Set<string>();
+        const presentIds = new Set(aircraftData.id);
         const selectedModel = this.displayOptions.selectedAircraftModel;
 
         for (let i = 0; i < aircraftData.id.length; i++) {
@@ -178,13 +182,14 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
             this.fleet.refreshPending(id, data);
         }
 
-        // Remove aircraft that no longer exist
+        // Remove meshes for aircraft that are no longer renderable, but only
+        // clear per-aircraft overrides for aircraft actually gone from the
+        // simulation — so overrides survive a transient invalid position and
+        // don't re-apply if the same acid is later recreated.
         this.fleet.forEach((_, id) => {
-            if (!activeIds.has(id)) {
-                this.fleet.remove(id);
-                // Clear any stale per-aircraft overrides so they don't
-                // accumulate across long sessions or re-apply if the
-                // same acid is recreated with a different type.
+            if (activeIds.has(id)) return;
+            this.fleet.remove(id);
+            if (!presentIds.has(id)) {
                 this.stateManager?.setAircraftModelOverride(id, null);
                 this.stateManager?.setAircraftScaleOverride(id, null);
             }
@@ -195,12 +200,10 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
 
     /**
      * The given model path if it is expected to load, otherwise the first
-     * usable fallback: the configured fallback path, then the default model.
-     * The default tier matters when a model is forced globally — modelPath
-     * then IS the forced (failed) path and can't serve as the fallback.
-     * If everything failed, the original path is returned and the aircraft
-     * stays queued (the loader won't re-request a failed path, so this
-     * stays cheap).
+     * fallback tier not known to fail: the configured fallback path, then
+     * the default model (needed when the forced model IS the failed path).
+     * If everything failed the original path is returned; the aircraft
+     * stays queued cheaply, since failed paths are never re-requested.
      */
     private usableModelPath(path: string): string {
         if (!this.modelLoader.hasFailed(path)) return path;
