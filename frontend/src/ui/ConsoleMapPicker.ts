@@ -62,6 +62,11 @@ export class ConsoleMapPicker {
     // Mirrors ShapeDrawingManager's right-click/Esc UX.
     private polyContextHandler: ((e: MapMouseEvent) => void) | null = null;
     private polyEscapeHandler: ((e: KeyboardEvent) => void) | null = null;
+    // Vertices added by map clicks in the active POLY session. Escape only
+    // cancels (clears the input) once a click-drawing is actually in
+    // progress; a purely typed command keeps the console's normal Escape
+    // behaviour (dismiss dropdowns, keep the text) like every other command.
+    private polyClickedVertices = 0;
 
     private hintElement: HTMLDivElement | null = null;
 
@@ -177,6 +182,10 @@ export class ConsoleMapPicker {
             // firing redundant cleanup.
             this.polyEscapeHandler = (e: KeyboardEvent) => {
                 if (e.key !== 'Escape') return;
+                // No map-clicked vertices yet: this is a typed command, not a
+                // drawing. Let the event through to the console's own Escape
+                // handling (hide dropdowns, keep the input).
+                if (this.polyClickedVertices === 0) return;
                 e.preventDefault();
                 e.stopPropagation();
                 this.consoleInstance.clearInput();
@@ -245,6 +254,7 @@ export class ConsoleMapPicker {
         this.snapHoverHandler = null;
         this.polyContextHandler = null;
         this.polyEscapeHandler = null;
+        this.polyClickedVertices = 0;
 
         this.hideHint();
 
@@ -346,6 +356,9 @@ export class ConsoleMapPicker {
                 ctx.params[lonIdx] === 'lon'
             ) {
                 const value = `${clickLat.toFixed(6)},${clickLon.toFixed(6)}`;
+                if (this.POLY_FAMILY.has(ctx.command)) {
+                    this.polyClickedVertices++;
+                }
                 this.consoleInstance.insertGeoValue(value, latIdx, 2);
                 return;
             }
