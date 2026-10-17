@@ -47,6 +47,7 @@ describe('RouteConstraintsModal', () => {
         sendCommand = vi.fn<(cmd: string) => Promise<boolean>>(async () => true);
         onComplete = vi.fn<() => void>();
         onCancel = vi.fn<() => void>();
+        vi.stubGlobal('alert', vi.fn());
     });
 
     it('reports a single cancel when the modal is closed while a route is pending', () => {
@@ -166,6 +167,97 @@ describe('RouteConstraintsModal', () => {
         await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
 
         expect(sendCommand).toHaveBeenCalledWith('ADDWPT KL204 52.000000,4.000000,20000');
+    });
+
+    it('a failed send keeps the modal open and a retry resumes with the unsent waypoints only', async () => {
+        // First waypoint sends, second fails (connection dropped), then the
+        // connection recovers for the retry.
+        sendCommand = vi.fn<(cmd: string) => Promise<boolean>>()
+            .mockResolvedValueOnce(true)
+            .mockResolvedValueOnce(false)
+            .mockResolvedValue(true);
+        const modal = makeModal();
+        modal.show('KL204', [{ lat: 52, lng: 4 }, { lat: 53, lng: 5 }], 'ft', 'knots');
+
+        const submitBtn = document.getElementById('submit-route-constraints-btn') as HTMLButtonElement;
+        submitBtn.click();
+        await vi.waitFor(() => expect(sendCommand).toHaveBeenCalledTimes(2));
+        await vi.waitFor(() => expect(submitBtn.disabled).toBe(false));
+
+        // The route must survive the failure: modal stays open, no callback.
+        expect(modalManager.isOpen(MODAL_ID)).toBe(true);
+        expect(onComplete).not.toHaveBeenCalled();
+        expect(onCancel).not.toHaveBeenCalled();
+
+        // Retry: only the failed waypoint is re-sent — the first one is
+        // already in BlueSky and re-sending it would duplicate it.
+        submitBtn.click();
+        await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+        expect(sendCommand).toHaveBeenCalledTimes(3);
+        expect(sendCommand).toHaveBeenNthCalledWith(2, 'ADDWPT KL204 53.000000,5.000000');
+        expect(sendCommand).toHaveBeenNthCalledWith(3, 'ADDWPT KL204 53.000000,5.000000');
+        expect(modalManager.isOpen(MODAL_ID)).toBe(false);
+        expect(onCancel).not.toHaveBeenCalled();
+    });
+
+    it('a send that throws keeps the modal open for a retry as well', async () => {
+        sendCommand = vi.fn<(cmd: string) => Promise<boolean>>()
+            .mockRejectedValueOnce(new Error('socket error'))
+            .mockResolvedValue(true);
+        const modal = makeModal();
+        modal.show('KL204', [{ lat: 52, lng: 4 }], 'ft', 'knots');
+
+        const submitBtn = document.getElementById('submit-route-constraints-btn') as HTMLButtonElement;
+        submitBtn.click();
+        await vi.waitFor(() => expect(sendCommand).toHaveBeenCalledTimes(1));
+        await vi.waitFor(() => expect(submitBtn.disabled).toBe(false));
+
+        expect(modalManager.isOpen(MODAL_ID)).toBe(true);
+        expect(onComplete).not.toHaveBeenCalled();
+        expect(onCancel).not.toHaveBeenCalled();
+
+        submitBtn.click();
+        await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+        expect(onCancel).not.toHaveBeenCalled();
+    });
+
+    it('a failure after the modal was closed mid-send reports a single cancel', async () => {
+        const resolvers: Array<(ok: boolean) => void> = [];
+        sendCommand = vi.fn<(cmd: string) => Promise<boolean>>(
+            () => new Promise<boolean>(resolve => { resolvers.push(resolve); })
+        );
+        const modal = makeModal();
+        modal.show('KL204', [{ lat: 52, lng: 4 }], 'ft', 'knots');
+
+        (document.getElementById('submit-route-constraints-btn') as HTMLButtonElement).click();
+        modalManager.close(MODAL_ID);
+        expect(onCancel).not.toHaveBeenCalled(); // suppressed while sending
+
+        resolvers[0](false); // ...but the send then fails with the modal gone
+        await vi.waitFor(() => expect(onCancel).toHaveBeenCalledTimes(1));
+        expect(onComplete).not.toHaveBeenCalled();
+    });
+
+    it('a fresh show() after a failed send restarts from the first waypoint', async () => {
+        sendCommand = vi.fn<(cmd: string) => Promise<boolean>>()
+            .mockResolvedValueOnce(true)
+            .mockResolvedValueOnce(false)
+            .mockResolvedValue(true);
+        const modal = makeModal();
+        modal.show('KL204', [{ lat: 52, lng: 4 }, { lat: 53, lng: 5 }], 'ft', 'knots');
+
+        const submitBtn = document.getElementById('submit-route-constraints-btn') as HTMLButtonElement;
+        submitBtn.click();
+        await vi.waitFor(() => expect(sendCommand).toHaveBeenCalledTimes(2));
+
+        // Abandon the pending route and draw a new one: the resume index
+        // must not leak into the new route.
+        modalManager.close(MODAL_ID);
+        expect(onCancel).toHaveBeenCalledTimes(1);
+        modal.show('PH101', [{ lat: 50, lng: 3 }], 'ft', 'knots');
+        submitBtn.click();
+        await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+        expect(sendCommand).toHaveBeenLastCalledWith('ADDWPT PH101 50.000000,3.000000');
     });
 
     it('converts constraints from the captured units to feet and knots', async () => {

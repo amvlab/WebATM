@@ -33,6 +33,10 @@ export class RouteConstraintsModal {
     // Blocks re-entrant submits (double-click) and stops a mid-send modal
     // close from reporting the route as cancelled.
     private sending = false;
+    // Index of the first waypoint command not yet sent. A retry after a
+    // failed submit resumes here instead of re-sending (and duplicating)
+    // waypoints BlueSky already accepted.
+    private nextSendIndex = 0;
 
     constructor(app: App, onComplete: () => void, onCancel: () => void) {
         this.app = app;
@@ -79,6 +83,7 @@ export class RouteConstraintsModal {
     ): void {
         this.active = { acid, points, altUnit, spdUnit };
         this.constraintRows = points.map(() => ({ alt: null, spd: null }));
+        this.nextSendIndex = 0;
 
         const table = document.getElementById('route-constraints-table') as HTMLTableElement | null;
         if (!table) {
@@ -112,6 +117,9 @@ export class RouteConstraintsModal {
         const tbody = table.querySelector('tbody');
         if (!tbody) {
             logger.error('RouteConstraintsModal', 'route-constraints-table has no tbody');
+            // Same fallback as a missing table: submit unconstrained rather
+            // than stranding the route with no modal and no callback.
+            void this.submit();
             return;
         }
         tbody.innerHTML = '';
@@ -214,17 +222,20 @@ export class RouteConstraintsModal {
 
         this.applyBulkConstraintsIfEnabled();
 
+        // Regenerated on every (re)try; commands map 1:1 to waypoints, so
+        // skipping the first nextSendIndex entries resumes a partial send.
         const commands = this.generateCommands();
         const consoleInstance = this.app.getConsole();
         const acid = this.active.acid;
 
         // 50 ms stays snappy for small routes while giving the proxy/ZMQ
-        // pipeline room to serialize sends cleanly.
+        // pipeline room to serialize sends cleanly (back-to-back sends race
+        // on the shared socket and crash BlueSky with msgpack errors).
         const COMMAND_INTERVAL_MS = 50;
 
         logger.info(
             'RouteConstraintsModal',
-            `Sending ${commands.length} ADDWPT command(s) for ${acid} (${COMMAND_INTERVAL_MS}ms spacing)`
+            `Sending ${commands.length - this.nextSendIndex} ADDWPT command(s) for ${acid} (${COMMAND_INTERVAL_MS}ms spacing)`
         );
 
         this.sending = true;
@@ -232,18 +243,19 @@ export class RouteConstraintsModal {
         if (submitBtn) submitBtn.disabled = true;
 
         try {
-            for (let i = 0; i < commands.length; i++) {
-                const command = commands[i];
+            while (this.nextSendIndex < commands.length) {
+                const command = commands[this.nextSendIndex];
                 logger.debug('RouteConstraintsModal', `Sending: ${command}`);
                 const ok = await this.app.sendCommand(command);
                 if (!ok) {
-                    alert('Failed to send a waypoint command. Please check your connection.');
+                    alert('Failed to send a waypoint command — check your connection. The route is kept; press Submit to retry the remaining waypoints.');
                     break;
                 }
+                this.nextSendIndex++;
                 if (consoleInstance) {
                     consoleInstance.displaySentCommand(command);
                 }
-                if (i < commands.length - 1) {
+                if (this.nextSendIndex < commands.length) {
                     await this.sleep(COMMAND_INTERVAL_MS);
                 }
             }
@@ -256,6 +268,19 @@ export class RouteConstraintsModal {
         } finally {
             this.sending = false;
             if (submitBtn) submitBtn.disabled = false;
+        }
+
+        if (this.nextSendIndex < commands.length) {
+            // Send failed part-way. Keep the route pending so Submit can
+            // retry the remaining waypoints — unless the modal was closed
+            // mid-send, in which case there is no UI left to retry from and
+            // we report the cancel that the close event suppressed while
+            // `sending` was set.
+            if (!modalManager.isOpen(MODAL_ID)) {
+                this.active = null;
+                this.onCancel();
+            }
+            return;
         }
 
         // Clear `active` before closing so the close event isn't a cancel.

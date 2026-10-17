@@ -94,10 +94,18 @@ export class Aircraft3DFleet {
             return;
         }
 
-        // SkeletonUtils.clone instead of Object3D.clone: identical for plain
-        // meshes, but re-binds skinned meshes to their cloned bones so rigged
-        // models animate per-aircraft instead of referencing the cached
-        // master's skeleton. Geometry/materials stay shared either way.
+        // This creation supersedes any queued wait for another model —
+        // without this, that model finishing would create a second mesh
+        // for the id, orphaning this one in its group as a frozen ghost.
+        this.pendingAircraft.delete(id);
+        // Replace, never duplicate: aircraft.set() alone would leak the
+        // previous mesh into the scene with no registry entry to remove it.
+        if (this.aircraft.has(id)) {
+            this.remove(id);
+        }
+
+        // SkeletonUtils.clone re-binds skinned meshes to their cloned bones
+        // (plain meshes clone identically); geometry/materials stay shared.
         const mesh = cloneModelScene(model);
         mesh.userData.realScale = this.computeRealScale(data, modelPath);
         // Stamp the aircraft id so transform methods can look up
@@ -156,11 +164,9 @@ export class Aircraft3DFleet {
     }
 
     /**
-     * Detach an aircraft mesh from its group. The mesh is a clone that
-     * shares the cached model's geometry/materials, so those GPU resources
-     * are NOT disposed here — the model loader owns and disposes them when
-     * its cache is cleared. Disposing per-clone would tear down resources
-     * still used by every other aircraft of the same type.
+     * Detach an aircraft mesh from its group. The clone shares the cached
+     * model's geometry/materials, so nothing is disposed here — the model
+     * loader owns those GPU resources and disposes them with its cache.
      */
     remove(id: string): void {
         const aircraftMesh = this.aircraft.get(id);
@@ -219,22 +225,29 @@ export class Aircraft3DFleet {
         });
     }
 
+    /** Remove and return the queue entries waiting on `path`. */
+    private takePendingForPath(path: string): Array<{ id: string; data: AircraftMeshData }> {
+        const taken: Array<{ id: string; data: AircraftMeshData }> = [];
+        this.pendingAircraft.forEach((entry, id) => {
+            if (entry.modelPath === path) {
+                taken.push({ id, data: entry.data });
+            }
+        });
+        for (const { id } of taken) {
+            this.pendingAircraft.delete(id);
+        }
+        return taken;
+    }
+
     /**
      * Create meshes for aircraft that were queued waiting for `path` to load.
      */
     processPending(path: string): void {
-        const ready: Array<{ id: string; data: AircraftMeshData }> = [];
-        this.pendingAircraft.forEach((entry, id) => {
-            if (entry.modelPath === path) {
-                ready.push({ id, data: entry.data });
-            }
-        });
-
+        const ready = this.takePendingForPath(path);
         if (ready.length === 0) return;
 
         logger.debug('Aircraft3DFleet', `Processing ${ready.length} pending aircraft for ${path}`);
         for (const { id, data } of ready) {
-            this.pendingAircraft.delete(id);
             this.create(id, data, path);
         }
     }
@@ -246,15 +259,7 @@ export class Aircraft3DFleet {
      * stay absent from the 3D scene.
      */
     redirectPending(fromPath: string, toPath: string | null): void {
-        const stranded: Array<{ id: string; data: AircraftMeshData }> = [];
-        this.pendingAircraft.forEach((entry, id) => {
-            if (entry.modelPath === fromPath) {
-                stranded.push({ id, data: entry.data });
-            }
-        });
-
-        for (const { id, data } of stranded) {
-            this.pendingAircraft.delete(id);
+        for (const { id, data } of this.takePendingForPath(fromPath)) {
             if (toPath) {
                 this.create(id, data, toPath);
             } else {
@@ -319,9 +324,8 @@ export class Aircraft3DFleet {
     }
 
     /**
-     * Detach every live mesh from its group and empty the registry. Shared
-     * by reload and full-teardown paths. Like remove(), this only detaches;
-     * the cached model's shared geometry/materials are disposed by the loader.
+     * Detach every live mesh from its group and empty the registry.
+     * Like remove(), detach only — the loader owns shared GPU resources.
      */
     private removeAllMeshes(): void {
         this.aircraft.forEach((aircraftMesh, id) => {

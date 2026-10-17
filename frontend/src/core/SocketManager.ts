@@ -12,7 +12,8 @@ import {
     CommandDictData,
     EchoData,
     Shape,
-    ShapeBatchData
+    ShapeBatchData,
+    StackCommandData
 } from '../data/types';
 import type { StateManager } from './StateManager';
 import { parseShapePayload } from './shapePayload';
@@ -45,6 +46,7 @@ interface SocketEventHandlers {
     onServerDisconnected?: () => void;
     onReset?: () => void;
     onCommandDict?: (data: CommandDictData) => void;
+    onStackCommand?: (data: StackCommandData) => void;
 }
 
 export class SocketManager {
@@ -196,6 +198,7 @@ export class SocketManager {
         ['server_disconnected', 'onServerDisconnected'],
         ['reset', 'onReset'],
         ['cmddict', 'onCommandDict'],
+        ['stack_command', 'onStackCommand'],
     ];
 
     private setupEventListeners(): void {

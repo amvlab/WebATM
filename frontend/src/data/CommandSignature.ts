@@ -47,7 +47,7 @@ const DISPLAY_SIGNATURE_OVERRIDES: Record<string, string> = {
  */
 export const LOCAL_COMMAND_SIGNATURES: Record<string, string> = {
     PAN: 'lat/acid/wpt/apt/LEFT/RIGHT/UP/DOWN,[lon]',
-    ZOOM: 'level/IN/OUT',
+    ZOOM: 'level/IN/OUT,[factor]',
     ZOOMIN: '',
     ZOOMOUT: '',
     SWRAD: 'APT/WPT/LABEL/SYM/TRAIL/POLY,[level]',

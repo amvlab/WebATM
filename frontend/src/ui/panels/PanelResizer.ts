@@ -47,6 +47,7 @@ export class PanelResizer {
 
     private isDragging: boolean = false;
     private currentHandle: HTMLElement | null = null;
+    private activeConfig: PanelConfig | null = null;
     private startPos: Position = { x: 0, y: 0 };
     private startSizes: PanelSizes = {};
     private handles: NodeListOf<Element> | null = null;
@@ -117,7 +118,11 @@ export class PanelResizer {
 
         // Global mouse events
         document.addEventListener('mousemove', (e) => this.onMouseMove(e), { signal });
-        document.addEventListener('mouseup', (e) => this.onMouseUp(e), { signal });
+        document.addEventListener('mouseup', () => this.endDrag(), { signal });
+
+        // A drag can also end without a mouseup reaching us (focus loss,
+        // alt-tab); recover instead of leaving the drag state stuck.
+        window.addEventListener('blur', () => this.endDrag(), { signal });
 
         // Prevent text selection during resize
         document.addEventListener('selectstart', (e) => {
@@ -140,6 +145,7 @@ export class PanelResizer {
 
         this.isDragging = true;
         this.currentHandle = handle;
+        this.activeConfig = config;
         this.startPos = { x: e.clientX, y: e.clientY };
         this.currentHandle.classList.add('resizing');
         this.startSizes = this.getCurrentSizes(config);
@@ -156,35 +162,41 @@ export class PanelResizer {
     }
 
     private onMouseMove(e: MouseEvent): void {
-        if (!this.isDragging || !this.currentHandle) return;
+        if (!this.isDragging || !this.activeConfig) return;
+
+        // No button held means the mouseup was lost (released outside the
+        // window); end the drag instead of resizing with the button up.
+        if (e.buttons === 0) {
+            this.endDrag();
+            return;
+        }
 
         e.preventDefault();
 
-        const target = this.currentHandle.getAttribute('data-target');
-        if (!target) return;
-
-        const config = this.panelConfigs[target];
-
-        if (!config) return;
-
-        if (config.direction === 'horizontal') {
-            this.handleHorizontalResize(e, config);
+        if (this.activeConfig.direction === 'horizontal') {
+            this.handleHorizontalResize(e, this.activeConfig);
         } else {
-            this.handleVerticalResize(e, config);
+            this.handleVerticalResize(e, this.activeConfig);
         }
     }
 
-    private onMouseUp(_e: MouseEvent): void {
+    /**
+     * Leave drag mode: restore the cursor, text selection and map
+     * interactivity, then persist the layout. Runs on mouseup, but also as
+     * the recovery path when the mouseup never arrives (release outside the
+     * window, focus loss, destroy), so it must be safe to call anytime.
+     */
+    private endDrag(): void {
         if (!this.isDragging) return;
 
         this.isDragging = false;
+        this.activeConfig = null;
 
         if (this.currentHandle) {
             this.currentHandle.classList.remove('resizing');
             this.currentHandle = null;
         }
 
-        // Reset cursor and re-enable text selection
         document.body.style.cursor = '';
         document.body.classList.remove('no-select');
 
@@ -194,12 +206,8 @@ export class PanelResizer {
             mapElement.style.pointerEvents = '';
         }
 
-        // No explicit map resize here: MapLibre's built-in trackResize
-        // observer follows the container through the whole drag with a
-        // synchronous redraw per step. A delayed bare resize() would clear
-        // the canvas without repainting it and flash white.
-
-        // Save panel sizes to localStorage
+        // No explicit map resize: MapLibre's trackResize observer already
+        // follows the container through the drag.
         this.savePanelSizes();
     }
 
@@ -284,15 +292,17 @@ export class PanelResizer {
 
         // Update flex basis
         if (config.leftPanel?.classList.contains('console-section')) {
-            // Special handling for console sections (use percentages)
+            // Console sections use percentages so they keep their split when
+            // the window resizes
             const leftPercent = (newLeftWidth / totalWidth) * 100;
             const rightPercent = (newRightWidth / totalWidth) * 100;
 
             config.leftPanel.style.flexBasis = `${leftPercent}%`;
             config.rightPanel!.style.flexBasis = `${rightPercent}%`;
         } else {
-            // Regular panels (use pixels)
-            if (config.leftPanel) {
+            // Regular panels use pixels; the map container keeps flex:1 and
+            // absorbs the remainder, so it never gets an inline basis
+            if (config.leftPanel && !config.leftPanel.classList.contains('map-container')) {
                 config.leftPanel.style.flexBasis = `${newLeftWidth}px`;
             }
             if (config.rightPanel && !config.rightPanel.classList.contains('map-container')) {
@@ -330,12 +340,6 @@ export class PanelResizer {
                 consoleContainer: this.getPanelSize('.console-container'),
                 consoleSection: this.getPanelSize('.console-section'),
                 echoSection: this.getPanelSize('.echo-section'),
-                trafficPanel: this.getPanelSize('.traffic-panel'),
-                aircraftPanel: this.getPanelSize('.aircraft-panel'),
-                conflictsPanel: this.getPanelSize('.conflicts-panel'),
-                nodePanel: this.getPanelSize('.node-panel'),
-                navPanel: this.getPanelSize('.nav-panel'),
-                displayPanel: this.getPanelSize('.display-panel'),
                 timestamp: Date.now(),
                 version: PanelResizer.LAYOUT_VERSION
             };
@@ -371,17 +375,8 @@ export class PanelResizer {
             this.setPanelSize('.console-container', layoutState.consoleContainer);
             this.setPanelSize('.console-section', layoutState.consoleSection);
             this.setPanelSize('.echo-section', layoutState.echoSection);
-            this.setPanelSize('.traffic-panel', layoutState.trafficPanel);
-            this.setPanelSize('.aircraft-panel', layoutState.aircraftPanel);
-            this.setPanelSize('.conflicts-panel', layoutState.conflictsPanel);
-            this.setPanelSize('.node-panel', layoutState.nodePanel);
-            this.setPanelSize('.nav-panel', layoutState.navPanel);
-            this.setPanelSize('.display-panel', layoutState.displayPanel);
 
             logger.debug('PanelResizer', 'Panel layout loaded from localStorage');
-
-            // No explicit map resize: MapLibre's built-in trackResize
-            // observer picks up the container change from the applied sizes.
         } catch (error) {
             logger.error('PanelResizer', 'Error loading panel layout:', error);
         }
@@ -412,8 +407,9 @@ export class PanelResizer {
         panel.style.flexBasis = size;
     }
 
-    /** Remove every listener registered in setupEventListeners. */
+    /** End any active drag and remove every registered listener. */
     public destroy(): void {
+        this.endDrag();
         this.listenerAbort.abort();
     }
 }

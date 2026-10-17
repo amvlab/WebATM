@@ -419,6 +419,14 @@ export class App {
      */
     private setupRouteDataHandler(): void {
         this.socketManager.setEventHandlers({
+            // GUI commands the simulation can't execute (PAN/ZOOM lines in
+            // scenario files) come back over STACK; run them through the
+            // same local handlers as console input so they move the map.
+            onStackCommand: (data) => {
+                if (data && typeof data.command === 'string') {
+                    this.commandHandler.executeServerCommand(data.command);
+                }
+            },
             onRouteData: (data: RouteData) => {
                 // Check if we just sent an explicit POS command for this aircraft
                 const isExplicitPosResponse = this.aircraftInteractionManager?.wasLastExplicitPosFor(data.acid) ?? false;
@@ -479,16 +487,6 @@ export class App {
      */
     public getRouteData(): RouteData | null {
         return this.mapOverlay ? this.mapOverlay.getRouteData() : null;
-    }
-
-    /**
-     * Get the AircraftInteractionManager instance (may be null if not yet
-     * initialized). Used by RouteDrawingManager to route its trailing POS
-     * command through the manager's explicit-POS tracking path so the
-     * resulting ROUTEDATA response is not misclassified as unsolicited.
-     */
-    public getAircraftInteractionManager(): AircraftInteractionManager | null {
-        return this.aircraftInteractionManager;
     }
 
     public getState(): AppState {

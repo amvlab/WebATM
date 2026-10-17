@@ -3,10 +3,17 @@
 STACKCMDS carries the server's command dictionary, which is cached on the
 proxy and forwarded to browsers as the ``cmddict`` Socket.IO event so the web
 console can validate and autocomplete commands. STACK carries command lines
-forwarded by the server — commands the simulation did not recognize and
-assumes are GUI/client commands (typically PAN/ZOOM lines in scenario files).
-They are handled locally and never echoed back to the server.
+forwarded by the simulation — commands it did not recognize and assumes are
+GUI/client commands (typically PAN/ZOOM lines in scenario files). They are
+forwarded to browsers as ``stack_command`` events, where the frontend's
+CommandHandler executes the ones it implements (PAN, ZOOM, ...) exactly as if
+they had been typed into the console — matching BlueSky's own GUIs, which run
+forwarded commands through their client stack. Nothing is ever sent back to
+the server (that would loop: the simulation forwarded the line precisely
+because it cannot execute it).
 """
+
+import time
 
 from ...logger import get_logger
 from ._base import REPLACE_ACTIONS, active_proxy, is_active_node, shared_context
@@ -61,58 +68,58 @@ def on_stackcmds_received(data):
 
 
 def on_stack_received(data):
-    """Process a BlueSky STACK event carrying server-forwarded command lines.
+    """Process a BlueSky STACK event carrying sim-forwarded command lines.
 
-    Normalizes the payload to a list of command lines and runs each non-empty
-    line through ``_process_server_command``, which executes it locally and
-    reports the outcome via the proxy's echo channel. Nothing is sent back to
-    the BlueSky server.
+    Normalizes the payload to individual command lines — BlueSky's
+    ``stack.forward()`` joins multiple commands into one semicolon-separated
+    string, and its reference client splits them back apart (``stack()`` in
+    ``bluesky.stack.stackbase``), so the same split happens here — and
+    forwards each non-empty line to browsers via ``_forward_to_browsers``.
 
     Args:
-        data (str | list | tuple): One command line, or a sequence of command
-            lines, forwarded by the server. Other types are logged and ignored.
+        data (str | list | tuple): One command line (possibly
+            semicolon-joined), or a sequence of such lines. Other types are
+            logged and ignored.
     """
     proxy = active_proxy()
     if not proxy:
         return
 
     if isinstance(data, str):
-        commands_to_process = [data]
+        received = [data]
     elif isinstance(data, (list, tuple)):
-        commands_to_process = list(data)
+        received = list(data)
     else:
         logger.warning(f"Unexpected STACK data format: {type(data)}")
         return
 
-    for cmdline in commands_to_process:
-        if isinstance(cmdline, str) and cmdline.strip():
-            _process_server_command(proxy, cmdline)
+    for cmdline in received:
+        if not isinstance(cmdline, str):
+            continue
+        for line in cmdline.split(";"):
+            line = line.strip()
+            if line:
+                _forward_to_browsers(proxy, line)
 
 
-def _process_server_command(proxy, cmdline):
-    """Execute a server-forwarded command locally without sending it back.
+def _forward_to_browsers(proxy, cmdline):
+    """Emit one sim-forwarded command line to browsers as ``stack_command``.
 
-    Runs the command through ``proxy._execute_local_command``. Commands the
-    web client does not implement (e.g. desktop-GUI view commands like PAN or
-    ZOOM from a scenario file) are benign no-ops here, so they are reported to
-    web clients as a warning, not an error.
+    The frontend executes the line through its CommandHandler (so PAN/ZOOM
+    lines from scenario files move the map, like they move BlueSky's own
+    GUIs) and reports unsupported commands itself. With no browser connected
+    there is nothing to act on the command, so it is only logged.
 
     Args:
-        proxy (BlueSkyProxy): The active proxy used for command execution
-            and echoing.
-        cmdline (str): The raw command line received from the server.
+        proxy (BlueSkyProxy): The active proxy.
+        cmdline (str): A single, stripped command line from the server.
     """
-    cmd, _, argstring = cmdline.strip().partition(" ")
-    cmd = cmd.upper()
-
-    try:
-        success, echotext = proxy._execute_local_command(cmd, argstring.strip())
-    except Exception as e:
-        logger.error(f"Error executing server command '{cmd}': {e}")
-        proxy._echo_response(f"Error executing server command '{cmd}': {e}", 1)
+    if not (proxy.socketio and proxy.connected_clients > 0):
+        logger.debug(f"No browsers connected; dropping forwarded command: {cmdline}")
         return
-
-    if success:
-        proxy._echo_response(echotext, 0)
-    else:
-        proxy._echo_response(f"{cmd}: not supported by the web client (ignored)", 2)
+    try:
+        proxy.socketio.emit(
+            "stack_command", {"command": cmdline, "timestamp": time.time()}
+        )
+    except Exception as e:
+        logger.error(f"Error forwarding '{cmdline}' to browsers: {e}")

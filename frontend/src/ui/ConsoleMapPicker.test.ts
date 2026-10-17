@@ -7,7 +7,7 @@
  * new aircraft straight at a known airport/waypoint - mirroring the
  * Draw-Aircraft flow (AircraftCreationManager), which snaps both clicks.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ConsoleMapPicker, GeoContext } from './ConsoleMapPicker';
 import type { MapDisplay } from './map/MapDisplay';
 import type { Console } from './Console';
@@ -105,20 +105,26 @@ const polyContext: GeoContext = {
 describe('ConsoleMapPicker navaid snapping', () => {
     let map: ReturnType<typeof createFakeMap>;
     let snapper: { snap: ReturnType<typeof vi.fn>; highlight: ReturnType<typeof vi.fn>; clearHighlight: ReturnType<typeof vi.fn> };
-    let consoleInstance: { insertGeoValue: ReturnType<typeof vi.fn> };
+    let consoleInstance: { insertGeoValue: ReturnType<typeof vi.fn>; clearInput: ReturnType<typeof vi.fn> };
     let picker: ConsoleMapPicker;
 
     beforeEach(() => {
         document.body.innerHTML = '<div class="console-input-container"></div>';
         map = createFakeMap();
         snapper = { snap: vi.fn(() => null), highlight: vi.fn(), clearHighlight: vi.fn() };
-        consoleInstance = { insertGeoValue: vi.fn() };
+        consoleInstance = { insertGeoValue: vi.fn(), clearInput: vi.fn() };
         const mapDisplay = { getMap: () => map } as unknown as MapDisplay;
         picker = new ConsoleMapPicker(
             mapDisplay,
             consoleInstance as unknown as Console,
             snapper as unknown as NavaidSnapper
         );
+    });
+
+    afterEach(() => {
+        // Release the document-level Escape listener a POLY session binds,
+        // so one test's picker can never act on another test's key events.
+        picker.disable();
     });
 
     it('aims a heading pick at the snapped navaid', () => {
@@ -229,5 +235,62 @@ describe('ConsoleMapPicker navaid snapping', () => {
 
         picker.disable();
         expect(banner.style.display).toBe('none');
+    });
+
+    describe('POLY Escape handling', () => {
+        function pressEscape(): KeyboardEvent {
+            const e = new KeyboardEvent('keydown', {
+                key: 'Escape',
+                cancelable: true
+            });
+            document.dispatchEvent(e);
+            return e;
+        }
+
+        it('leaves a typed-only POLY command intact on Escape', () => {
+            // The user typed every coordinate by hand (no map clicks), then
+            // pressed Escape - e.g. just to dismiss the autocomplete. The
+            // input must survive, exactly as it does for CRE and every other
+            // command; only the console's own handler should act.
+            picker.enable(polyContext);
+
+            const e = pressEscape();
+
+            expect(consoleInstance.clearInput).not.toHaveBeenCalled();
+            expect(e.defaultPrevented).toBe(false);
+        });
+
+        it('cancels a click-drawing in progress on Escape', () => {
+            picker.enable(polyContext);
+            map.fire('click', clickEvent(52.5, 4.5)); // one map-clicked vertex
+
+            const e = pressEscape();
+
+            expect(consoleInstance.clearInput).toHaveBeenCalledTimes(1);
+            expect(e.defaultPrevented).toBe(true);
+        });
+
+        it('forgets clicked vertices when the session ends', () => {
+            picker.enable(polyContext);
+            map.fire('click', clickEvent(52.5, 4.5));
+            picker.disable();
+
+            // New session, typed-only: the old session's click must not make
+            // Escape destructive again.
+            picker.enable(polyContext);
+            pressEscape();
+
+            expect(consoleInstance.clearInput).not.toHaveBeenCalled();
+        });
+
+        it('a CRE coordinate pick never arms the Escape cancel', () => {
+            picker.enable(latContext); // CRE lat/lon slot
+            map.fire('click', clickEvent(52.5, 4.5));
+
+            const e = pressEscape();
+
+            expect(consoleInstance.clearInput).not.toHaveBeenCalled();
+            expect(e.defaultPrevented).toBe(false);
+        });
     });
 });

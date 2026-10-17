@@ -152,6 +152,9 @@ export class ProcessControlManager {
         try {
             const res = await fetch('/api/integrated/server/status');
             const data = await res.json();
+            // A lifecycle action may have started while this probe was in
+            // flight; its transient status owns the display until it settles.
+            if (this.busy) return;
             this.serverRunning = !!data.running;
             this.renderStatus();
         } catch {

@@ -26,8 +26,6 @@ function createAppMock() {
         isInitialized: vi.fn(() => true),
         panTo: vi.fn(),
         setZoom: vi.fn(),
-        zoomIn: vi.fn(),
-        zoomOut: vi.fn(),
         getZoom: vi.fn(() => 8),
         getCenter: vi.fn((): [number, number] => [4.5, 52.5]),
         // [west, south, east, north]
@@ -192,11 +190,39 @@ describe('CommandHandler', () => {
             expect(result).toEqual({ handled: true, sendToServer: false });
         });
 
-        it('supports ZOOM IN / ZOOM OUT and ZOOMIN / ZOOMOUT', () => {
+        it('ZOOM IN / ZOOM OUT and ZOOMIN / ZOOMOUT step half a level, like one +/-', () => {
             handler.handleCommand('ZOOM IN');
-            expect(mocks.mapDisplay.zoomIn).toHaveBeenCalledTimes(1);
+            expect(mocks.mapDisplay.setZoom).toHaveBeenLastCalledWith(8.5);
+            handler.handleCommand('ZOOM OUT');
+            expect(mocks.mapDisplay.setZoom).toHaveBeenLastCalledWith(7.5);
+            handler.handleCommand('ZOOMIN');
+            expect(mocks.mapDisplay.setZoom).toHaveBeenLastCalledWith(8.5);
             handler.handleCommand('ZOOMOUT');
-            expect(mocks.mapDisplay.zoomOut).toHaveBeenCalledTimes(1);
+            expect(mocks.mapDisplay.setZoom).toHaveBeenLastCalledWith(7.5);
+        });
+
+        it('ZOOM IN/OUT accepts an explicit factor (BlueSky: ZOOM IN 2 doubles)', () => {
+            handler.handleCommand('ZOOM IN 2');
+            expect(mocks.mapDisplay.setZoom).toHaveBeenLastCalledWith(9); // 8 + log2(2)
+            handler.handleCommand('ZOOM OUT 4');
+            expect(mocks.mapDisplay.setZoom).toHaveBeenLastCalledWith(6); // 8 - log2(4)
+        });
+
+        it('warns on a non-positive or non-numeric factor', () => {
+            handler.handleCommand('ZOOM IN fast');
+            handler.handleCommand('ZOOM OUT 0');
+            expect(mocks.mapDisplay.setZoom).not.toHaveBeenCalled();
+            expect(addMessage).toHaveBeenCalledTimes(2);
+            expect(addMessage).toHaveBeenCalledWith(
+                expect.stringContaining('Invalid zoom factor'), 'warning', 'webatm');
+        });
+
+        it('echoes the level the map actually applied, not the raw request', () => {
+            // The mock map clamps everything to zoom 8 (getZoom always
+            // returns 8), standing in for MapLibre's min/max clamping.
+            handler.handleCommand('ZOOM 99');
+            expect(mocks.mapDisplay.setZoom).toHaveBeenCalledWith(99);
+            expect(addMessage).toHaveBeenCalledWith('Zoom set to 8.0', 'success', 'webatm');
         });
 
         it('warns on a non-numeric level', () => {

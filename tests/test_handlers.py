@@ -263,6 +263,44 @@ class TestAcdataThrottle:
         assert proxy.traffic_data["id"] == ["AC1"]
 
 
+class TestAcdataCachingWithoutClients:
+    """The traffic cache must track the live feed even with no browser
+    attached: the initial_data snapshot, the 0.5 s backup timer and the
+    ROUTEDATA aircraft filter all serve ``proxy.traffic_data`` verbatim, so a
+    cache frozen while unwatched hands the next client the aircraft from the
+    moment the last one left — ghosts at stale positions, resurrected deleted
+    aircraft, and route frames filtered against a stale id list."""
+
+    def test_frame_is_cached_but_not_emitted_without_clients(
+        self, proxy, fake_socketio
+    ):
+        proxy.connected_clients = 0
+        on_acdata_received({"id": ["AC1"], "lat": [1.0]})
+        assert proxy.traffic_data["id"] == ["AC1"]
+        assert fake_socketio.count("acdata") == 0
+
+    def test_deletions_while_unwatched_reach_the_cache(self, proxy, fake_socketio):
+        # A client watches two aircraft, then leaves...
+        on_acdata_received({"id": ["AC1", "AC2"]})
+        assert proxy.traffic_data["id"] == ["AC1", "AC2"]
+
+        # ...AC2 is deleted while nobody is connected: the next frame must
+        # replace the cached pair, not be dropped at the client gate.
+        proxy.connected_clients = 0
+        proxy.last_acdata_emit = 0  # throttle interval elapsed
+        on_acdata_received({"id": ["AC1"]})
+        assert proxy.traffic_data["id"] == ["AC1"]
+        assert fake_socketio.count("acdata") == 1  # only the first frame
+
+    def test_cache_refresh_is_still_throttled(self, proxy, fake_socketio):
+        proxy.connected_clients = 0
+        on_acdata_received({"id": ["AC1"]})
+        cached = proxy.traffic_data
+        # A second frame within acdata_interval is skipped wholesale.
+        on_acdata_received({"id": ["AC2"]})
+        assert proxy.traffic_data is cached
+
+
 class TestStatechangeHandler:
     def test_emits_statechange(self, proxy, fake_socketio):
         proxy.sim_data = {"state": 0}
@@ -437,35 +475,49 @@ class TestStackcmdsHandler:
 
 
 class TestStackReceivedHandler:
-    def test_local_help_command_executed(self, proxy, fake_socketio):
-        on_stack_received("HELP")
-        # Bare HELP is answered locally -> info echo emitted.
-        assert fake_socketio.count("echo") == 1
-        echo_payload = fake_socketio.last("echo")
-        assert echo_payload["flags"] == 0
-        assert "bluesky web client" in echo_payload["text"].lower()
-
-    def test_gui_only_command_reports_warning_not_error(self, proxy, fake_socketio):
-        # A scenario-file GUI command (e.g. PAN) forwarded by the server is a
-        # benign no-op for the web client: warning (flags=2), never an error.
+    def test_forwarded_command_emitted_to_browsers(self, proxy, fake_socketio):
+        # A scenario-file GUI command (e.g. PAN) forwarded by the simulation
+        # goes to browsers as stack_command; the frontend CommandHandler
+        # executes it (or reports it unsupported) exactly like typed input.
         on_stack_received("PAN EHAM")
-        echo_payload = fake_socketio.last("echo")
-        assert echo_payload["text"] == "PAN: not supported by the web client (ignored)"
-        assert echo_payload["flags"] == 2
+        assert fake_socketio.count("stack_command") == 1
+        payload = fake_socketio.last("stack_command")
+        assert payload["command"] == "PAN EHAM"
+        assert "timestamp" in payload
+
+    def test_semicolon_joined_payload_is_split(self, proxy, fake_socketio):
+        # BlueSky's stack.forward() joins multiple commands with ';' and its
+        # reference client splits them back apart; mirror that.
+        on_stack_received("PAN EHAM; ZOOM 2")
+        assert fake_socketio.count("stack_command") == 2
+        first, second = fake_socketio.events("stack_command")
+        assert first["command"] == "PAN EHAM"
+        assert second["command"] == "ZOOM 2"
 
     def test_list_of_commands(self, proxy, fake_socketio):
-        on_stack_received(["HELP", "?"])
-        assert fake_socketio.count("echo") == 2
+        on_stack_received(["PAN EHAM", "ZOOM 0.4"])
+        assert fake_socketio.count("stack_command") == 2
 
     def test_empty_command_skipped(self, proxy, fake_socketio):
-        on_stack_received(["", "   "])
-        assert fake_socketio.count("echo") == 0
+        on_stack_received(["", "   ", " ; "])
+        assert fake_socketio.count("stack_command") == 0
+
+    def test_non_string_entries_skipped(self, proxy, fake_socketio):
+        on_stack_received(["PAN EHAM", 42, None])
+        assert fake_socketio.count("stack_command") == 1
+
+    def test_dropped_without_connected_browsers(self, proxy, fake_socketio):
+        # No browser connected -> nothing can execute the command; no emit,
+        # no error.
+        proxy.connected_clients = 0
+        on_stack_received("PAN EHAM")
+        assert fake_socketio.count("stack_command") == 0
 
     def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
         proxy.allow_reconnection = False
         proxy.last_successful_update = 42.0
         on_stack_received("PAN EHAM")
-        assert fake_socketio.count("echo") == 0
+        assert fake_socketio.count("stack_command") == 0
         assert proxy.last_successful_update == 42.0  # liveness untouched
 
 
@@ -489,10 +541,10 @@ class TestResetHandler:
     def test_clears_cached_aircraft_with_no_clients_connected(
         self, proxy, fake_socketio
     ):
-        # The initial_data snapshot serves proxy.traffic_data verbatim, and
-        # on_acdata_received only refreshes it while clients are attached — so
-        # a reset with nobody connected must still clear the cache, or the
-        # next page load renders the pre-reset aircraft (ghosts).
+        # The initial_data snapshot serves proxy.traffic_data verbatim, and a
+        # paused/idle sim may send no further ACDATA to overwrite it — so a
+        # reset with nobody connected must still clear the cache, or the next
+        # page load renders the pre-reset aircraft (ghosts).
         from WebATM.utils import empty_traffic_data
 
         proxy.connected_clients = 0
@@ -1013,3 +1065,50 @@ class TestPolySharedStateActions:
 
         polys = proxy.poly_data_by_node[sender_hex]["polys"]
         assert set(polys) == {"area1", "area2"}
+
+    def test_redefining_line_as_poly_moves_it_to_the_polygon_store(
+        self, proxy, fake_client
+    ):
+        # BlueSky's defineArea overwrites an existing name with a shape of any
+        # kind and publishes it as a plain Update. Regression: the full POLY
+        # definition was routed into the polyline store (the partial-update
+        # heuristic only checked the name), so the area rendered as a line.
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+        on_poly_received({"polys": {"z1": dict(self.LINE)}})
+
+        on_poly_received({"polys": {"z1": dict(self.AREA)}})
+
+        assert "z1" in proxy.poly_data_by_node[sender_hex]["polys"]
+        assert "z1" not in proxy.polyline_data_by_node[sender_hex]["polys"]
+        assert proxy.poly_data_by_node[sender_hex]["polys"]["z1"]["shape"] == "POLY"
+
+    def test_redefining_poly_as_line_evicts_the_stale_polygon(self, proxy, fake_client):
+        # Regression: the new polyline was stored, but the old polygon stayed
+        # in the polygon store, so both kept being emitted and the map
+        # flickered between the stale area and the new line.
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+        on_poly_received({"polys": {"z2": dict(self.AREA)}})
+
+        on_poly_received({"polys": {"z2": dict(self.LINE)}})
+
+        assert "z2" not in proxy.poly_data_by_node[sender_hex]["polys"]
+        assert "z2" in proxy.polyline_data_by_node[sender_hex]["polys"]
+
+    def test_full_redefinition_replaces_stale_fields(self, proxy, fake_client):
+        # defineArea creates a fresh server-side Shape, so fields of the old
+        # one (a previous COLOR, POLYALT bounds) no longer exist there; a full
+        # definition must replace the stored entry, not merge into it.
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+        volume = dict(self.AREA, shape="POLYALT", top=3000.0, bottom=500.0)
+        on_poly_received({"polys": {"z3": volume}})
+        on_poly_received({"polys": {"z3": {"color": [255, 0, 0]}}})
+
+        on_poly_received({"polys": {"z3": dict(self.AREA)}})
+
+        stored = proxy.poly_data_by_node[sender_hex]["polys"]["z3"]
+        assert "color" not in stored
+        assert "top" not in stored
+        assert stored["lat"] == [1.0, 3.0, 5.0]

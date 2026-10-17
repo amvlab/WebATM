@@ -346,6 +346,36 @@ describe('ProcessControlManager', () => {
         });
     });
 
+    it('a status probe resolving mid-action does not overwrite the lifecycle status', async () => {
+        // Hold the construction-time probe open so it resolves after Start.
+        let resolveProbe!: (value: { ok: boolean; json: () => Promise<{ running: boolean }> }) => void;
+        const probePromise = new Promise<{ ok: boolean; json: () => Promise<{ running: boolean }> }>(
+            (resolve) => {
+                resolveProbe = resolve;
+            },
+        );
+        // Keep the connect attempt pending so the action still owns the status.
+        autoConnect.mockImplementation(() => new Promise<boolean>(() => {}));
+
+        const fetchMock = vi.fn((url: string) => {
+            if (url.endsWith('/status')) return probePromise;
+            return Promise.resolve({
+                ok: true,
+                json: async () => ({ success: true, status: 'running', message: 'BlueSky server started' }),
+            });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        makeManager();
+        click('start');
+        await vi.waitFor(() => expect(statusText()).toBe('connecting…'));
+
+        // The stale probe lands now; it must not clobber "connecting…" with "stopped".
+        resolveProbe({ ok: true, json: async () => ({ running: false }) });
+        await new Promise((r) => setTimeout(r, 20));
+        expect(statusText()).toBe('connecting…');
+    });
+
     describe('connection-status reconciliation', () => {
         it('re-probes and re-renders when the live BlueSky connection flips', async () => {
             const conn = makeConnState(true);

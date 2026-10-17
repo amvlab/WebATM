@@ -184,6 +184,45 @@ describe('Aircraft3DFleet pending-model fallback', () => {
         expect(mercatorGroup.children.length).toBe(0);
     });
 
+    it('creating a mesh drops a stale queued wait so the old model loading later cannot ghost it', () => {
+        // AC1 queued on a slow model, then created directly with a cached one
+        // (e.g. a per-aircraft override resolved on the next data tick).
+        const { model } = multiMaterialModel();
+        const models: Record<string, THREE.Group> = { 'A320.glb': model };
+        const { fleet, mercatorGroup } = makeFleetWithModels(models);
+
+        fleet.create('AC1', DATA, 'slow.glb'); // queued, model still loading
+        fleet.create('AC1', DATA, 'A320.glb'); // cached -> live mesh now
+
+        expect(fleet.get('AC1')?.modelPath).toBe('A320.glb');
+        expect(mercatorGroup.children.length).toBe(1);
+
+        // The slow model finally loads: the stale queue entry must be gone,
+        // or this would overwrite the registry and orphan the live mesh.
+        models['slow.glb'] = multiMaterialModel().model;
+        fleet.processPending('slow.glb');
+
+        expect(fleet.get('AC1')?.modelPath).toBe('A320.glb');
+        expect(mercatorGroup.children.length).toBe(1);
+    });
+
+    it('create() replaces an existing mesh instead of orphaning it in the group', () => {
+        const models: Record<string, THREE.Group> = {
+            'a.glb': multiMaterialModel().model,
+            'b.glb': multiMaterialModel().model,
+        };
+        const { fleet, mercatorGroup } = makeFleetWithModels(models);
+
+        fleet.create('AC1', DATA, 'a.glb');
+        const firstMesh = fleet.get('AC1')?.mesh;
+        fleet.create('AC1', DATA, 'b.glb');
+
+        expect(fleet.size).toBe(1);
+        expect(fleet.get('AC1')?.modelPath).toBe('b.glb');
+        expect(mercatorGroup.children.length).toBe(1);
+        expect(firstMesh && mercatorGroup.children.includes(firstMesh)).toBe(false);
+    });
+
     it('redirectPending leaves aircraft queued for other models alone', () => {
         const models: Record<string, THREE.Group> = {};
         const { fleet } = makeFleetWithModels(models);

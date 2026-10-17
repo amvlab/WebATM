@@ -325,6 +325,16 @@ export interface EchoData {
   sender?: string;
 }
 
+/**
+ * A GUI/client command line the simulation forwarded over BlueSky's STACK
+ * topic (e.g. a PAN/ZOOM line from a scenario file), relayed by the proxy as
+ * the `stack_command` Socket.IO event for the CommandHandler to execute.
+ */
+export interface StackCommandData {
+  command: string;
+  timestamp?: number;
+}
+
 // Modal and UI Component Types
 
 export interface ModalOptions {
@@ -441,12 +451,6 @@ export interface PanelLayoutState {
   consoleContainer: string;
   consoleSection: string;
   echoSection: string;
-  trafficPanel: string;
-  aircraftPanel: string;
-  conflictsPanel: string;
-  nodePanel: string;
-  navPanel: string;
-  displayPanel: string;
   timestamp: number;
   version: string;
 }

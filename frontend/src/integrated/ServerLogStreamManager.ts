@@ -3,22 +3,19 @@ import type { ServerLogBatch, ServerLogLine } from '../data/types';
 import { logger } from '../utils/Logger';
 
 /**
- * Live server-log tab (integrated build only).
- *
- * Adds a third tab — "Server Log" — next to the existing Echo / Output Log
- * tabs and renders the live, in-order stdout/stderr of the `bluesky --headless`
- * process tree pushed over the `server_log` Socket.IO event. This is distinct
- * from the file-polling "Output Log" tab (LogStreamManager): this one streams a
- * running process, that one browses output files on disk.
- *
- * The tab button and pane are injected at runtime so the core `index.html`
- * carries no integrated-specific markup (preserving build-time exclusion).
+ * Live "Server Log" tab (integrated build only): a third tab next to Echo /
+ * Output Log rendering the in-order stdout/stderr of the `bluesky --headless`
+ * process tree, pushed over the `server_log` Socket.IO event. Unlike the
+ * file-polling Output Log tab, this streams a running process. The tab button
+ * and pane are injected at runtime so the core `index.html` carries no
+ * integrated-specific markup (preserving build-time exclusion).
  */
 
 // Shared header controls owned by the core echo/output-log tabs. Hidden while
 // the Server Log tab is active; the core tab handlers restore them on switch.
 const SHARED_CONTROL_IDS = [
     'clear-echo',
+    'create-log-btn',
     'refresh-output-files',
     'clear-log-stream',
     'stop-log-stream',
@@ -87,8 +84,7 @@ export class ServerLogStreamManager {
         toolbar.style.gap = '4px';
         toolbar.style.padding = '4px 8px';
         toolbar.style.borderBottom = '1px solid #404040';
-        // The action buttons / status span carry generic data-bs-action and
-        // .bs-status hooks (alongside their ids) so ProcessControlManager can
+        // The data-bs-action / .bs-status hooks let ProcessControlManager
         // drive this toolbar and the Settings-modal controls uniformly.
         toolbar.innerHTML = `
             <button id="bs-start" data-bs-action="start" class="console-btn">Start</button>
@@ -129,8 +125,7 @@ export class ServerLogStreamManager {
                 this.ingest(data.lines);
             }
         });
-        // A reconnect leaves a gap: lines broadcast while the socket was down
-        // never reach this client. The backend buffers them for replay, so
+        // Lines broadcast while the socket was down never reached this client;
         // re-request the history (seq dedup makes the overlap harmless).
         this.socket.on('connect', () => {
             if (this.historyRequested) {
@@ -155,6 +150,10 @@ export class ServerLogStreamManager {
             if (el) el.style.display = 'none';
         }
 
+        // Lines stream in while the pane is hidden (where scrollHeight is 0,
+        // so auto-scroll can't track them): jump to the newest lines now.
+        if (this.output) this.output.scrollTop = this.output.scrollHeight;
+
         if (!this.historyRequested) {
             this.historyRequested = true;
             this.socket?.emit('request_log_history');
@@ -168,9 +167,8 @@ export class ServerLogStreamManager {
 
     /**
      * A changed stream id means the backend restarted: the new boot's seqs
-     * restart at 1 and would all collide with the previous session's, so drop
-     * the stale buffer (its process tree is gone server-side too) before
-     * ingesting the new stream.
+     * restart at 1 and would collide with the old session's, so drop the
+     * stale buffer before ingesting the new stream.
      */
     private trackStream(stream: string | undefined): void {
         if (typeof stream !== 'string' || stream === this.streamId) return;

@@ -65,6 +65,13 @@ export class CommandHandler {
     private static readonly QUIT_ALIASES = ['CLOSE', 'END', 'EXIT', 'Q', 'STOP'];
 
     /**
+     * BlueSky's zoom step is a factor sqrt(2) — one + or - keystroke, and
+     * also what ZOOM IN/OUT does without an explicit factor. On MapLibre's
+     * log2 zoom scale that factor is 0.5 levels.
+     */
+    private static readonly ZOOM_STEP_LEVELS = 0.5;
+
+    /**
      * SHOW* display-toggle commands (mirroring BlueSky's GUI commands of the
      * same names) → the DisplayOptions flag they drive and a label for echo
      * feedback.
@@ -135,6 +142,40 @@ export class CommandHandler {
 
         // Not handled by this handler, pass through to server
         return { handled: false, sendToServer: true };
+    }
+
+    /**
+     * Execute a command line the simulation forwarded over BlueSky's STACK
+     * topic (a scenario-file GUI command such as PAN/ZOOM, relayed by the
+     * proxy as a `stack_command` event). Runs the local-command handlers
+     * exactly as if the line had been typed into the console, but never
+     * sends anything back to the server — the simulation forwarded the line
+     * precisely because it cannot execute it, so returning it would loop.
+     */
+    public executeServerCommand(command: string): void {
+        const trimmed = command.trim();
+        if (!trimmed) {
+            return;
+        }
+
+        const parts = trimmed.split(/\s+/);
+        const cmd = parts[0].toUpperCase();
+        const args = parts.slice(1).join(' ');
+
+        if (/^[+=-]+$/.test(cmd)) {
+            this.handleZoomShorthand(cmd);
+            return;
+        }
+
+        if (this.LOCAL_COMMANDS.includes(cmd)) {
+            logger.info('CommandHandler', 'Executing server-forwarded command:', trimmed);
+            this.handleLocalCommand(cmd, args);
+            return;
+        }
+
+        // Same benign-no-op semantics the desktop GUIs give commands they
+        // don't implement: report and ignore.
+        this.sendEcho(`${cmd}: not supported by the web client (ignored)`, 'warning');
     }
 
     /**
@@ -261,71 +302,48 @@ export class CommandHandler {
     }
 
     /**
-     * Handle ZOOM command - set specific zoom level
-     * Usage: ZOOM <level> or ZOOM IN or ZOOM OUT
+     * Handle ZOOM command, mirroring BlueSky's:
+     *   ZOOM <level>        set an absolute zoom level
+     *   ZOOM IN/OUT [factor] zoom by factor (default sqrt(2), like one +/-)
      */
     private handleZoomCommand(args: string): CommandResult {
-        if (!args || args.trim().length === 0) {
-            this.sendEcho('ZOOM command requires a level (e.g., ZOOM 8) or IN/OUT', 'warning');
+        const parts = args.trim().split(/\s+/).filter(p => p.length > 0);
+        if (parts.length === 0) {
+            this.sendEcho('ZOOM command requires a level (e.g., ZOOM 8) or IN/OUT [factor]', 'warning');
             return { handled: true, sendToServer: false };
         }
 
-        const mapDisplay = this.requireMapInitialized();
-        if (!mapDisplay) {
-            return { handled: true, sendToServer: false };
+        const sub = parts[0].toUpperCase();
+        if (sub === 'IN' || sub === 'OUT') {
+            const sign = sub === 'IN' ? 1 : -1;
+            if (parts[1] === undefined) {
+                return this.zoomByLevels(sign * CommandHandler.ZOOM_STEP_LEVELS);
+            }
+            const factor = parseFloat(parts[1]);
+            if (isNaN(factor) || factor <= 0) {
+                this.sendEcho(`Invalid zoom factor: ${parts[1]}`, 'warning');
+                return { handled: true, sendToServer: false };
+            }
+            return this.zoomByLevels(sign * Math.log2(factor));
         }
 
-        const upperArgs = args.trim().toUpperCase();
-
-        // Handle ZOOM IN / ZOOM OUT
-        if (upperArgs === 'IN') {
-            return this.handleZoomInCommand();
-        }
-        if (upperArgs === 'OUT') {
-            return this.handleZoomOutCommand();
-        }
-
-        // Try to parse as zoom level
-        const level = parseFloat(args);
+        const level = parseFloat(parts[0]);
         if (isNaN(level)) {
             this.sendEcho('Invalid zoom level. Use a number, IN, or OUT', 'warning');
             return { handled: true, sendToServer: false };
         }
 
-        mapDisplay.setZoom(level);
-        this.sendEcho(`Zoom set to ${level.toFixed(1)}`, 'success');
-
-        return { handled: true, sendToServer: false };
+        return this.zoomToLevel(level);
     }
 
-    /**
-     * Handle ZOOMIN command - zoom in one level
-     */
+    /** Handle ZOOMIN command - zoom in one sqrt(2) step */
     private handleZoomInCommand(): CommandResult {
-        const mapDisplay = this.requireMapInitialized();
-        if (!mapDisplay) {
-            return { handled: true, sendToServer: false };
-        }
-
-        mapDisplay.zoomIn();
-        this.sendEcho('Zoomed in', 'success');
-
-        return { handled: true, sendToServer: false };
+        return this.zoomByLevels(CommandHandler.ZOOM_STEP_LEVELS);
     }
 
-    /**
-     * Handle ZOOMOUT command - zoom out one level
-     */
+    /** Handle ZOOMOUT command - zoom out one sqrt(2) step */
     private handleZoomOutCommand(): CommandResult {
-        const mapDisplay = this.requireMapInitialized();
-        if (!mapDisplay) {
-            return { handled: true, sendToServer: false };
-        }
-
-        mapDisplay.zoomOut();
-        this.sendEcho('Zoomed out', 'success');
-
-        return { handled: true, sendToServer: false };
+        return this.zoomByLevels(-CommandHandler.ZOOM_STEP_LEVELS);
     }
 
     /**
@@ -361,24 +379,37 @@ export class CommandHandler {
 
     /**
      * Handle BlueSky's +/- console shorthand: each + or = zooms in one
-     * sqrt(2) step, each - zooms out one. On MapLibre's log2 zoom scale a
-     * sqrt(2) factor is 0.5 zoom levels.
+     * sqrt(2) step, each - zooms out one.
      */
     private handleZoomShorthand(token: string): CommandResult {
-        const mapDisplay = this.requireMapInitialized();
-        if (!mapDisplay) {
-            return { handled: true, sendToServer: false };
-        }
-
         let steps = 0;
         for (const ch of token) {
             steps += ch === '-' ? -1 : 1;
         }
+        return this.zoomByLevels(CommandHandler.ZOOM_STEP_LEVELS * steps);
+    }
 
-        const newZoom = mapDisplay.getZoom() + 0.5 * steps;
-        mapDisplay.setZoom(newZoom);
-        this.sendEcho(`Zoom set to ${newZoom.toFixed(1)}`, 'success');
+    /** Zoom by a delta in MapLibre levels and echo the applied level. */
+    private zoomByLevels(deltaLevels: number): CommandResult {
+        const mapDisplay = this.requireMapInitialized();
+        if (!mapDisplay) {
+            return { handled: true, sendToServer: false };
+        }
+        return this.zoomToLevel(mapDisplay.getZoom() + deltaLevels);
+    }
 
+    /**
+     * Set an absolute zoom level, echoing the level actually applied —
+     * MapLibre clamps to its min/max zoom, so reading it back keeps the
+     * echo honest for out-of-range requests like ZOOM 99.
+     */
+    private zoomToLevel(level: number): CommandResult {
+        const mapDisplay = this.requireMapInitialized();
+        if (!mapDisplay) {
+            return { handled: true, sendToServer: false };
+        }
+        mapDisplay.setZoom(level);
+        this.sendEcho(`Zoom set to ${mapDisplay.getZoom().toFixed(1)}`, 'success');
         return { handled: true, sendToServer: false };
     }
 
