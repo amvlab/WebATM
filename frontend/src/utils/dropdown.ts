@@ -91,7 +91,10 @@ export class Dropdown<T> {
             return true;
         }
         if (key === 'ArrowUp') {
-            this.selectedIndex = Math.max(this.selectedIndex - 1, -1);
+            // With no selection yet, Up picks the top item (mirroring Down);
+            // once on the top item, repeated Up keeps it selected rather than
+            // dropping back to "nothing selected".
+            this.selectedIndex = this.selectedIndex < 0 ? 0 : Math.max(this.selectedIndex - 1, 0);
             this.render();
             return true;
         }
