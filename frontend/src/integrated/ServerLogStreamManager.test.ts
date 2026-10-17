@@ -26,6 +26,7 @@ function buildEchoScaffold(): void {
                 <div class="echo-header-controls">
                     <span id="log-stream-filename"></span>
                     <button id="clear-echo" class="console-btn">Clear</button>
+                    <button id="create-log-btn" class="console-btn">+ Create Log</button>
                     <button id="refresh-output-files" class="console-btn">Reload</button>
                     <button id="clear-log-stream" class="console-btn">Clear</button>
                     <button id="stop-log-stream" class="console-btn">Exit Stream</button>
@@ -167,6 +168,37 @@ describe('ServerLogStreamManager', () => {
 
         manager.activate();
         expect(historyRequestCount(socket)).toBe(1);
+    });
+
+    it('activate() hides every shared header control, including Create Log', () => {
+        // The Output Log browser view leaves these visible; switching to the
+        // Server Log tab must not leave any of them floating above the pane.
+        manager.activate();
+
+        for (const id of [
+            'clear-echo',
+            'create-log-btn',
+            'refresh-output-files',
+            'clear-log-stream',
+            'stop-log-stream',
+            'log-stream-filename',
+        ]) {
+            expect(byId(id).style.display, `#${id} should be hidden`).toBe('none');
+        }
+    });
+
+    it('activate() jumps to the newest lines after streaming while hidden', () => {
+        serverLogListener(socket)({ lines: lines(1, 2, 3) });
+
+        // While the pane is hidden its scrollHeight is 0, so the ingest-time
+        // auto-scroll could not track the stream. Simulate the layout being
+        // measurable again once the tab is shown.
+        const out = byId('server-log-output');
+        Object.defineProperty(out, 'scrollHeight', { value: 500, configurable: true });
+        out.scrollTop = 0;
+
+        manager.activate();
+        expect(out.scrollTop).toBe(500);
     });
 
     it('re-requests history on reconnect to backfill lines missed while down', () => {
