@@ -11,7 +11,7 @@ import { PanelResizer } from './PanelResizer';
 function buildLayout(): void {
     document.body.innerHTML = `
         <div class="left-panel"></div>
-        <div class="map-container"></div>
+        <div class="map-container"><div id="map"></div></div>
         <div class="right-panel"></div>
         <div class="console-container">
             <div class="console-section"></div>
@@ -19,6 +19,7 @@ function buildLayout(): void {
         </div>
         <div class="content-area"></div>
         <div class="resize-handle" data-target="left-map"></div>
+        <div class="resize-handle" data-target="map-right"></div>
         <div class="resize-handle" data-target="content-console"></div>
         <div class="resize-handle" data-target="bogus"></div>
     `;
@@ -34,6 +35,16 @@ function mousedown(el: HTMLElement): void {
 
 function mouseup(): void {
     document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 100, clientY: 100 }));
+}
+
+function mousemove(x: number, buttons: number): void {
+    document.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true, clientX: x, clientY: 100, buttons
+    }));
+}
+
+function mapElement(): HTMLElement {
+    return document.getElementById('map') as HTMLElement;
 }
 
 describe('PanelResizer mousedown handling', () => {
@@ -85,5 +96,90 @@ describe('PanelResizer mousedown handling', () => {
         expect(document.body.style.cursor).toBe('');
         // Layout is saved under the StorageManager namespace.
         expect(localStorage.getItem('webatm-panel-layout')).not.toBeNull();
+    });
+
+    it('disables map pointer events during the drag and restores them on mouseup', () => {
+        mousedown(handle('left-map'));
+        expect(mapElement().style.pointerEvents).toBe('none');
+
+        mouseup();
+        expect(mapElement().style.pointerEvents).toBe('');
+    });
+
+    it('does not persist the dropped per-section layout keys', () => {
+        mousedown(handle('left-map'));
+        mouseup();
+
+        const saved = JSON.parse(localStorage.getItem('webatm-panel-layout') as string);
+        expect(saved).not.toHaveProperty('trafficPanel');
+        expect(saved).not.toHaveProperty('displayPanel');
+        expect(saved).toHaveProperty('version');
+    });
+});
+
+describe('PanelResizer lost-mouseup recovery', () => {
+    let resizer: PanelResizer;
+
+    beforeEach(() => {
+        localStorage.clear();
+        buildLayout();
+        resizer = new PanelResizer();
+    });
+
+    afterEach(() => {
+        resizer.destroy();
+        document.body.className = '';
+        document.body.style.cursor = '';
+    });
+
+    it('keeps dragging while a button is held', () => {
+        const h = handle('left-map');
+        mousedown(h);
+        mousemove(150, 1);
+
+        expect(h.classList.contains('resizing')).toBe(true);
+        expect(mapElement().style.pointerEvents).toBe('none');
+    });
+
+    it('ends the drag when a mousemove arrives with no button held', () => {
+        const h = handle('left-map');
+        mousedown(h);
+        // Simulates a mouseup lost outside the window: the next move has
+        // buttons === 0 and must tear the drag down.
+        mousemove(150, 0);
+
+        expect(h.classList.contains('resizing')).toBe(false);
+        expect(document.body.classList.contains('no-select')).toBe(false);
+        expect(document.body.style.cursor).toBe('');
+        expect(mapElement().style.pointerEvents).toBe('');
+    });
+
+    it('ends the drag when the window loses focus', () => {
+        const h = handle('content-console');
+        mousedown(h);
+        window.dispatchEvent(new Event('blur'));
+
+        expect(h.classList.contains('resizing')).toBe(false);
+        expect(document.body.style.cursor).toBe('');
+        expect(mapElement().style.pointerEvents).toBe('');
+    });
+
+    it('destroy() mid-drag releases the stuck drag state', () => {
+        const h = handle('left-map');
+        mousedown(h);
+        resizer.destroy();
+
+        expect(h.classList.contains('resizing')).toBe(false);
+        expect(document.body.classList.contains('no-select')).toBe(false);
+        expect(mapElement().style.pointerEvents).toBe('');
+    });
+
+    it('never writes an inline flex-basis on the map container', () => {
+        mousedown(handle('map-right'));
+        mousemove(150, 1);
+        mouseup();
+
+        const map = document.querySelector('.map-container') as HTMLElement;
+        expect(map.style.flexBasis).toBe('');
     });
 });

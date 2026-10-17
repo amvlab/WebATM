@@ -451,12 +451,6 @@ export interface PanelLayoutState {
   consoleContainer: string;
   consoleSection: string;
   echoSection: string;
-  trafficPanel: string;
-  aircraftPanel: string;
-  conflictsPanel: string;
-  nodePanel: string;
-  navPanel: string;
-  displayPanel: string;
   timestamp: number;
   version: string;
 }
