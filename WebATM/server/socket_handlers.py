@@ -5,6 +5,7 @@ server, including connection management, commands, node management, and
 BlueSky events.
 """
 
+import time
 import uuid
 
 from flask import current_app, session
@@ -142,12 +143,26 @@ def register_socket_handlers(socketio, session_manager):
             data (dict): Payload with a ``command`` string.
 
         Emits a ``command_result`` event with the success flag back to the
-        sender.
+        sender. A failed send additionally gets an error ``echo``: no BlueSky
+        response will follow it, and ``command_result`` carries no
+        user-visible text, so without the echo the command would vanish
+        silently.
         """
         command = (data or {}).get("command", "")
         success = current_app.bluesky_proxy.send_command(command)
         try:
             emit("command_result", {"success": success, "command": command})
+            if not success:
+                emit(
+                    "echo",
+                    {
+                        "text": f"Command not sent — not connected to a "
+                        f"BlueSky server: {command}",
+                        "flags": 1,  # rendered as an error by the frontend
+                        "timestamp": time.time(),
+                        "sender": None,
+                    },
+                )
         except Exception as e:
             logger.info(f"Error emitting command result: {e}")
 

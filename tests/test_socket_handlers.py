@@ -105,6 +105,45 @@ class TestCommandEvent:
         assert results
         assert results[0]["args"][0]["command"] == "CRE KL204"
 
+    def test_failed_command_echoes_error_to_sender(self, sio):
+        """A command that cannot be sent (no BlueSky client running) must
+        produce user-visible feedback: an error echo to the sender. Nothing
+        consumes the bare ``command_result``, and no BlueSky response will
+        ever follow, so without the echo the command vanishes silently."""
+        app, socketio, client = sio
+        client.get_received()
+        client.emit("command", {"command": "CRE KL204"})
+        received = {p["name"]: p["args"][0] for p in client.get_received()}
+        assert received["command_result"]["success"] is False
+        echo = received["echo"]
+        assert echo["flags"] == 1  # error
+        assert "CRE KL204" in echo["text"]
+        assert echo["sender"] is None  # WebATM-generated, not from a node
+
+    def test_failed_command_echo_is_not_broadcast(self, sio):
+        """The failure concerns only the client that sent the command; other
+        browsers must not see an error echo for it."""
+        app, socketio, client = sio
+        client.get_received()
+        second = socketio.test_client(app)
+        try:
+            second.get_received()  # drain connect envelopes
+            client.emit("command", {"command": "CRE KL204"})
+            assert "echo" not in {p["name"] for p in second.get_received()}
+        finally:
+            second.disconnect()
+
+    def test_successful_command_does_not_echo(self, sio):
+        """A command that was sent fine gets its feedback from BlueSky's own
+        echo response; WebATM must not add one of its own."""
+        app, socketio, client = sio
+        client.get_received()
+        app.bluesky_proxy.send_command = lambda command: True
+        client.emit("command", {"command": "CRE KL204"})
+        received = {p["name"]: p["args"][0] for p in client.get_received()}
+        assert received["command_result"]["success"] is True
+        assert "echo" not in received
+
 
 class TestNodeEvents:
     def test_get_nodes_does_not_error(self, sio):
