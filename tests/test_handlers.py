@@ -263,6 +263,44 @@ class TestAcdataThrottle:
         assert proxy.traffic_data["id"] == ["AC1"]
 
 
+class TestAcdataCachingWithoutClients:
+    """The traffic cache must track the live feed even with no browser
+    attached: the initial_data snapshot, the 0.5 s backup timer and the
+    ROUTEDATA aircraft filter all serve ``proxy.traffic_data`` verbatim, so a
+    cache frozen while unwatched hands the next client the aircraft from the
+    moment the last one left — ghosts at stale positions, resurrected deleted
+    aircraft, and route frames filtered against a stale id list."""
+
+    def test_frame_is_cached_but_not_emitted_without_clients(
+        self, proxy, fake_socketio
+    ):
+        proxy.connected_clients = 0
+        on_acdata_received({"id": ["AC1"], "lat": [1.0]})
+        assert proxy.traffic_data["id"] == ["AC1"]
+        assert fake_socketio.count("acdata") == 0
+
+    def test_deletions_while_unwatched_reach_the_cache(self, proxy, fake_socketio):
+        # A client watches two aircraft, then leaves...
+        on_acdata_received({"id": ["AC1", "AC2"]})
+        assert proxy.traffic_data["id"] == ["AC1", "AC2"]
+
+        # ...AC2 is deleted while nobody is connected: the next frame must
+        # replace the cached pair, not be dropped at the client gate.
+        proxy.connected_clients = 0
+        proxy.last_acdata_emit = 0  # throttle interval elapsed
+        on_acdata_received({"id": ["AC1"]})
+        assert proxy.traffic_data["id"] == ["AC1"]
+        assert fake_socketio.count("acdata") == 1  # only the first frame
+
+    def test_cache_refresh_is_still_throttled(self, proxy, fake_socketio):
+        proxy.connected_clients = 0
+        on_acdata_received({"id": ["AC1"]})
+        cached = proxy.traffic_data
+        # A second frame within acdata_interval is skipped wholesale.
+        on_acdata_received({"id": ["AC2"]})
+        assert proxy.traffic_data is cached
+
+
 class TestStatechangeHandler:
     def test_emits_statechange(self, proxy, fake_socketio):
         proxy.sim_data = {"state": 0}
@@ -489,10 +527,10 @@ class TestResetHandler:
     def test_clears_cached_aircraft_with_no_clients_connected(
         self, proxy, fake_socketio
     ):
-        # The initial_data snapshot serves proxy.traffic_data verbatim, and
-        # on_acdata_received only refreshes it while clients are attached — so
-        # a reset with nobody connected must still clear the cache, or the
-        # next page load renders the pre-reset aircraft (ghosts).
+        # The initial_data snapshot serves proxy.traffic_data verbatim, and a
+        # paused/idle sim may send no further ACDATA to overwrite it — so a
+        # reset with nobody connected must still clear the cache, or the next
+        # page load renders the pre-reset aircraft (ghosts).
         from WebATM.utils import empty_traffic_data
 
         proxy.connected_clients = 0

@@ -84,17 +84,20 @@ def on_siminfo_received(
             proxy.socketio.emit("siminfo", proxy.sim_data)
             proxy.last_siminfo_emit = current_time
         except Exception as e:
-            logger.error(f"Proxy→Web: Error sending SIMINFO: {e}")
+            logger.error(f"Error emitting SIMINFO: {e}")
 
 
 def on_acdata_received(data):
     """Process a BlueSky ACDATA traffic frame and emit ``acdata`` to web clients.
 
-    Hot path: the network timer delivers ACDATA at up to 50 Hz, but it is only
-    emitted to browsers at ``acdata_interval`` (10 Hz) and only for the active
-    node. ``make_json_serializable`` is the dominant per-frame cost, so it is
-    deferred until after the active-node filter and the emit throttle decide the
-    frame is actually sent. Set WEBATM_PERF=1 (WebATM.proxy.perf) to measure it.
+    Hot path: the network timer delivers ACDATA at up to 50 Hz, but frames are
+    only serialized and cached at ``acdata_interval`` (10 Hz), only for the
+    active node, and only emitted to browsers while any are connected.
+    ``make_json_serializable`` is the dominant per-frame cost, so it is deferred
+    until after the active-node filter and the throttle accept the frame. The
+    cache is refreshed even with no browser attached — ``initial_data``, the
+    backup timer and the ROUTEDATA filter serve it, so it must track the live
+    feed. Set WEBATM_PERF=1 (WebATM.proxy.perf) to measure the hot path.
 
     Aircraft clearing on a simulation reset is NOT handled here: BlueSky
     signals a reset on the dedicated RESET topic (events.on_reset_received),
@@ -136,24 +139,28 @@ def on_acdata_received(data):
             return
 
         # Throttle BEFORE serializing: serialization is the dominant per-frame
-        # cost, so pay it only for frames that are actually emitted.
+        # cost, so pay it at most once per acdata_interval.
         current_time = time.time()
-        if not (
-            proxy.socketio
-            and proxy.connected_clients > 0
-            and (current_time - proxy.last_acdata_emit) >= proxy.acdata_interval
-        ):
+        if (current_time - proxy.last_acdata_emit) < proxy.acdata_interval:
             return
 
+        # Refresh the cache even with no browser attached: the initial_data
+        # snapshot, the 0.5 s backup timer and the ROUTEDATA aircraft filter
+        # all serve proxy.traffic_data, so a cache frozen while unwatched
+        # would hand the next client the aircraft from the moment the last
+        # one left (ghosts at stale positions).
         t0 = time.perf_counter()
         serializable_data = make_json_serializable(data)
         data_path_perf.record_serialize(time.perf_counter() - t0)
         proxy.traffic_data = serializable_data
+        proxy.last_acdata_emit = current_time
+
+        if not (proxy.socketio and proxy.connected_clients > 0):
+            return
 
         try:
             t1 = time.perf_counter()
             proxy.socketio.emit("acdata", serializable_data)
-            proxy.last_acdata_emit = current_time
             data_path_perf.record_emit(time.perf_counter() - t1)
         except Exception:
             logger.exception("Error emitting ACDATA")
@@ -210,6 +217,6 @@ def on_statechange_received(data, sender_id=None):
         try:
             proxy.socketio.emit("statechange", payload)
         except Exception as e:
-            logger.error(f"Proxy->Web: Error sending STATECHANGE: {e}")
+            logger.error(f"Error emitting STATECHANGE: {e}")
 
     logger.info(f"STATECHANGE from {sender_id_str}: simstate={simstate}")

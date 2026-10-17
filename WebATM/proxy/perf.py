@@ -47,6 +47,7 @@ class DataPathPerf:
         except ValueError:
             self.interval = 5.0
         self._window_start = time.time()
+        self._last_frame_wall: float | None = None
         self._last_emit_wall: float | None = None
         self._max_emit_gap = 0.0
         self._reset_counters()
@@ -54,7 +55,8 @@ class DataPathPerf:
     def _reset_counters(self) -> None:
         self.received = 0  # ACDATA frames into the handler (any node)
         self.filtered = 0  # dropped by the active-node filter
-        self.emits = 0  # frames serialized and emitted
+        self.serializes = 0  # frames serialized (emit may still fail)
+        self.emits = 0  # frames actually emitted
         self.serialize_s = 0.0
         self.serialize_max_s = 0.0
         self.emit_s = 0.0
@@ -62,9 +64,23 @@ class DataPathPerf:
     # --- recording (cheap no-ops when disabled) --------------------------
 
     def record_received(self) -> None:
-        """Count one ACDATA frame arriving at the handler (any node)."""
-        if self.enabled:
-            self.received += 1
+        """Count one ACDATA frame arriving at the handler (any node).
+
+        A frame arriving after an idle gap longer than ``interval`` (process
+        boot, disconnect/reconnect) restarts the measurement window from that
+        frame, discarding any partial pre-gap counters. Otherwise the idle
+        period would dilute the reported CPU shares by an arbitrary factor
+        and read as a bogus multi-second emit gap.
+        """
+        if not self.enabled:
+            return
+        now = time.time()
+        if self._last_frame_wall is None or now - self._last_frame_wall > self.interval:
+            self._reset_counters()
+            self._window_start = now
+            self._last_emit_wall = None
+        self._last_frame_wall = now
+        self.received += 1
 
     def record_filtered(self) -> None:
         """Count one frame dropped by the active-node filter."""
@@ -79,6 +95,7 @@ class DataPathPerf:
         """
         if not self.enabled:
             return
+        self.serializes += 1
         self.serialize_s += seconds
         if seconds > self.serialize_max_s:
             self.serialize_max_s = seconds
@@ -118,8 +135,8 @@ class DataPathPerf:
         if elapsed < self.interval:
             return
         if self.received:
-            throttled = max(0, self.received - self.filtered - self.emits)
-            avg_ser_s = self.serialize_s / self.emits if self.emits else 0.0
+            throttled = max(0, self.received - self.filtered - self.serializes)
+            avg_ser_s = self.serialize_s / self.serializes if self.serializes else 0.0
             avg_emit_ms = 1000.0 * self.emit_s / self.emits if self.emits else 0.0
             datapath_cpu = 100.0 * (self.serialize_s + self.emit_s) / elapsed
             # Estimate the pre-optimization cost: one serialize per received
