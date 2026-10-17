@@ -475,35 +475,49 @@ class TestStackcmdsHandler:
 
 
 class TestStackReceivedHandler:
-    def test_local_help_command_executed(self, proxy, fake_socketio):
-        on_stack_received("HELP")
-        # Bare HELP is answered locally -> info echo emitted.
-        assert fake_socketio.count("echo") == 1
-        echo_payload = fake_socketio.last("echo")
-        assert echo_payload["flags"] == 0
-        assert "bluesky web client" in echo_payload["text"].lower()
-
-    def test_gui_only_command_reports_warning_not_error(self, proxy, fake_socketio):
-        # A scenario-file GUI command (e.g. PAN) forwarded by the server is a
-        # benign no-op for the web client: warning (flags=2), never an error.
+    def test_forwarded_command_emitted_to_browsers(self, proxy, fake_socketio):
+        # A scenario-file GUI command (e.g. PAN) forwarded by the simulation
+        # goes to browsers as stack_command; the frontend CommandHandler
+        # executes it (or reports it unsupported) exactly like typed input.
         on_stack_received("PAN EHAM")
-        echo_payload = fake_socketio.last("echo")
-        assert echo_payload["text"] == "PAN: not supported by the web client (ignored)"
-        assert echo_payload["flags"] == 2
+        assert fake_socketio.count("stack_command") == 1
+        payload = fake_socketio.last("stack_command")
+        assert payload["command"] == "PAN EHAM"
+        assert "timestamp" in payload
+
+    def test_semicolon_joined_payload_is_split(self, proxy, fake_socketio):
+        # BlueSky's stack.forward() joins multiple commands with ';' and its
+        # reference client splits them back apart; mirror that.
+        on_stack_received("PAN EHAM; ZOOM 2")
+        assert fake_socketio.count("stack_command") == 2
+        first, second = fake_socketio.events("stack_command")
+        assert first["command"] == "PAN EHAM"
+        assert second["command"] == "ZOOM 2"
 
     def test_list_of_commands(self, proxy, fake_socketio):
-        on_stack_received(["HELP", "?"])
-        assert fake_socketio.count("echo") == 2
+        on_stack_received(["PAN EHAM", "ZOOM 0.4"])
+        assert fake_socketio.count("stack_command") == 2
 
     def test_empty_command_skipped(self, proxy, fake_socketio):
-        on_stack_received(["", "   "])
-        assert fake_socketio.count("echo") == 0
+        on_stack_received(["", "   ", " ; "])
+        assert fake_socketio.count("stack_command") == 0
+
+    def test_non_string_entries_skipped(self, proxy, fake_socketio):
+        on_stack_received(["PAN EHAM", 42, None])
+        assert fake_socketio.count("stack_command") == 1
+
+    def test_dropped_without_connected_browsers(self, proxy, fake_socketio):
+        # No browser connected -> nothing can execute the command; no emit,
+        # no error.
+        proxy.connected_clients = 0
+        on_stack_received("PAN EHAM")
+        assert fake_socketio.count("stack_command") == 0
 
     def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
         proxy.allow_reconnection = False
         proxy.last_successful_update = 42.0
         on_stack_received("PAN EHAM")
-        assert fake_socketio.count("echo") == 0
+        assert fake_socketio.count("stack_command") == 0
         assert proxy.last_successful_update == 42.0  # liveness untouched
 
 

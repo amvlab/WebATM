@@ -462,22 +462,6 @@ export class MapDisplay {
     }
 
     /**
-     * Zoom in by one level
-     */
-    public zoomIn(): void {
-        if (!this.map) return;
-        this.map.zoomIn();
-    }
-
-    /**
-     * Zoom out by one level
-     */
-    public zoomOut(): void {
-        if (!this.map) return;
-        this.map.zoomOut();
-    }
-
-    /**
      * Pan to a specific location (animated)
      */
     public panTo(lat: number, lon: number): void {
