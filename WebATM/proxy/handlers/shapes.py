@@ -23,11 +23,8 @@ _CIRCLE_SEGMENTS = 72
 # Nautical miles per degree of latitude (1 arc-minute == 1 nm).
 _NM_PER_DEGREE = 60.0
 
-# BlueSky stores a shape's vertical extent (metres) on ``Shape.top``/``bottom``,
-# defaulting to +/-1e9 for "unbounded". amvlab BlueSky additionally publishes
-# these on the POLY payload so WebATM can extrude the shape into a 3D volume;
-# vanilla BlueSky omits them. Any bound at or beyond this magnitude is treated
-# as unbounded (no vertical extent -> flat 2D, the vanilla behaviour).
+# BlueSky uses +/-1e9 m as the "unbounded" vertical extent of a shape; any
+# bound at or beyond this magnitude is treated as unbounded (renders flat).
 _ALT_UNBOUNDED = 9e8
 
 # Cap on stored shapes per node and kind (demo limit): oldest are dropped.
@@ -38,15 +35,11 @@ def _normalize_altitudes(shape_dict):
     """Keep only finite vertical bounds on a shape dict, in place.
 
     amvlab BlueSky publishes ``top``/``bottom`` (metres) on each shape so the
-    frontend can extrude it; vanilla BlueSky sends neither. BlueSky uses
-    +/-1e9 as its "unbounded" sentinel, which must never reach the 3D renderer
-    as a literal extrusion height. This keeps ``top`` only when it is a finite
-    upper bound and ``bottom`` only when it is a finite lower bound, popping
-    anything else (missing, non-numeric, or sentinel) so the shape renders flat.
-
-    The frontend treats the mere presence of ``top`` as "has altitude", so a
-    fully-unbounded shape ends up with neither key and renders in 2D, exactly
-    like it does against vanilla BlueSky.
+    frontend can extrude it; vanilla BlueSky sends neither. The +/-1e9
+    "unbounded" sentinels must never reach the 3D renderer as literal
+    extrusion heights, so anything non-numeric or at sentinel magnitude is
+    popped and the shape renders flat (the frontend treats the presence of
+    ``top`` as "has altitude").
 
     Args:
         shape_dict (dict): A per-shape payload that may carry ``top``/``bottom``.
@@ -192,18 +185,33 @@ def _deleted_names(poly_data):
     return []
 
 
-def _merge_shape(target, name, info):
-    """Merge one shape payload into a store, patching partial updates in place.
+def _is_full_definition(info):
+    """Check whether a payload entry is a full shape (re)definition.
 
-    An Update action may carry only the changed fields (e.g. a COLOR change
-    sends ``{"color": ...}`` without coordinates); replacing the stored entry
-    would wipe the shape's geometry, so dict payloads are merged into the
-    existing dict instead.
+    BlueSky's ``defineArea`` always sends ``shape`` and ``coordinates``
+    together; partial updates (e.g. COLOR) carry neither.
+
+    Args:
+        info (Any): Separated per-shape payload.
+
+    Returns:
+        bool: True when the entry defines the shape rather than patching it.
+    """
+    return isinstance(info, dict) and "shape" in info
+
+
+def _merge_shape(target, name, info):
+    """Patch one partial shape update into a store, in place.
+
+    A partial Update carries only the changed fields (e.g. COLOR sends
+    ``{"color": ...}`` without coordinates); replacing the stored entry would
+    wipe the shape's geometry, so dict payloads are merged into the existing
+    dict instead.
 
     Args:
         target (dict): Shape store (name -> shape info) to merge into.
         name (str): Shape name.
-        info (Any): New shape payload.
+        info (Any): Partial shape payload.
     """
     existing = target.get(name)
     if isinstance(existing, dict) and isinstance(info, dict):
@@ -215,6 +223,16 @@ def _merge_shape(target, name, info):
 def _merge_shapes(store_polys, store_lines, new_polys, new_lines):
     """Merge separated new shapes into a node's polygon and polyline stores.
 
+    A full definition decides its kind authoritatively: BlueSky's
+    ``defineArea`` overwrites any existing shape with the same name (even one
+    of a different kind) with a fresh object, so the stored entry is replaced
+    and the name is evicted from the other store. Otherwise a redefinition
+    from LINE to POLY would be trapped in the polyline store (rendering an
+    area as a thin line), the reverse would leave a stale polygon behind, and
+    dropped server-side fields (a previous COLOR, POLYALT bounds) would
+    linger. Partial updates merge into whichever store already holds the
+    shape.
+
     Args:
         store_polys (dict): Stored polygon mapping for the node.
         store_lines (dict): Stored polyline mapping for the node.
@@ -222,15 +240,20 @@ def _merge_shapes(store_polys, store_lines, new_polys, new_lines):
         new_lines (dict): Newly received polyline shapes.
     """
     for name, info in new_polys.items():
-        # A partial update carries no 'shape' field and lands in the polygon
-        # bucket by default; route it to the store that already holds the shape
-        # so a polyline's update doesn't create a phantom polygon.
-        if name in store_lines and name not in store_polys:
+        if _is_full_definition(info):
+            store_lines.pop(name, None)
+            store_polys[name] = info
+        elif name in store_lines and name not in store_polys:
+            # Partial update for a stored polyline: it lands in the polygon
+            # bucket by default (no 'shape' field), so route it home.
             _merge_shape(store_lines, name, info)
         else:
             _merge_shape(store_polys, name, info)
     for name, info in new_lines.items():
-        _merge_shape(store_lines, name, info)
+        # Line-bucket entries always carry shape == "LINE" (that is the
+        # routing criterion), so they are full definitions.
+        store_polys.pop(name, None)
+        store_lines[name] = info
 
 
 def _trim_shape_store(polys, kind):
@@ -326,16 +349,13 @@ def on_poly_received(data, *args, **kwargs):
 def _separate_poly_and_polyline_data(poly_data):
     """Split combined POLY data into polygons and polylines by ``shape`` field.
 
-    Shapes marked ``LINE`` become polylines; ``POLYALT`` shapes are rewritten
-    as ``POLY`` polygons; ``BOX`` (two opposite corners) and ``CIRCLE`` (centre
-    plus radius in nautical miles) are expanded into ``POLY`` polygon rings;
-    everything else is treated as a polygon. Flat ``coordinates`` arrays
-    (``[lat1, lon1, lat2, lon2, ...]``) are converted to separate ``lat``/``lon``
-    lists for web-client compatibility. Finite ``top``/``bottom`` vertical
-    bounds (metres) are passed through so the frontend can extrude the shape in
-    3D; BlueSky's unbounded +/-1e9 sentinels (and vanilla BlueSky's absent
-    altitudes) are dropped so those shapes stay flat. On errors or unexpected
-    formats the whole payload is treated as polygons.
+    Shapes marked ``LINE`` become polylines; ``POLYALT`` is rewritten as
+    ``POLY``; ``BOX`` (two opposite corners) and ``CIRCLE`` (centre plus
+    radius in nautical miles) are expanded into ``POLY`` polygon rings;
+    everything else is treated as a polygon. Flat ``coordinates`` arrays are
+    split into the ``lat``/``lon`` lists the web client wants, and only finite
+    ``top``/``bottom`` bounds survive (see ``_normalize_altitudes``). On
+    errors or unexpected formats the whole payload is treated as polygons.
 
     Args:
         poly_data (dict): JSON-serializable POLY payload, expected to contain a
@@ -368,20 +388,13 @@ def _separate_poly_and_polyline_data(poly_data):
                     polylines_polys[name] = info
                     continue
 
-                if shape == "BOX":
-                    # Two opposite corners; expand into a 4-corner POLY ring
-                    # (the flat-pair path below can't - a box has only 2 points).
+                if shape in ("BOX", "CIRCLE"):
+                    # Corner-pair / centre+radius encodings; expand into a
+                    # POLY ring (the flat-pair path below can't handle them).
                     info["shape"] = "POLY"
                     if not ("lat" in info and "lon" in info):
-                        corners = _box_corners(info.get("coordinates"))
-                        if corners:
-                            info["lat"], info["lon"] = corners
-                            info["name"] = name
-                elif shape == "CIRCLE":
-                    # Centre + radius (nm); tessellate into a POLY ring.
-                    info["shape"] = "POLY"
-                    if not ("lat" in info and "lon" in info):
-                        ring = _circle_ring(info.get("coordinates"))
+                        expand = _box_corners if shape == "BOX" else _circle_ring
+                        ring = expand(info.get("coordinates"))
                         if ring:
                             info["lat"], info["lon"] = ring
                             info["name"] = name

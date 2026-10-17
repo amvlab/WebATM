@@ -1065,3 +1065,50 @@ class TestPolySharedStateActions:
 
         polys = proxy.poly_data_by_node[sender_hex]["polys"]
         assert set(polys) == {"area1", "area2"}
+
+    def test_redefining_line_as_poly_moves_it_to_the_polygon_store(
+        self, proxy, fake_client
+    ):
+        # BlueSky's defineArea overwrites an existing name with a shape of any
+        # kind and publishes it as a plain Update. Regression: the full POLY
+        # definition was routed into the polyline store (the partial-update
+        # heuristic only checked the name), so the area rendered as a line.
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+        on_poly_received({"polys": {"z1": dict(self.LINE)}})
+
+        on_poly_received({"polys": {"z1": dict(self.AREA)}})
+
+        assert "z1" in proxy.poly_data_by_node[sender_hex]["polys"]
+        assert "z1" not in proxy.polyline_data_by_node[sender_hex]["polys"]
+        assert proxy.poly_data_by_node[sender_hex]["polys"]["z1"]["shape"] == "POLY"
+
+    def test_redefining_poly_as_line_evicts_the_stale_polygon(self, proxy, fake_client):
+        # Regression: the new polyline was stored, but the old polygon stayed
+        # in the polygon store, so both kept being emitted and the map
+        # flickered between the stale area and the new line.
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+        on_poly_received({"polys": {"z2": dict(self.AREA)}})
+
+        on_poly_received({"polys": {"z2": dict(self.LINE)}})
+
+        assert "z2" not in proxy.poly_data_by_node[sender_hex]["polys"]
+        assert "z2" in proxy.polyline_data_by_node[sender_hex]["polys"]
+
+    def test_full_redefinition_replaces_stale_fields(self, proxy, fake_client):
+        # defineArea creates a fresh server-side Shape, so fields of the old
+        # one (a previous COLOR, POLYALT bounds) no longer exist there; a full
+        # definition must replace the stored entry, not merge into it.
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+        volume = dict(self.AREA, shape="POLYALT", top=3000.0, bottom=500.0)
+        on_poly_received({"polys": {"z3": volume}})
+        on_poly_received({"polys": {"z3": {"color": [255, 0, 0]}}})
+
+        on_poly_received({"polys": {"z3": dict(self.AREA)}})
+
+        stored = proxy.poly_data_by_node[sender_hex]["polys"]["z3"]
+        assert "color" not in stored
+        assert "top" not in stored
+        assert stored["lat"] == [1.0, 3.0, 5.0]
