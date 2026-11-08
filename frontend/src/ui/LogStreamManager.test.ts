@@ -200,6 +200,99 @@ describe('LogStreamManager streaming line assembly', () => {
         expect(renderedLines()).toEqual([]);
     });
 
+    it('follows the stream only while the view is at the bottom', async () => {
+        const { logStreamManager } = await import('./LogStreamManager');
+        const output = document.getElementById('log-stream-output') as HTMLElement;
+        // happy-dom does no layout, so give the pane fixed scroll metrics.
+        Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 1000 });
+        Object.defineProperty(output, 'clientHeight', { configurable: true, get: () => 100 });
+
+        queueResponse(streamResponse('one\ntwo\n', 8));
+        await logStreamManager.startStreaming('t.log');
+        // Initial load is a replace: always lands on the tail.
+        expect(output.scrollTop).toBe(1000);
+
+        // The user scrolls up to read; the next poll must not yank them down.
+        output.scrollTop = 0;
+        queueResponse(streamResponse('three\n', 14));
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(renderedLines()).toEqual(['one', 'two', 'three']);
+        expect(output.scrollTop).toBe(0);
+
+        // Back near the bottom (within the 40px threshold): follow again.
+        output.scrollTop = 880;
+        queueResponse(streamResponse('four\n', 19));
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(output.scrollTop).toBe(1000);
+
+        logStreamManager.stopStreaming();
+    });
+
+    it('a truncation replace jumps to the tail even when scrolled up', async () => {
+        const { logStreamManager } = await import('./LogStreamManager');
+        const output = document.getElementById('log-stream-output') as HTMLElement;
+        Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 1000 });
+        Object.defineProperty(output, 'clientHeight', { configurable: true, get: () => 100 });
+
+        queueResponse(streamResponse('old1\nold2\n', 10));
+        await logStreamManager.startStreaming('t.log');
+        output.scrollTop = 0;
+
+        // Offset moved backwards: the file was rewritten, display replaced.
+        queueResponse(streamResponse('new\n', 4));
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(renderedLines()).toEqual(['new']);
+        expect(output.scrollTop).toBe(1000);
+
+        logStreamManager.stopStreaming();
+    });
+
+    it('highlights matching lines appended while a search is active and prunes replaced ones', async () => {
+        Element.prototype.scrollIntoView = vi.fn();
+        const { logStreamManager } = await import('./LogStreamManager');
+
+        // Chunk ends mid-line; both the full and the partial line match.
+        queueResponse(streamResponse('bravo one\nbravo tw', 18));
+        await logStreamManager.startStreaming('t.log');
+
+        typeSearch('bravo');
+        await vi.advanceTimersByTimeAsync(200); // search debounce
+        expect(highlightedLines().length).toBe(2);
+
+        // The partial line completes (its old element is replaced) and a new
+        // matching line arrives: count stays live, no dead elements counted.
+        queueResponse(streamResponse('o\nskip me\nbravo three\n', 40));
+        await vi.advanceTimersByTimeAsync(2000);
+
+        expect(renderedLines()).toEqual(['bravo one', 'bravo two', 'skip me', 'bravo three']);
+        expect(highlightedLines().length).toBe(3);
+        expect(document.getElementById('log-search-count')?.textContent).toBe('1/3');
+
+        logStreamManager.stopStreaming();
+    });
+
+    it('drops matches trimmed out by the line cap from the search count', async () => {
+        Element.prototype.scrollIntoView = vi.fn();
+        const { logStreamManager } = await import('./LogStreamManager');
+
+        queueResponse(streamResponse('bravo a\nbravo b\n', 16));
+        await logStreamManager.startStreaming('t.log');
+
+        typeSearch('bravo');
+        await vi.advanceTimersByTimeAsync(200);
+        expect(document.getElementById('log-search-count')?.textContent).toBe('1/2');
+
+        // 1000 non-matching lines push both matches past the line cap.
+        const filler = Array.from({ length: 1000 }, (_, i) => `filler ${i}`).join('\n') + '\n';
+        queueResponse(streamResponse(filler, 16 + filler.length));
+        await vi.advanceTimersByTimeAsync(2000);
+
+        expect(highlightedLines().length).toBe(0);
+        expect(document.getElementById('log-search-count')?.textContent).toBe('No matches');
+
+        logStreamManager.stopStreaming();
+    });
+
     it('replaces the display when the server restarts a truncated file with a fresh tail', async () => {
         const { logStreamManager } = await import('./LogStreamManager');
 
