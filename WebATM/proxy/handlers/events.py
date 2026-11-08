@@ -71,18 +71,8 @@ def on_reset_received(data=None, *args, sender_id=None, **kwargs):
 
 
 def on_request_received(data, *args, **kwargs):
-    """Handle REQUEST events from the BlueSky server.
-
-    Currently only logs the payload; specific request handling is not yet
-    implemented.
-
-    Args:
-        data (Any): The REQUEST payload.
-        *args (Any): Additional positional payload items (unused).
-        **kwargs (Any): Additional keyword payload items (unused).
-    """
+    """Log REQUEST events; specific request handling is not yet implemented."""
     if not active_proxy():
         return
 
-    # TODO: Implement specific request handling logic
     logger.debug(f"REQUEST data received: {data}")

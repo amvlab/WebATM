@@ -20,7 +20,6 @@ from .handlers import (
     on_simsettings_received,
     on_stack_received,
     on_stackcmds_received,
-    on_statechange_received,
     on_trails_received,
 )
 
@@ -30,7 +29,6 @@ logger = get_logger()
 # active node and are re-subscribed when the active node changes.
 SUBSCRIPTIONS = [
     ("SIMINFO", on_siminfo_received, False),
-    ("STATECHANGE", on_statechange_received, False),
     ("ACDATA", on_acdata_received, True),
     ("ROUTEDATA", on_routedata_received, True),
     ("ECHO", echo, False),
@@ -89,8 +87,5 @@ def register_subscribers(proxy=None):
             logger.debug(f"Registered {topic} subscriber (actonly={actonly})")
 
         logger.info("All subscribers registered successfully with standalone client")
-    except Exception as e:
-        logger.error(f"Error registering subscribers: {e}")
-        import traceback
-
-        traceback.print_exc()
+    except Exception:
+        logger.exception("Error registering subscribers")

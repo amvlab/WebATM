@@ -1,8 +1,8 @@
 """Expose the BlueSky data-event handlers as a single package namespace.
 
 Re-exports the handler callables for each BlueSky network topic (SIMINFO,
-ACDATA, STATECHANGE, ROUTEDATA, ECHO, POLY/POLYLINE, STACK, STACKCMDS, RESET,
-REQUEST, PLOT, TRAILS, SHOWDIALOG, SIMSETTINGS, and DEFWPT) so that
+ACDATA, ROUTEDATA, ECHO, POLY/POLYLINE, STACK, STACKCMDS, RESET, REQUEST,
+PLOT, TRAILS, SHOWDIALOG, SIMSETTINGS, and DEFWPT) so that
 ``proxy.subscribers`` can register them all from one place.
 """
 
@@ -12,11 +12,7 @@ from .events import on_request_received, on_reset_received
 from .navigation import on_defwpt_received
 from .routes import on_routedata_received
 from .shapes import on_poly_received
-from .simulation import (
-    on_acdata_received,
-    on_siminfo_received,
-    on_statechange_received,
-)
+from .simulation import on_acdata_received, on_siminfo_received
 from .visualization import (
     on_plot_received,
     on_showdialog_received,
@@ -27,7 +23,6 @@ from .visualization import (
 __all__ = [
     "on_siminfo_received",
     "on_acdata_received",
-    "on_statechange_received",
     "on_routedata_received",
     "echo",
     "on_poly_received",

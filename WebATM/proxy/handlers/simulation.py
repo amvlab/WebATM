@@ -1,10 +1,15 @@
-"""Handle BlueSky simulation-state events (SIMINFO, ACDATA, STATECHANGE).
+"""Handle BlueSky simulation-state events (SIMINFO, ACDATA).
 
 These handlers receive the core simulation feed from the BlueSky server: the
-per-node simulation clock and state (SIMINFO), the aircraft traffic frames
-(ACDATA), and explicit run-state transitions (STATECHANGE). They cache the data
-on the proxy and forward it to connected browsers over Socket.IO as the
-``siminfo``, ``acdata``, and ``statechange`` events.
+per-node simulation clock and run-state (SIMINFO) and the aircraft traffic
+frames (ACDATA). They cache the data on the proxy and forward it to connected
+browsers over Socket.IO as the ``siminfo`` and ``acdata`` events.
+
+BlueSky's STATECHANGE topic is deliberately NOT handled: sim nodes publish it
+addressed to their own server (``to_group=bs.net.server_id``), which consumes
+it for batch-scenario bookkeeping and never forwards it to clients — so a
+client subscription can never receive it. Run-state reaches clients via the
+``state`` field of the 1 Hz SIMINFO feed, as in BlueSky's own GUIs.
 """
 
 import time
@@ -12,7 +17,7 @@ import time
 from ...logger import get_logger
 from ...utils import id2str, make_json_serializable, tim2txt
 from ..perf import data_path_perf
-from ._base import active_proxy, get_bluesky_proxy, is_active_node
+from ._base import active_proxy, is_active_node, shared_context
 
 logger = get_logger()
 
@@ -97,11 +102,9 @@ def on_acdata_received(data):
     until after the active-node filter and the throttle accept the frame. The
     cache is refreshed even with no browser attached — ``initial_data``, the
     backup timer and the ROUTEDATA filter serve it, so it must track the live
-    feed. Set WEBATM_PERF=1 (WebATM.proxy.perf) to measure the hot path.
-
-    Aircraft clearing on a simulation reset is NOT handled here: BlueSky
-    signals a reset on the dedicated RESET topic (events.on_reset_received),
-    never via an ACDATA action.
+    feed. Reset clearing is the RESET topic's job (events.on_reset_received),
+    never an ACDATA action's. Set WEBATM_PERF=1 (WebATM.proxy.perf) to measure
+    the hot path.
 
     Args:
         data (dict): Aircraft state arrays keyed by field (``id``, ``lat``,
@@ -109,31 +112,17 @@ def on_acdata_received(data):
             as sent by the BlueSky server.
     """
     try:
-        proxy = get_bluesky_proxy()
+        # ACDATA from any node proves the link is alive, so liveness (which
+        # active_proxy refreshes) is updated before the active-node filter.
+        proxy = active_proxy()
         if not proxy:
-            logger.debug("on_acdata_received called but no proxy available")
             return
-
-        # Ignore data if reconnection is not allowed (we're disconnected)
-        if not proxy.allow_reconnection:
-            logger.debug("on_acdata_received ignored - reconnection not allowed")
-            return
-
-        # The sending node is set on the shared context just before this
-        # synchronous dispatch.
-        sender_id_str = None
-        if proxy.bluesky_client and hasattr(proxy.bluesky_client, "context"):
-            sender_id_str = id2str(
-                getattr(proxy.bluesky_client.context, "sender_id", None)
-            )
-
-        # ACDATA from any node proves the link is alive: update liveness
-        # before the active-node filter.
-        proxy.last_successful_update = time.time()
         data_path_perf.record_received()
 
-        # Only the active node's traffic is displayed (mirrors the SIMINFO
-        # filter).
+        # The sending node is set on the shared context just before this
+        # synchronous dispatch; only the active node's traffic is displayed
+        # (mirrors the SIMINFO filter).
+        sender_id_str, _ = shared_context(proxy)
         if not is_active_node(proxy, sender_id_str):
             data_path_perf.record_filtered()
             return
@@ -144,11 +133,6 @@ def on_acdata_received(data):
         if (current_time - proxy.last_acdata_emit) < proxy.acdata_interval:
             return
 
-        # Refresh the cache even with no browser attached: the initial_data
-        # snapshot, the 0.5 s backup timer and the ROUTEDATA aircraft filter
-        # all serve proxy.traffic_data, so a cache frozen while unwatched
-        # would hand the next client the aircraft from the moment the last
-        # one left (ghosts at stale positions).
         t0 = time.perf_counter()
         serializable_data = make_json_serializable(data)
         data_path_perf.record_serialize(time.perf_counter() - t0)
@@ -169,54 +153,3 @@ def on_acdata_received(data):
         logger.exception(f"Error in on_acdata_received (data type: {type(data)})")
     finally:
         data_path_perf.maybe_log()
-
-
-def on_statechange_received(data, sender_id=None):
-    """Process a BlueSky STATECHANGE event and emit ``statechange`` to web clients.
-
-    Updates the cached simulation state (``proxy.sim_data['state']``) and
-    immediately forwards the new run-state and sending node to connected
-    browsers, without throttling. Like SIMINFO, only the active node's state
-    changes touch the cached header state — a paused background node must not
-    flip the displayed run-state.
-
-    Args:
-        data (dict): Event payload; the ``simstate`` key holds the new
-            run-state code. Payloads without ``simstate`` are ignored.
-        sender_id (bytes | str | None): Identifier of the sending node; bytes
-            are converted to a hex string.
-    """
-    proxy = active_proxy()
-    if not proxy:
-        return
-
-    simstate = data.get("simstate") if isinstance(data, dict) else None
-    if simstate is None:
-        return
-
-    sender_id_str = id2str(sender_id)
-
-    if not is_active_node(proxy, sender_id_str):
-        logger.debug(
-            f"STATECHANGE from background node {sender_id_str} ignored "
-            f"(simstate={simstate})"
-        )
-        return
-
-    # Only patch an existing SIMINFO cache; seeding a bare {'state': ...} would
-    # let the backup timer re-emit a partial siminfo payload.
-    if proxy.sim_data:
-        proxy.sim_data["state"] = int(simstate)
-
-    payload = {
-        "simstate": int(simstate),
-        "sender_id": sender_id_str,
-    }
-
-    if proxy.socketio and proxy.connected_clients > 0:
-        try:
-            proxy.socketio.emit("statechange", payload)
-        except Exception as e:
-            logger.error(f"Error emitting STATECHANGE: {e}")
-
-    logger.info(f"STATECHANGE from {sender_id_str}: simstate={simstate}")

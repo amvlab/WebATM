@@ -17,7 +17,6 @@ Key adaptations from BlueSky's networking components:
 """
 
 import threading
-import traceback
 from collections import defaultdict, deque
 from collections.abc import Callable
 
@@ -235,8 +234,10 @@ class BlueSkySignal:
             try:
                 callback(*args, **kwargs)
             except Exception as e:
-                logger.warning(f"Signal {self.name}: Error in callback {callback}: {e}")
-                traceback.print_exc()
+                logger.warning(
+                    f"Signal {self.name}: Error in callback {callback}: {e}",
+                    exc_info=True,
+                )
 
 
 class BlueSkySubscriber:
@@ -282,9 +283,11 @@ class BlueSkySubscriber:
             try:
                 callback(*args, **kwargs)
             except Exception as e:
-                logger.warning(f"Subscriber {topic}: Error in callback {callback}: {e}")
+                logger.warning(
+                    f"Subscriber {topic}: Error in callback {callback}: {e}",
+                    exc_info=True,
+                )
                 logger.debug(f"Subscriber {topic}: Args: {args} Kwargs: {kwargs}")
-                traceback.print_exc()
 
 
 class BlueSkyStack:
@@ -722,16 +725,6 @@ class BlueSkyClient:
                         flags = data[1] if len(data) > 1 else 0
                         echo_sender = data[2] if len(data) > 2 else sender_id
                     self.subscriber.emit(topic, text, flags, echo_sender)
-                elif topic == "STATECHANGE":
-                    # STATECHANGE follows BlueSky's shared-state format:
-                    # [action_type, {"simstate": <int>, ...}]
-                    if isinstance(data, (list, tuple)) and len(data) == 2:
-                        action_type, actual_data = data
-                        self.context.action = action_type
-                        self.context.sender_id = sender_id
-                        self.subscriber.emit(topic, actual_data, sender_id=sender_id)
-                    else:
-                        self.subscriber.emit(topic, data, sender_id=sender_id)
                 elif topic == "RESET":
                     # What matters for RESET is WHICH node reset, so thread the
                     # sender from the message header. The generic path below
