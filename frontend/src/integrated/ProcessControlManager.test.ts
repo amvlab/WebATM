@@ -198,6 +198,85 @@ describe('ProcessControlManager', () => {
         expect(logTab.activate).not.toHaveBeenCalled();
     });
 
+    it('renders an HTTP error without a message as a failure, never "done"', async () => {
+        // Flask's generic error handler answers {"error": ...} with a 500 —
+        // no success/message/status keys. This used to render as "done".
+        const fetchMock = vi.fn((url: string) => {
+            if (url.endsWith('/status')) {
+                return Promise.resolve({ ok: true, json: async () => ({ running: false }) });
+            }
+            return Promise.resolve({
+                ok: false,
+                status: 500,
+                json: async () => ({ error: 'Internal server error' }),
+            });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        makeManager();
+        await vi.waitFor(() => expect(statusText()).toBe('stopped'));
+
+        click('start');
+
+        await vi.waitFor(() => expect(statusText()).toBe('start failed (HTTP 500)'));
+        expect(autoConnect).not.toHaveBeenCalled();
+        // The log tab still opens so the failure output is visible.
+        expect(logTab.activate).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the structured error message of a 500 and skips auto-disconnect', async () => {
+        const fetchMock = vi.fn((url: string) => {
+            if (url.endsWith('/status')) {
+                return Promise.resolve({ ok: true, json: async () => ({ running: true, pid: 7 }) });
+            }
+            return Promise.resolve({
+                ok: false,
+                status: 500,
+                json: async () => ({
+                    success: false,
+                    status: 'error',
+                    message: 'BlueSky server stop failed: wait() lost the process',
+                }),
+            });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        makeManager();
+        await vi.waitFor(() => expect(statusText()).toBe('running — not connected'));
+
+        click('stop');
+
+        await vi.waitFor(() =>
+            expect(statusText()).toBe('BlueSky server stop failed: wait() lost the process'),
+        );
+        expect(autoDisconnect).not.toHaveBeenCalled();
+    });
+
+    it('ignores a failing status probe instead of rendering it as "stopped"', async () => {
+        let probeOk = true;
+        const conn = makeConnState(true);
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockImplementation(() =>
+                Promise.resolve(
+                    probeOk
+                        ? { ok: true, json: async () => ({ success: true, running: true, pid: 42 }) }
+                        : { ok: false, status: 500, json: async () => ({ error: 'Internal server error' }) },
+                ),
+            ),
+        );
+
+        makeManager(conn.source);
+        await vi.waitFor(() => expect(statusText()).toBe('running — connected'));
+
+        // The probe starts erroring; a connection flip re-probes but the
+        // error payload must leave the last known status in place.
+        probeOk = false;
+        conn.flip(false);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(statusText()).toBe('running — connected');
+    });
+
     it('surfaces a "failed" status when the request throws', async () => {
         const fetchMock = vi.fn((url: string) => {
             if (url.endsWith('/status')) {

@@ -169,11 +169,14 @@ export class Header {
     private handlePlayPauseClick(): void {
         if (!this.stateManager || !this.socketManager) return;
 
-        const state = this.stateManager.getState();
-        const isPaused = state.simInfo?.speed === 0;
+        // Decide by run state (2 = OP) — the same criterion that enables this
+        // control — not by SIMINFO's measured speed, which is a wall-clock
+        // average that can read 0 on a just-resumed sim (sending OP again
+        // instead of HOLD) and nonzero on the first tick after a pause.
+        const isRunning = this.stateManager.getState().simInfo?.state === 2;
 
-        this.socketManager.sendCommand(isPaused ? 'OP' : 'HOLD');
-        logger.info('Header', `${isPaused ? 'Resuming simulation' : 'Pausing simulation'}`);
+        this.socketManager.sendCommand(isRunning ? 'HOLD' : 'OP');
+        logger.info('Header', `${isRunning ? 'Pausing simulation' : 'Resuming simulation'}`);
     }
 
     /**

@@ -26,7 +26,6 @@ class TestRegisterSubscribers:
                 "STACKCMDS",
                 "POLY",
                 "ROUTEDATA",
-                "STATECHANGE",
                 "RESET",
                 "REQUEST",
                 "PLOT",
@@ -89,13 +88,33 @@ class TestRegisterSubscribers:
         finally:
             set_bluesky_proxy(None)
 
+    def test_registration_failure_logs_traceback_through_logger(self, caplog):
+        # The traceback must travel through the WebATM logger (so it reaches
+        # configured handlers/log files), not raw stderr via print_exc().
+        import logging
+
+        class ExplodingClient:
+            def subscribe(self, topic, callback, actonly=False):
+                raise RuntimeError("subscribe failed")
+
+        proxy = BlueSkyProxy()
+        proxy.bluesky_client = ExplodingClient()
+        with caplog.at_level(logging.ERROR, logger="WebATM.subscribers"):
+            register_subscribers(proxy)  # must not raise
+        record = next(
+            r
+            for r in caplog.records
+            if "Error registering subscribers" in r.getMessage()
+        )
+        assert record.exc_info is not None
+        assert "subscribe failed" in caplog.text
+
 
 class TestSubscriptionTable:
     """Guard the data-driven SUBSCRIPTIONS table that registration iterates."""
 
     EXPECTED_TOPICS = {
         "SIMINFO",
-        "STATECHANGE",
         "ACDATA",
         "ROUTEDATA",
         "ECHO",

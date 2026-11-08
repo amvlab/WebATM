@@ -171,6 +171,25 @@ class TestBlueSkySubscriber:
         sub.emit("T", "payload")
         assert ok == ["payload"]
 
+    def test_subscriber_exception_traceback_goes_through_logger(self, caplog):
+        # The traceback must travel through the WebATM logger (so it reaches
+        # configured handlers/log files), not raw stderr via print_exc().
+        import logging
+
+        sub = BlueSkySubscriber()
+
+        def boom(data):
+            raise RuntimeError("callback exploded")
+
+        sub.subscribe("T", boom)
+        with caplog.at_level(logging.WARNING, logger="WebATM.bluesky_client"):
+            sub.emit("T", 1)
+        record = next(
+            r for r in caplog.records if "Error in callback" in r.getMessage()
+        )
+        assert record.exc_info is not None
+        assert "callback exploded" in caplog.text
+
     def test_subscribe_is_idempotent(self):
         # Subscribing the same callback twice must not double-register it, so
         # emit() invokes it once (mirrors BlueSkySignal.connect's dedup guard).

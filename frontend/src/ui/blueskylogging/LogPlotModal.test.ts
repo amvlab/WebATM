@@ -125,6 +125,32 @@ describe('LogPlotModal aircraft selection', () => {
         expect(visibleLabels()).toEqual(['KL002', 'AF265']);
     });
 
+    it('keeps the chosen columns across a Data & Stats round-trip', async () => {
+        await boot();
+        const ySelect = document.getElementById('log-plot-y-select') as HTMLSelectElement;
+        expect(ySelect.value).toBe('2'); // default: first numeric column after simt (lat)
+        ySelect.value = '4'; // alt
+        ySelect.dispatchEvent(new Event('change'));
+
+        const tab = (view: string) =>
+            (document.querySelector(`.log-plot-tab[data-view="${view}"]`) as HTMLElement).click();
+        tab('table');
+        tab('timeseries');
+        expect(ySelect.value).toBe('4');
+
+        // Switching chart kind still applies that kind's own defaults...
+        const xSelect = document.getElementById('log-plot-x-select') as HTMLSelectElement;
+        tab('xy');
+        expect(xSelect.value).toBe('3'); // lon
+        expect(ySelect.value).toBe('2'); // lat
+        // ...and an X-Y column choice also survives the table round-trip.
+        xSelect.value = '4';
+        xSelect.dispatchEvent(new Event('change'));
+        tab('table');
+        tab('xy');
+        expect(xSelect.value).toBe('4');
+    });
+
     it('says a CONFLOG-style event log cannot be plotted instead of charting it', async () => {
         const conflog = ['# CONF LOG', '# simt', '123.00000000,1', '245.50000000,3'].join('\n');
         vi.stubGlobal('fetch', vi.fn(async () => ({
