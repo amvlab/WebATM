@@ -20,3 +20,13 @@ export const OPENAP_AIRCRAFT_TYPES: readonly string[] = [
 export function isOpenapAircraftType(type: string): boolean {
     return !!type && OPENAP_AIRCRAFT_TYPES.includes(type.toUpperCase());
 }
+
+/**
+ * True while `partial` can still complete to an openap type — some entry
+ * contains it (case-insensitive, so prefixes count too). Type-ahead UIs use
+ * this to hold the "unknown type" warning until no completion is possible.
+ */
+export function hasOpenapTypeCandidates(partial: string): boolean {
+    const upper = partial.toUpperCase();
+    return OPENAP_AIRCRAFT_TYPES.some(type => type.includes(upper));
+}
