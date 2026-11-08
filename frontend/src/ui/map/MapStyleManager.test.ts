@@ -13,6 +13,8 @@ import type { Map } from 'maplibre-gl';
 import { MapStyleManager } from './MapStyleManager';
 
 const OFFLINE_STYLE = '/static/map/offline-style.json';
+// StorageManager namespaces with 'webatm-'; the style key is 'webatm-map-style'.
+const STORAGE_KEY = 'webatm-webatm-map-style';
 
 function makeMap(): { map: Map; setStyle: ReturnType<typeof vi.fn>; once: ReturnType<typeof vi.fn> } {
     const setStyle = vi.fn();
@@ -66,6 +68,29 @@ describe('MapStyleManager offline fallback', () => {
 
         expect(setStyle).toHaveBeenCalledWith(OFFLINE_STYLE);
         expect(mgr.getCurrentStyle()).toBe(OFFLINE_STYLE);
+    });
+
+    it('does not persist the error-event fallback over the saved style choice', () => {
+        localStorage.clear();
+        const SAVED = 'https://tiles.openfreemap.org/styles/liberty';
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(SAVED));
+        const { map, setStyle } = makeMap();
+        const mgr = new MapStyleManager(() => map);
+        mgr.resolveInitialStyle();
+
+        mgr.handleMapError({ error: Object.assign(new Error('Failed to fetch'), { status: 0 }) });
+
+        expect(setStyle).toHaveBeenCalledWith(OFFLINE_STYLE);
+        expect(mgr.getCurrentStyle()).toBe(OFFLINE_STYLE);
+        expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toBe(SAVED);
+    });
+
+    it('persists an explicit style change', () => {
+        const { mgr } = makeManager();
+
+        mgr.changeStyle('https://example.com/style.json');
+
+        expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toBe('https://example.com/style.json');
     });
 
     it('only falls back once, even on repeated document failures', () => {
@@ -206,6 +231,24 @@ describe('MapStyleManager first-load probe fallback', () => {
         await flushProbe();
 
         expect(calls).toEqual(['before', 'setStyle']);
+    });
+
+    it('does not persist the probe fallback over the saved style choice', async () => {
+        // A slow boot (probe timeout) must not permanently replace the
+        // user's chosen basemap: next boot should retry the remote style.
+        localStorage.clear();
+        const SAVED = 'https://tiles.openfreemap.org/styles/liberty';
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(SAVED));
+        const { map, setStyle } = makeMap();
+        const mgr = new MapStyleManager(() => map);
+        mgr.resolveInitialStyle();
+        vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))));
+
+        mgr.armFirstLoadFallback();
+        await flushProbe();
+
+        expect(setStyle).toHaveBeenCalledWith(OFFLINE_STYLE);
+        expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toBe(SAVED);
     });
 
     it('does not arm the probe when booting on a local (offline) style', () => {

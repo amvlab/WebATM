@@ -21,6 +21,10 @@ if (!window.__webatmPmtilesRegistered__) {
     window.__webatmPmtilesRegistered__ = true;
 }
 
+/** Default map view (Amsterdam), shared with the Reset View control. */
+export const DEFAULT_CENTER: [number, number] = [4.9, 52.3];
+export const DEFAULT_ZOOM = 8;
+
 /**
  * MapDisplay - Core map functionality
  *
@@ -58,10 +62,6 @@ export class MapDisplay {
     private dprMediaQuery: MediaQueryList | null = null;
     private dprListener: (() => void) | null = null;
 
-    // Default center and zoom for Amsterdam
-    private readonly DEFAULT_CENTER: [number, number] = [4.9, 52.3];
-    private readonly DEFAULT_ZOOM = 8;
-
     /**
      * Constructor
      * @param containerId - The ID of the HTML element to contain the map
@@ -93,8 +93,8 @@ export class MapDisplay {
         const savedCenter = storage.get<[number, number]>(this.STORAGE_KEY_CENTER);
         const savedZoom = storage.get<number>(this.STORAGE_KEY_ZOOM);
 
-        const initialCenter = savedCenter || this.DEFAULT_CENTER;
-        const initialZoom = savedZoom ?? this.DEFAULT_ZOOM;
+        const initialCenter = savedCenter || DEFAULT_CENTER;
+        const initialZoom = savedZoom ?? DEFAULT_ZOOM;
 
         // Create map options
         const mapOptions: MapOptions = {
@@ -426,7 +426,7 @@ export class MapDisplay {
      * Get the map center
      */
     public getCenter(): [number, number] {
-        if (!this.map) return this.DEFAULT_CENTER;
+        if (!this.map) return DEFAULT_CENTER;
         const center = this.map.getCenter();
         return [center.lng, center.lat];
     }
@@ -449,7 +449,7 @@ export class MapDisplay {
      * Get the current zoom level
      */
     public getZoom(): number {
-        if (!this.map) return this.DEFAULT_ZOOM;
+        if (!this.map) return DEFAULT_ZOOM;
         return this.map.getZoom();
     }
 

@@ -1,14 +1,11 @@
 /**
- * MapControlsPanel - Manages the Map Controls panel
- *
- * This panel handles:
- * - Map navigation controls (zoom, pan, reset view)
- * - Drawing controls (create aircraft, draw shapes)
- * - Bounding box display
+ * MapControlsPanel - Manages the Map Controls panel:
+ * map navigation (zoom, reset view), drawing controls (create aircraft,
+ * draw shapes/routes), and the zoom/bounding-box info readout.
  */
 
 import { BasePanel } from '../BasePanel';
-import { MapDisplay } from '../../map/MapDisplay';
+import { MapDisplay, DEFAULT_CENTER, DEFAULT_ZOOM } from '../../map/MapDisplay';
 import { logger } from '../../../utils/Logger';
 import type { AircraftCreationManager } from '../../map/aircraft/AircraftCreationManager';
 import type { ShapeDrawingManager } from '../../map/shapes/ShapeDrawingManager';
@@ -19,8 +16,7 @@ export class MapControlsPanel extends BasePanel {
     private aircraftCreationManager: AircraftCreationManager | null = null;
     private shapeDrawingManager: ShapeDrawingManager | null = null;
     private routeDrawingManager: RouteDrawingManager | null = null;
-    private readonly DEFAULT_CENTER: [number, number] = [4.9, 52.3]; // Amsterdam
-    private readonly DEFAULT_ZOOM = 8;
+    private mapListenersAttached = false;
 
     constructor() {
         super('.nav-panel', 'map-view-content');
@@ -36,7 +32,7 @@ export class MapControlsPanel extends BasePanel {
         this.bindClick('draw-route-btn', () =>
             this.withManager(this.routeDrawingManager, 'RouteDrawingManager', m => m.toggleDrawing()));
 
-        this.setupMapInfoHandlers();
+        this.bindClick('map-info-toggle', () => this.toggleMapInfoSection());
     }
 
     /**
@@ -52,75 +48,43 @@ export class MapControlsPanel extends BasePanel {
         }
     }
 
-    /**
-     * Set the MapDisplay instance for this panel
-     */
     public setMapDisplay(mapDisplay: MapDisplay): void {
         this.mapDisplay = mapDisplay;
         logger.debug('MapControlsPanel', 'MapControlsPanel connected to MapDisplay');
 
-        // Check if map is already initialized, if so, set up listeners immediately
+        // If the map is already up (App normally calls this before map init,
+        // then setupMapEventListeners from the map-load callback), attach now.
         if (this.mapDisplay.isInitialized()) {
             this.setupMapEventListeners();
         }
-        // Otherwise, listeners will be set up when map initialization is complete
-        // (App.ts should call setupMapEventListeners after map is initialized)
     }
 
     /**
-     * Set up map info handlers (zoom, bbox)
-     */
-    private setupMapInfoHandlers(): void {
-        this.bindClick('map-info-toggle', () => this.toggleMapInfoSection());
-
-        // Initial update of zoom and bounding box will happen when map is set
-    }
-
-    /**
-     * Set up event listeners on the MapLibre GL map
-     * This should be called after the map is initialized
+     * Attach the zoom/bbox listeners once the map is ready. Safe to call more
+     * than once; the listeners are only attached once.
      */
     public setupMapEventListeners(): void {
-        if (!this.mapDisplay) return;
-
-        const map = this.mapDisplay.getMap();
+        const map = this.mapDisplay?.getMap();
         if (!map) {
             logger.warn('MapControlsPanel', 'Map not initialized yet');
             return;
         }
 
-        // Check if map is already loaded
         if (map.loaded()) {
-            // Map is ready, set up listeners immediately
             this.attachMapListeners();
         } else {
-            // Wait for map to load before attaching listeners
-            map.once('load', () => {
-                this.attachMapListeners();
-            });
+            map.once('load', () => this.attachMapListeners());
         }
     }
 
-    /**
-     * Attach event listeners to the map
-     */
     private attachMapListeners(): void {
-        if (!this.mapDisplay) return;
+        const map = this.mapDisplay?.getMap();
+        if (!map || this.mapListenersAttached) return;
+        this.mapListenersAttached = true;
 
-        const map = this.mapDisplay.getMap();
-        if (!map) return;
+        map.on('zoom', () => this.updateZoomDisplay());
+        map.on('moveend', () => this.updateBoundingBoxDisplay());
 
-        // Update zoom level on zoom events
-        map.on('zoom', () => {
-            this.updateZoomDisplay();
-        });
-
-        // Update bounding box on moveend events
-        map.on('moveend', () => {
-            this.updateBoundingBoxDisplay();
-        });
-
-        // Initial update
         this.updateZoomDisplay();
         this.updateBoundingBoxDisplay();
 
@@ -157,24 +121,22 @@ export class MapControlsPanel extends BasePanel {
         this.routeDrawingManager = manager;
     }
 
-    /** Zoom in by one level */
-    public zoomIn(): void {
+    /** Zoom in or out by a number of levels. */
+    private zoomBy(delta: number): void {
         const map = this.mapDisplay?.getMap();
         if (!map) {
-            logger.warn('MapControlsPanel', 'Cannot zoom in: map not ready');
+            logger.warn('MapControlsPanel', 'Cannot zoom: map not ready');
             return;
         }
-        map.easeTo({ zoom: map.getZoom() + 1, duration: 300 });
+        map.easeTo({ zoom: map.getZoom() + delta, duration: 300 });
     }
 
-    /** Zoom out by one level */
+    public zoomIn(): void {
+        this.zoomBy(1);
+    }
+
     public zoomOut(): void {
-        const map = this.mapDisplay?.getMap();
-        if (!map) {
-            logger.warn('MapControlsPanel', 'Cannot zoom out: map not ready');
-            return;
-        }
-        map.easeTo({ zoom: map.getZoom() - 1, duration: 300 });
+        this.zoomBy(-1);
     }
 
     /** Reset view to the default center and zoom */
@@ -185,16 +147,13 @@ export class MapControlsPanel extends BasePanel {
             return;
         }
         map.flyTo({
-            center: this.DEFAULT_CENTER,
-            zoom: this.DEFAULT_ZOOM,
+            center: DEFAULT_CENTER,
+            zoom: DEFAULT_ZOOM,
             duration: 1000,
             essential: true
         });
     }
 
-    /**
-     * Toggle the map info collapsible section
-     */
     private toggleMapInfoSection(): void {
         const section = document.getElementById('map-info-controls');
         const toggleBtn = document.getElementById('map-info-toggle');
