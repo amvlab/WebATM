@@ -35,7 +35,7 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
     // Last seen projection mode, to detect globe/mercator switches.
     private lastProjectionMode: boolean | null = null;
     // Wall-clock delta source for GLB animation playback (engines, rotors).
-    private readonly animationClock = new THREE.Clock();
+    private readonly animationTimer = new THREE.Timer();
 
     // Separate groups for different projection modes
     // Globe mode: uses raw getMatrixForModel transforms (no scene rotation)
@@ -79,6 +79,10 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
 
     protected onSceneReady(): void {
         logger.debug('Aircraft3DCustomLayer', '3D scene ready');
+
+        // Start animation time now, so the first frame does not jump by
+        // however long the layer waited to be added to the map.
+        this.animationTimer.reset();
 
         // Mercator group: rotateX(π/2) maps the (east, up, north) scene frame
         // into MapLibre mercator coords (Y = south) without any mirror/negative
@@ -262,7 +266,8 @@ export class Aircraft3DCustomLayer extends CustomLayer3D {
         // Advance any GLB animation clips (spinning engines/rotors) by the
         // real time elapsed since the last frame. The base layer triggers a
         // repaint after every render, so playback is continuous.
-        this.fleet.advanceAnimations(this.animationClock.getDelta());
+        this.animationTimer.update();
+        this.fleet.advanceAnimations(this.animationTimer.getDelta());
 
         const isGlobe = this.isGlobeProjection();
 
