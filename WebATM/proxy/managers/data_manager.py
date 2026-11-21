@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 from ...logger import get_logger
-from ...utils import empty_traffic_data
+from ...utils import empty_sim_data, empty_traffic_data
 
 logger = get_logger()
 
@@ -63,20 +63,7 @@ class DataManager:
                 )
 
                 self.proxy.socketio.emit("acdata", empty_traffic_data())
-
-                # Same shape the SIMINFO handler emits, so clients always see
-                # a complete siminfo payload.
-                empty_sim_data = {
-                    "speed": 0.0,
-                    "simdt": 0.0,
-                    "simt": 0.0,
-                    "simutc": "",
-                    "ntraf": 0,
-                    "state": 0,
-                    "scenname": "disconnected",
-                    "sender_id": None,
-                }
-                self.proxy.socketio.emit("siminfo", empty_sim_data)
+                self.proxy.socketio.emit("siminfo", empty_sim_data("disconnected"))
 
                 self.proxy.socketio.emit("poly", {"polys": {}})
                 self.proxy.socketio.emit("polyline", {"polys": {}})

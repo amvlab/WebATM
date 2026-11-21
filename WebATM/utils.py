@@ -118,6 +118,32 @@ def empty_traffic_data():
     }
 
 
+def empty_sim_data(scenname=""):
+    """Return a fresh empty ``siminfo`` payload for clearing the sim header.
+
+    Same shape as the SIMINFO handler emits, so clients always receive a
+    complete payload. Emitted whenever the displayed sim info becomes stale
+    (active-node change, server disconnect).
+
+    Args:
+        scenname (str): Scenario name to show, e.g. ``"disconnected"`` on the
+            disconnect clear path.
+
+    Returns:
+        dict: A ``siminfo`` payload with zeroed clock/speed/state fields.
+    """
+    return {
+        "speed": 0.0,
+        "simdt": 0.0,
+        "simt": 0.0,
+        "simutc": "",
+        "ntraf": 0,
+        "state": 0,
+        "scenname": scenname,
+        "sender_id": None,
+    }
+
+
 def id2str(node_id):
     """Convert a BlueSky node/sender ID to its hex-string form.
 

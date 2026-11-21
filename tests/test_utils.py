@@ -5,6 +5,7 @@ import struct
 import numpy as np
 
 from WebATM.utils import (
+    empty_sim_data,
     empty_traffic_data,
     i2txt,
     id2str,
@@ -247,3 +248,34 @@ class TestEmptyTrafficData:
         first = empty_traffic_data()
         first["id"].append("AC1")
         assert empty_traffic_data()["id"] == []
+
+
+class TestEmptySimData:
+    def test_same_shape_as_siminfo_handler_payload(self):
+        # Must stay in sync with the dict built in
+        # WebATM.proxy.handlers.simulation.on_siminfo_received, so clearing
+        # emissions and live emissions are interchangeable for browsers.
+        payload = empty_sim_data()
+        assert set(payload) == {
+            "speed",
+            "simdt",
+            "simt",
+            "simutc",
+            "ntraf",
+            "state",
+            "scenname",
+            "sender_id",
+        }
+        assert payload["simt"] == 0.0
+        assert payload["state"] == 0
+        assert payload["ntraf"] == 0
+        assert payload["sender_id"] is None
+
+    def test_default_scenname_empty_and_overridable(self):
+        assert empty_sim_data()["scenname"] == ""
+        assert empty_sim_data("disconnected")["scenname"] == "disconnected"
+
+    def test_returns_fresh_dict_each_call(self):
+        first = empty_sim_data()
+        first["simt"] = 99.0
+        assert empty_sim_data()["simt"] == 0.0
