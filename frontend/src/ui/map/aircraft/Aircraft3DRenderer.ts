@@ -3,6 +3,7 @@ import type { IEntityRenderer } from '../rendering/IEntityRenderer';
 import type { AircraftData, DisplayOptions } from '../../../data/types';
 import type { StateManager } from '../../../core/StateManager';
 import { logger } from '../../../utils/Logger';
+import { whenStyleReady } from '../rendering/styleReady';
 import { Aircraft3DCustomLayer } from './Aircraft3DCustomLayer';
 
 /**
@@ -49,20 +50,11 @@ export class Aircraft3DRenderer implements IEntityRenderer<AircraftData> {
     }
 
     /**
-     * Run `callback` once the map style is loaded (rAF polling; style.load may
-     * have already fired). Aborts if the renderer is destroyed or moved to
-     * another map while waiting.
+     * Run `callback` once the map style can take layers. Aborts if the
+     * renderer is destroyed or moved to another map while waiting.
      */
     private whenStyleLoaded(map: MapLibreMap, callback: () => void): void {
-        const poll = () => {
-            if (this.map !== map) return;
-            if (map.isStyleLoaded()) {
-                callback();
-            } else {
-                requestAnimationFrame(poll);
-            }
-        };
-        poll();
+        whenStyleReady(map, () => this.map === map, callback);
     }
 
     private addLayerToMap(map: MapLibreMap): void {

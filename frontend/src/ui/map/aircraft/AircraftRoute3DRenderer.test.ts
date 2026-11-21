@@ -20,8 +20,12 @@ function makeMap(styleLoaded: boolean) {
     const layers = new Set<string>();
     const map = {
         styleLoaded,
-        isStyleLoaded: vi.fn(function (this: { styleLoaded: boolean }) {
-            return this.styleLoaded;
+        // Sources never finish loading (traffic streams continuously), so
+        // the renderer must not wait on isStyleLoaded().
+        isStyleLoaded: vi.fn(() => false),
+        // Like MapLibre: undefined until the style document is parsed.
+        getStyle: vi.fn(function (this: { styleLoaded: boolean }) {
+            return this.styleLoaded ? { version: 8, sources: {}, layers: [] } : undefined;
         }),
         getLayer: vi.fn((id: string) => (layers.has(id) ? { id } : undefined)),
         addLayer: vi.fn((layer: { id: string }) => layers.add(layer.id)),
