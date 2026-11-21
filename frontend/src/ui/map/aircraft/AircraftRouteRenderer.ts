@@ -1,6 +1,7 @@
 import { Map, ExpressionSpecification } from 'maplibre-gl';
 import { RouteData, DisplayOptions } from '../../../data/types';
 import { DataProcessor } from '../../../data/DataProcessor';
+import { unwrapLongitude } from '../../../utils/geo';
 import { lineStringFeature, pointFeature } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
 import {
@@ -181,6 +182,11 @@ export class AircraftRouteRenderer {
      * @param data - Route data from server
      * @param activeWaypointIndex - Index of active waypoint
      * @returns Object containing all feature collections
+     *
+     * Line coordinates are unwrapped to the previous point's nearest world
+     * copy (unwrapLongitude) so a leg crossing the antimeridian is drawn
+     * across it, not the long way around the world. Point features need no
+     * unwrapping — MapLibre repeats them in every world copy.
      */
     public buildRouteFeatures(data: RouteData, activeWaypointIndex: number): RouteFeatureSets {
         const completeRouteFeatures: GeoJSON.Feature[] = [];
@@ -198,7 +204,7 @@ export class AircraftRouteRenderer {
 
             if (isValidCoordinate(activeLat, activeLon)) {
                 aircraftToActiveFeatures.push(lineStringFeature(
-                    [[data.aclon, data.aclat], [activeLon, activeLat]],
+                    [[data.aclon, data.aclat], [unwrapLongitude(activeLon, data.aclon), activeLat]],
                     { aircraftId: data.acid }
                 ));
             }
@@ -213,17 +219,21 @@ export class AircraftRouteRenderer {
 
             if (isValidCoordinate(lat1, lon1) && isValidCoordinate(lat2, lon2)) {
                 completeRouteFeatures.push(lineStringFeature(
-                    [[lon1, lat1], [lon2, lat2]],
+                    [[lon1, lat1], [unwrapLongitude(lon2, lon1), lat2]],
                     { aircraftId: data.acid }
                 ));
             }
         }
 
-        // Remaining route line (from active waypoint forward)
+        // Remaining route line (from active waypoint forward). Unwrapping is
+        // cumulative along the polyline so repeated crossings keep extending
+        // in the same direction.
         const remainingCoordinates: [number, number][] = [];
         for (let i = Math.max(0, activeWaypointIndex); i < data.wplat.length; i++) {
             if (isValidCoordinate(data.wplat[i], data.wplon[i])) {
-                remainingCoordinates.push([data.wplon[i], data.wplat[i]]);
+                const prev = remainingCoordinates[remainingCoordinates.length - 1];
+                const lon = prev ? unwrapLongitude(data.wplon[i], prev[0]) : data.wplon[i];
+                remainingCoordinates.push([lon, data.wplat[i]]);
             }
         }
         if (remainingCoordinates.length >= 2) {

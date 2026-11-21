@@ -3,7 +3,7 @@
  * modes (ConsoleMapPicker heading picks, aircraft map-draw creation).
  */
 import { describe, it, expect } from 'vitest';
-import { computeBearing, roundedBearing, normalizeLongitude } from './geo';
+import { computeBearing, roundedBearing, normalizeLongitude, unwrapLongitude } from './geo';
 
 describe('normalizeLongitude', () => {
     it('leaves in-range longitudes untouched (including the ±180 edges)', () => {
@@ -27,6 +27,25 @@ describe('normalizeLongitude', () => {
         // -179.9 is 0.2° east of 179.9, not 359.8° west
         expect(normalizeLongitude(-179.9 - 179.9)).toBeCloseTo(0.2, 10);
         expect(normalizeLongitude(200)).toBeCloseTo(-160, 10);
+    });
+});
+
+describe('unwrapLongitude', () => {
+    it('leaves longitudes on the same side of the antimeridian untouched', () => {
+        expect(unwrapLongitude(5, 4)).toBe(5);
+        expect(unwrapLongitude(-179.9, -179.5)).toBeCloseTo(-179.9, 10);
+    });
+
+    it('unwraps an eastward antimeridian crossing past +180', () => {
+        expect(unwrapLongitude(-179.9, 179.8)).toBeCloseTo(180.1, 10);
+    });
+
+    it('unwraps a westward antimeridian crossing past -180', () => {
+        expect(unwrapLongitude(179.9, -179.8)).toBeCloseTo(-180.1, 10);
+    });
+
+    it('keeps unwrapping relative to an already-unwrapped reference', () => {
+        expect(unwrapLongitude(-178, 180.3)).toBeCloseTo(182, 10);
     });
 });
 

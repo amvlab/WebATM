@@ -25,6 +25,9 @@ export class NavSearchBox {
     private input: HTMLInputElement | null = null;
     private results: HTMLElement | null = null;
     private debounceTimer: number | null = null;
+    // Pending blur-delay hide (see init); cancelled when focus returns so it
+    // can't close the dropdown that the refocus just re-opened.
+    private blurHideTimer: number | null = null;
     private activeIndex = -1;
     private current: NavSearchResult[] = [];
     // Monotonic id of the newest search; responses carrying an older id are
@@ -54,9 +57,13 @@ export class NavSearchBox {
         // Hide the dropdown when focus leaves the widget (slight delay so a
         // click on a result still registers before it is removed).
         this.input.addEventListener('blur', () => {
-            window.setTimeout(() => this.hideResults(), 150);
+            this.blurHideTimer = window.setTimeout(() => this.hideResults(), 150);
         });
         this.input.addEventListener('focus', () => {
+            if (this.blurHideTimer !== null) {
+                window.clearTimeout(this.blurHideTimer);
+                this.blurHideTimer = null;
+            }
             if (this.current.length) this.showResults();
         });
 
@@ -175,15 +182,24 @@ export class NavSearchBox {
             return;
         }
         if (this.current.length === 0) return;
-        if (e.key === 'ArrowDown') {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault();
-            this.activeIndex = Math.min(this.activeIndex + 1, this.current.length - 1);
-            this.highlight();
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            this.activeIndex = Math.max(this.activeIndex - 1, 0);
+            if (!this.isDropdownOpen()) {
+                // The dropdown was closed (e.g. right after a selection):
+                // re-open it over the kept results instead of moving an
+                // invisible highlight.
+                this.showResults();
+                this.highlight();
+                return;
+            }
+            this.activeIndex = e.key === 'ArrowDown'
+                ? Math.min(this.activeIndex + 1, this.current.length - 1)
+                : Math.max(this.activeIndex - 1, 0);
             this.highlight();
         } else if (e.key === 'Enter') {
+            // Only select from a visible dropdown - selecting from a hidden
+            // one would fly the map to a result the user cannot see.
+            if (!this.isDropdownOpen()) return;
             e.preventDefault();
             this.select(this.activeIndex >= 0 ? this.activeIndex : 0);
         }
@@ -207,6 +223,10 @@ export class NavSearchBox {
             this.input.value = r.ident;
         }
         this.hideResults();
+    }
+
+    private isDropdownOpen(): boolean {
+        return this.results?.style.display === 'block';
     }
 
     private showResults(): void {

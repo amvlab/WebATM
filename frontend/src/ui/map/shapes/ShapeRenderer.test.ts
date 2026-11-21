@@ -147,6 +147,33 @@ describe('ShapeRenderer subscription lifecycle', () => {
         expect(polygonSetDataCalls()).toBe(0);
     });
 
+    it('renders a polygon straddling the antimeridian across it, not around the world', () => {
+        const renderer = new ShapeRenderer(mapDisplay, stateManager);
+        renderer.initialize();
+
+        stateManager.addShape({
+            type: 'polygon',
+            name: 'PACIFIC',
+            visible: true,
+            coordinates: [
+                { lat: 5, lng: 175 },
+                { lat: 5, lng: -175 },
+                { lat: -5, lng: -175 },
+                { lat: -5, lng: 175 }
+            ]
+        });
+
+        const fc = fakeMap.sources.get('shapes-polygons')!.setData.mock.calls[0][0];
+        const ring: [number, number][] = fc.features[0].geometry.coordinates[0];
+        // Unwrapped: no segment may jump (nearly) around the world.
+        for (let i = 1; i < ring.length; i++) {
+            expect(Math.abs(ring[i][0] - ring[i - 1][0])).toBeLessThan(180);
+        }
+        // The label anchors on the shape (±180), not at lng ~0.
+        const labels = fakeMap.sources.get('shapes-labels')!.setData.mock.calls[0][0];
+        expect(labels.features[0].geometry.coordinates[0]).toBe(180);
+    });
+
     it('recovers when a style change wiped the sources before onStyleChange ran', () => {
         const renderer = new ShapeRenderer(mapDisplay, stateManager);
         renderer.initialize();

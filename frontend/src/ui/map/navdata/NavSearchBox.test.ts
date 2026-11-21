@@ -228,6 +228,66 @@ describe('NavSearchBox stale-response handling', () => {
         expect(item.textContent).toContain('A & B "field"');
     });
 
+    it('reopens a closed dropdown on ArrowDown instead of moving an invisible highlight', async () => {
+        await type('EH');
+        pending[0].resolve({ success: true, results: [result('EHAM'), result('EHRD')] });
+        await flush();
+
+        // Select the first result: the dropdown closes, results are kept.
+        input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        expect(mapDisplay.setCenter).toHaveBeenCalledTimes(1);
+        expect(results().style.display).toBe('none');
+
+        // ArrowDown must re-open the dropdown, not navigate while hidden.
+        input().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+        expect(results().style.display).toBe('block');
+
+        // And the re-opening keystroke itself must not have moved the highlight.
+        expect(results().querySelectorAll('.nav-search-item.active')).toHaveLength(0);
+    });
+
+    it('ignores Enter while the dropdown is closed (no invisible selection)', async () => {
+        await type('EH');
+        pending[0].resolve({ success: true, results: [result('EHAM'), result('EHRD')] });
+        await flush();
+
+        input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        expect(mapDisplay.setCenter).toHaveBeenCalledTimes(1);
+        expect(results().style.display).toBe('none');
+
+        // A second Enter on the closed dropdown must not fly the map again.
+        input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        expect(mapDisplay.setCenter).toHaveBeenCalledTimes(1);
+    });
+
+    it('hides the dropdown 150ms after blur', async () => {
+        await type('EH');
+        pending[0].resolve({ success: true, results: [result('EHAM')] });
+        await flush();
+        expect(results().style.display).toBe('block');
+
+        input().dispatchEvent(new Event('blur'));
+        await vi.advanceTimersByTimeAsync(150);
+        expect(results().style.display).toBe('none');
+    });
+
+    it('does not let a stale blur timer close the dropdown after a quick refocus', async () => {
+        await type('EH');
+        pending[0].resolve({ success: true, results: [result('EHAM')] });
+        await flush();
+        expect(results().style.display).toBe('block');
+
+        // Blur, then refocus before the 150ms hide fires.
+        input().dispatchEvent(new Event('blur'));
+        await vi.advanceTimersByTimeAsync(100);
+        input().dispatchEvent(new Event('focus'));
+        expect(results().style.display).toBe('block');
+
+        // The cancelled blur timer must not hide the focused dropdown.
+        await vi.advanceTimersByTimeAsync(200);
+        expect(results().style.display).toBe('block');
+    });
+
     it('clears stale results on a failed search so Enter cannot select one', async () => {
         await type('EHAM');
         pending[0].resolve({ success: true, results: [result('EHAM')] });

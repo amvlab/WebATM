@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { boxCornerPoints, circleRingPoints, distanceNm, CIRCLE_PREVIEW_SEGMENTS } from './shapeGeometry';
+import {
+    boxCornerPoints,
+    circleRingPoints,
+    distanceNm,
+    polygonLabelAnchor,
+    polylineLabelAnchor,
+    CIRCLE_PREVIEW_SEGMENTS,
+} from './shapeGeometry';
 
 describe('distanceNm', () => {
     it('returns 0 for identical points', () => {
@@ -17,6 +24,55 @@ describe('distanceNm', () => {
     it('shrinks longitude distance by cos(lat) away from the equator', () => {
         const d = distanceNm({ lat: 60, lng: 0 }, { lat: 60, lng: 1 });
         expect(d).toBeCloseTo(60.04 * Math.cos(Math.PI / 3), 0);
+    });
+});
+
+describe('polygonLabelAnchor', () => {
+    it('returns the mean of the vertices', () => {
+        expect(polygonLabelAnchor([
+            { lat: 0, lng: 0 },
+            { lat: 2, lng: 0 },
+            { lat: 2, lng: 4 },
+            { lat: 0, lng: 4 },
+        ])).toEqual({ lat: 1, lng: 2 });
+    });
+
+    it('ignores a closing vertex equal to the first', () => {
+        expect(polygonLabelAnchor([
+            { lat: 0, lng: 0 },
+            { lat: 3, lng: 0 },
+            { lat: 0, lng: 3 },
+            { lat: 0, lng: 0 },
+        ])).toEqual({ lat: 1, lng: 1 });
+    });
+
+    it('anchors a ring straddling ±180 on the shape, not at lng ~0', () => {
+        const anchor = polygonLabelAnchor([
+            { lat: 5, lng: 175 },
+            { lat: 5, lng: -175 },
+            { lat: -5, lng: -175 },
+            { lat: -5, lng: 175 },
+        ]);
+        expect(anchor?.lat).toBe(0);
+        expect(anchor?.lng).toBe(180);
+    });
+
+    it('returns null for an empty ring', () => {
+        expect(polygonLabelAnchor([])).toBeNull();
+    });
+});
+
+describe('polylineLabelAnchor', () => {
+    it('returns the middle vertex', () => {
+        expect(polylineLabelAnchor([
+            { lat: 10, lng: 170 },
+            { lat: 12, lng: 180 },
+            { lat: 10, lng: -170 },
+        ])).toEqual({ lat: 12, lng: 180 });
+    });
+
+    it('returns null for an empty line', () => {
+        expect(polylineLabelAnchor([])).toBeNull();
     });
 });
 

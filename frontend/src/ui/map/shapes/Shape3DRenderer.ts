@@ -1,7 +1,7 @@
 import { PolygonShape, DisplayOptions } from '../../../data/types';
 import type { MapDisplay } from '../MapDisplay';
 import type { StateManager } from '../../../core/StateManager';
-import { polygonFeature, toLngLatCoords } from '../../../utils/geojson';
+import { polygonFeature, toLngLatCoords, unwrapLngLatPath } from '../../../utils/geojson';
 import { logger } from '../../../utils/Logger';
 import { extrusionBounds } from './extrusion';
 import {
@@ -87,7 +87,7 @@ export class Shape3DRenderer {
         for (const poly of polygons) {
             const bounds = extrusionBounds(poly);
             if (!bounds) continue;
-            features.push(polygonFeature(toLngLatCoords(poly.coordinates), {
+            features.push(polygonFeature(unwrapLngLatPath(toLngLatCoords(poly.coordinates)), {
                 name: poly.name,
                 fillColor: poly.fillColor || displayOptions.shapeFillColor || '#ff00ff',
                 extrusionHeight: bounds.top,
