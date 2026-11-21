@@ -44,21 +44,13 @@ class ConnectionManager:
             "actnode_changed": node_mgr._on_actnode_changed,
         }
 
-        try:
-            logger.debug("Connecting BlueSky client signals...")
-            for name, handler in signal_handlers.items():
-                signal = getattr(client, name, None)
-                if signal is None:
-                    logger.warning(f"{name} signal not available")
-                    continue
-                signal.connect(handler)
-                logger.debug(f"{name} signal connected")
-        except Exception as e:
-            # Continue without signals - basic functionality might still work.
-            logger.error(f"Error connecting signals: {e}")
-            logger.debug(
-                f"Available attributes: {[attr for attr in dir(client) if not attr.startswith('_')]}"
-            )
+        logger.debug("Connecting BlueSky client signals...")
+        for name, handler in signal_handlers.items():
+            signal = getattr(client, name, None)
+            if signal is None:
+                logger.warning(f"{name} signal not available")
+                continue
+            signal.connect(handler)
 
     def start_client(self, hostname=None):
         """Start the network client with fresh state, following the ZMQ pattern.
@@ -175,72 +167,77 @@ class ConnectionManager:
     def _start_network_timer(self):
         """Start the recurring 20 ms network update timer.
 
-        Each tick pumps ``BlueSkyClient.update()``, tracks connection health
-        (node presence, data-flow timeout, consecutive failures), and
-        reschedules itself while the proxy is running. On timeout or repeated
-        failures it triggers disconnection handling and stops rescheduling.
+        Each tick runs ``_network_tick``; the timer reschedules itself while
+        the proxy is running and no disconnect has been detected.
         """
+        self._schedule_network_tick()
 
-        def network_timer_callback():
-            if (
-                self.proxy.running
-                and self.proxy.allow_reconnection
-                and self.proxy.bluesky_client
-            ):
-                try:
-                    self.proxy.bluesky_client.update()
-                    self.proxy.connection_failures = 0
-
-                    current_time = time.time()
-
-                    if len(self.proxy.tracked_nodes) > 0:
-                        self.mark_connected()
-
-                    # Data-flow timeout: nothing received within
-                    # connection_timeout (whether nodes are still listed or all
-                    # gone — no nodes means no data) counts as a disconnect.
-                    if (
-                        self.proxy.was_connected
-                        and current_time - self.proxy.last_successful_update
-                        > self.proxy.connection_timeout
-                    ):
-                        timeout_duration = (
-                            current_time - self.proxy.last_successful_update
-                        )
-                        logger.info(
-                            f"Connection timeout detected ({timeout_duration:.1f}s since last data)"
-                        )
-                        self._handle_disconnection("Connection timeout")
-                        return  # Don't schedule next timer
-
-                except Exception as e:
-                    self.proxy.connection_failures += 1
-                    logger.info(
-                        f"Network error detected ({self.proxy.connection_failures}/{self.proxy.max_connection_failures}): {e}"
-                    )
-
-                    if (
-                        self.proxy.connection_failures
-                        >= self.proxy.max_connection_failures
-                    ):
-                        logger.info(
-                            "Max connection failures reached - marking as disconnected"
-                        )
-                        self._handle_disconnection("Network error (max failures)")
-                        return  # Don't schedule next timer
-
-                # Schedule the next update
-                if self.proxy.running and self.proxy.allow_reconnection:
-                    self.proxy.network_timer = threading.Timer(
-                        0.02, network_timer_callback
-                    )
-                    self.proxy.network_timer.daemon = True
-                    self.proxy.network_timer.start()
-
-        # Start the timer
-        self.proxy.network_timer = threading.Timer(0.02, network_timer_callback)
+    def _schedule_network_tick(self):
+        """Arm the timer for the next ``_network_tick`` in 20 ms."""
+        self.proxy.network_timer = threading.Timer(0.02, self._network_timer_callback)
         self.proxy.network_timer.daemon = True
         self.proxy.network_timer.start()
+
+    def _network_timer_callback(self):
+        """Run one tick and reschedule while the proxy keeps running."""
+        if (
+            self._network_tick()
+            and self.proxy.running
+            and self.proxy.allow_reconnection
+        ):
+            self._schedule_network_tick()
+
+    def _network_tick(self):
+        """Pump the network client once and track connection health.
+
+        ``BlueSkyClient.update()`` reports trouble by returning False — it
+        never raises — so a False return counts toward
+        ``max_connection_failures``. A healthy tick resets that count, flips
+        the proxy to connected once nodes exist, and enforces the data-flow
+        timeout (nothing received within ``connection_timeout`` counts as a
+        disconnect, whether nodes are still listed or all gone).
+
+        Returns:
+            bool: True when the next tick should be scheduled, False when the
+                proxy is no longer running or this tick triggered
+                disconnection handling.
+        """
+        proxy = self.proxy
+        if not (proxy.running and proxy.allow_reconnection and proxy.bluesky_client):
+            return False
+
+        try:
+            update_ok = proxy.bluesky_client.update()
+        except Exception as e:
+            logger.info(f"Network update raised: {e}")
+            update_ok = False
+
+        if not update_ok:
+            proxy.connection_failures += 1
+            logger.info(
+                f"Network error detected "
+                f"({proxy.connection_failures}/{proxy.max_connection_failures})"
+            )
+            if proxy.connection_failures >= proxy.max_connection_failures:
+                logger.info("Max connection failures reached - marking as disconnected")
+                self._handle_disconnection("Network error (max failures)")
+                return False
+            return True
+
+        proxy.connection_failures = 0
+
+        if len(proxy.tracked_nodes) > 0:
+            self.mark_connected()
+
+        idle_time = time.time() - proxy.last_successful_update
+        if proxy.was_connected and idle_time > proxy.connection_timeout:
+            logger.info(
+                f"Connection timeout detected ({idle_time:.1f}s since last data)"
+            )
+            self._handle_disconnection("Connection timeout")
+            return False
+
+        return True
 
     def _handle_disconnection(self, reason="Unknown"):
         """Close connections and clean up state after a detected disconnect.
@@ -313,26 +310,19 @@ class ConnectionManager:
         self.proxy.data_mgr._clear_state(context)
 
     def _cancel_timers(self):
-        """Cancel all timers with proper cleanup."""
-        if self.proxy.network_timer:
-            try:
-                self.proxy.network_timer.cancel()
-                # Wait briefly to let any active timer callback complete
-                time.sleep(0.05)
-                logger.info("Network timer cancelled")
-            except Exception as e:
-                logger.warning(f"Warning cancelling network timer: {e}")
-            finally:
-                self.proxy.network_timer = None
-
-        if self.proxy.backup_timer:
-            try:
-                self.proxy.backup_timer.cancel()
-                logger.info("Backup timer cancelled")
-            except Exception as e:
-                logger.warning(f"Warning cancelling backup timer: {e}")
-            finally:
-                self.proxy.backup_timer = None
+        """Cancel the network and backup timers."""
+        cancelled = False
+        for attr in ("network_timer", "backup_timer"):
+            timer = getattr(self.proxy, attr)
+            if timer is not None:
+                timer.cancel()
+                setattr(self.proxy, attr, None)
+                cancelled = True
+        if cancelled:
+            # Give an in-flight network tick a moment to finish before the
+            # sockets are torn down underneath it.
+            time.sleep(0.05)
+            logger.info("Timers cancelled")
 
     def _close_bluesky_client(self):
         """Close network client following ZMQ pattern: close sockets first, then context."""

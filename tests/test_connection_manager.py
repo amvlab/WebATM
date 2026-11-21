@@ -243,6 +243,65 @@ class TestMarkConnected:
         assert fake_socketio.count("connection_status") == 0
 
 
+class TestNetworkTick:
+    """One pass of the 20 ms network timer (``_network_tick``)."""
+
+    @pytest.fixture
+    def connected(self, proxy, fake_client):
+        """A proxy that looks fully connected with fresh data flow."""
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        proxy.tracked_nodes["n1"] = {"node_id": b"NODE\x81"}
+        proxy.last_successful_update = time.time()
+        return proxy
+
+    def test_healthy_tick_resets_failures_and_reschedules(self, connected):
+        connected.connection_failures = 2
+        assert connected.connection_mgr._network_tick() is True
+        assert connected.connection_failures == 0
+
+    def test_failed_update_counts_toward_max(self, connected):
+        """update() reports socket trouble by returning False, never by
+        raising — counting only exceptions would disable the failure limit."""
+        connected.bluesky_client.update_result = False
+        assert connected.connection_mgr._network_tick() is True
+        assert connected.connection_failures == 1
+
+    def test_max_failed_updates_disconnect(self, connected, fake_socketio):
+        connected.bluesky_client.update_result = False
+        results = [connected.connection_mgr._network_tick() for _ in range(3)]
+        assert results == [True, True, False]
+        assert connected.running is False
+        assert fake_socketio.last("connection_status")["connected"] is False
+
+    def test_update_exception_counts_as_failure(self, connected):
+        connected.bluesky_client.update_result = RuntimeError("boom")
+        assert connected.connection_mgr._network_tick() is True
+        assert connected.connection_failures == 1
+
+    def test_data_flow_timeout_disconnects(self, connected, fake_socketio):
+        connected.last_successful_update = time.time() - (
+            connected.connection_timeout + 1
+        )
+        assert connected.connection_mgr._network_tick() is False
+        assert connected.running is False
+        assert fake_socketio.last("connection_status")["connected"] is False
+
+    def test_first_node_flips_connected(self, proxy, fake_client):
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = False
+        proxy.tracked_nodes["n1"] = {"node_id": b"NODE\x81"}
+        assert proxy.connection_mgr._network_tick() is True
+        assert proxy.was_connected is True
+
+    def test_stopped_proxy_does_not_reschedule(self, proxy, fake_client):
+        proxy.bluesky_client = fake_client
+        proxy.running = False
+        assert proxy.connection_mgr._network_tick() is False
+
+
 class TestHandleDisconnection:
     def test_stops_clears_and_notifies_browsers(
         self, proxy, fake_socketio, fake_client
