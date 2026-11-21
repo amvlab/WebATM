@@ -1072,6 +1072,8 @@ class TestPolySharedStateActions:
 
         on_poly_received({"polys": {"z1": {"color": [255, 0, 0]}}})
 
+        # Re-read: the handler publishes updates as fresh envelopes.
+        polys = proxy.poly_data_by_node[sender_hex]["polys"]
         assert set(polys) == {"z2", "z3", "z4", "z5", "z6"}
 
     def test_full_redefinition_replaces_stale_fields(self, proxy, fake_client):
@@ -1090,3 +1092,105 @@ class TestPolySharedStateActions:
         assert "color" not in stored
         assert "top" not in stored
         assert stored["lat"] == [1.0, 3.0, 5.0]
+
+
+class TestPublishedPayloadsAreSwapped:
+    """Handlers must publish cmddict/shape updates by swapping in fresh
+    objects, never by mutating the published ones in place. The published
+    objects are shared: get_current_data() hands them to the Socket.IO
+    connect handler, which JSON-encodes them on its own thread while the
+    network-timer thread dispatches the next STACKCMDS/POLY message.
+    In-place mutation let a connecting browser capture them half-done
+    (regression: an empty cmddict between clear() and update(), killing
+    console autocomplete/validation until the next STACKCMDS; a shape
+    store caught above the trim cap or mid-merge)."""
+
+    AREA = {"shape": "POLY", "coordinates": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}
+
+    def _activate(self, proxy, fake_client, sender=b"NODE1"):
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        fake_client.act_id = sender
+        fake_client.context.sender_id = sender
+        proxy.tracked_nodes[sender.hex()] = {"status": "init", "time": "0"}
+        return sender.hex()
+
+    def test_stackcmds_replace_swaps_cmddict(self, proxy, fake_client):
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        self._activate(proxy, fake_client, active)
+        snapshot = proxy.cmddict
+        seeded = dict(snapshot)
+
+        fake_client.context.action = b"R"
+        on_stackcmds_received({"cmddict": {"CRE": "acid,type"}})
+
+        assert proxy.cmddict == {"CRE": "acid,type"}
+        assert snapshot == seeded  # the captured reference never changes
+
+    def test_stackcmds_merge_swaps_cmddict(self, proxy, fake_client):
+        active = b"\xaa\xaa\xaa\xaa\x81"
+        self._activate(proxy, fake_client, active)
+        snapshot = proxy.cmddict
+        seeded = dict(snapshot)
+
+        fake_client.context.action = b"U"
+        on_stackcmds_received({"cmddict": {"CRE": "acid,type"}})
+
+        assert proxy.cmddict == {**seeded, "CRE": "acid,type"}
+        assert snapshot == seeded
+
+    def test_poly_update_swaps_envelope(self, proxy, fake_client):
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+        on_poly_received({"polys": {"area1": dict(self.AREA)}})
+        envelope = proxy.poly_data_by_node[sender_hex]
+        entry = envelope["polys"]["area1"]
+
+        on_poly_received({"polys": {"area1": {"color": [255, 0, 0]}}})
+
+        assert "color" not in entry  # captured entry untouched
+        assert proxy.poly_data_by_node[sender_hex]["polys"]["area1"]["color"] == [
+            255,
+            0,
+            0,
+        ]
+
+    def test_poly_delete_swaps_envelope(self, proxy, fake_client):
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+        on_poly_received({"polys": {"area1": dict(self.AREA)}})
+        envelope = proxy.poly_data_by_node[sender_hex]
+
+        fake_client.context.action = b"D"
+        on_poly_received({"polys": ["area1"]})
+
+        assert "area1" in envelope["polys"]  # captured envelope untouched
+        assert "area1" not in proxy.poly_data_by_node[sender_hex]["polys"]
+
+    def test_initial_data_snapshot_is_isolated(self, proxy, fake_client):
+        """End to end: a snapshot taken for a connecting browser must not
+        change when later STACKCMDS/POLY messages arrive."""
+        sender = b"\xaa\xaa\xaa\xaa\x81"
+        sender_hex = self._activate(proxy, fake_client, sender)
+        fake_client.context.action = b"R"
+        on_stackcmds_received({"cmddict": {"CRE": "acid,type"}})
+        fake_client.context.action = b"U"
+        on_poly_received({"polys": {"area1": dict(self.AREA)}})
+
+        import copy
+
+        snapshot = proxy.get_current_data()
+        expected = copy.deepcopy(snapshot)
+
+        fake_client.context.action = b"R"
+        on_stackcmds_received({"cmddict": {"DEST": "acid,wpname"}})
+        fake_client.context.action = b"D"
+        on_poly_received({"polys": ["area1"]})
+
+        assert snapshot["cmddict"] == expected["cmddict"]
+        assert snapshot["poly_data"] == expected["poly_data"]
+        assert snapshot["polyline_data"] == expected["polyline_data"]
+        # The live state did move on.
+        assert proxy.cmddict == {"DEST": "acid,wpname"}
+        assert "area1" not in proxy.poly_data_by_node[sender_hex]["polys"]

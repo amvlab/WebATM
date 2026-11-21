@@ -55,9 +55,14 @@ def on_stackcmds_received(data):
         logger.debug(f"STACKCMDS from background node {sender_id} ignored")
         return
 
+    # Publish by swapping in a fresh dict, never by mutating the published
+    # one: initial_data snapshots hold a reference to it and are JSON-encoded
+    # on other threads, so an in-place clear()+update() could be captured
+    # half-done (a browser connecting at that moment got an empty cmddict).
     if action in REPLACE_ACTIONS:
-        proxy.cmddict.clear()
-    proxy.cmddict.update(cmddict)
+        proxy.cmddict = dict(cmddict)
+    else:
+        proxy.cmddict = {**proxy.cmddict, **cmddict}
     logger.debug(f"Updated cmddict with {len(cmddict)} commands (action={action})")
 
     if proxy.socketio and proxy.connected_clients > 0:

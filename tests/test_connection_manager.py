@@ -108,7 +108,6 @@ def _seed_cached_state(proxy):
     proxy.last_siminfo_emit = 123.0
     proxy.last_acdata_emit = 123.0
     proxy.last_node_info_emit = 123.0
-    proxy.current_bbox = (0.0, 0.0, 1.0, 1.0)
     proxy.was_connected = True
     proxy.connection_failures = 2
 
@@ -123,7 +122,6 @@ def _assert_cached_state_cleared(proxy):
     assert proxy.last_siminfo_emit == 0
     assert proxy.last_acdata_emit == 0
     assert proxy.last_node_info_emit == 0
-    assert proxy.current_bbox is None
     assert proxy.cmddict == {}
     assert proxy.was_connected is False
     # A leftover failure count would put the next session on the same proxy

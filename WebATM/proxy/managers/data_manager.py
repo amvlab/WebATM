@@ -141,8 +141,8 @@ class DataManager:
         self.proxy.last_acdata_emit = 0
         self.proxy.last_node_info_emit = 0
 
-        self.proxy.current_bbox = None
-        self.proxy.cmddict.clear()
+        # Swap rather than clear() in place: snapshots hold the old dict.
+        self.proxy.cmddict = {}
 
     def _emit_disconnected_state(self, was_connected):
         """Tell browsers the BlueSky link is gone.
@@ -195,25 +195,15 @@ class DataManager:
         """
         active_node_id = self.proxy.node_mgr._get_safe_active_node()
 
+        # Holding references is safe here: every published payload below
+        # (traffic/sim caches, shape envelopes, cmddict) is swapped whole on
+        # update, never mutated in place, so the network-timer thread cannot
+        # tear this snapshot while a Socket.IO thread JSON-encodes it.
         poly_data = {}
         polyline_data = {}
-
         if active_node_id:
-            # Only include shapes from the active node
-            if active_node_id in self.proxy.poly_data_by_node:
-                poly_data = self.proxy.poly_data_by_node[active_node_id]
-
-            if active_node_id in self.proxy.polyline_data_by_node:
-                polyline_data = self.proxy.polyline_data_by_node[active_node_id]
-
-            poly_count = len(poly_data.get("polys", {}))
-            polyline_count = len(polyline_data.get("polys", {}))
-            if poly_count > 0 or polyline_count > 0:
-                logger.info(
-                    f"Including shapes from active node '{active_node_id}' in initial data: {poly_count} polygons, {polyline_count} polylines"
-                )
-        else:
-            logger.debug("No active node - not including any shapes in initial data")
+            poly_data = self.proxy.poly_data_by_node.get(active_node_id, {})
+            polyline_data = self.proxy.polyline_data_by_node.get(active_node_id, {})
 
         return {
             "traffic_data": self.proxy.traffic_data,
