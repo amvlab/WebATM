@@ -4,7 +4,26 @@
  * follow the GeoJSON convention: [lng, lat].
  */
 
+import { normalizeLongitude, unwrapLongitude } from './geo';
+
 export type LngLat = [number, number];
+
+/**
+ * Unwrap a path's longitudes so each point lands in the world copy nearest
+ * its predecessor (the first point is wrapped into [-180, 180]). MapLibre
+ * draws LineString/Polygon edges as literal planar lines, so a path whose
+ * raw longitudes straddle ±180 would be drawn the long way around the world;
+ * unwrapped (values may exceed ±180) it crosses the antimeridian. Paths that
+ * never jump more than 180° between points come back unchanged in value.
+ */
+export function unwrapLngLatPath(coords: LngLat[]): LngLat[] {
+    let prev: number | null = null;
+    return coords.map(([lng, lat]) => {
+        const unwrapped = prev === null ? normalizeLongitude(lng) : unwrapLongitude(lng, prev);
+        prev = unwrapped;
+        return [unwrapped, lat];
+    });
+}
 
 export function pointFeature(
     coordinates: LngLat,

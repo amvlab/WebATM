@@ -14,6 +14,17 @@ export function normalizeLongitude(lon: number): number {
 }
 
 /**
+ * Express `lon` in the 360°-world-copy nearest `refLon`, e.g.
+ * unwrapLongitude(-179.9, 179.8) === 180.1. MapLibre draws LineStrings as
+ * literal planar lines, so a segment whose endpoints are kept in [-180, 180]
+ * would cross the whole map instead of the antimeridian; unwrapped
+ * coordinates beyond ±180 render correctly (world copies repeat).
+ */
+export function unwrapLongitude(lon: number, refLon: number): number {
+    return refLon + normalizeLongitude(lon - refLon);
+}
+
+/**
  * Aviation bearing from (lat1, lon1) to (lat2, lon2). 0° = North,
  * clockwise. Returns a value in [0, 360).
  */

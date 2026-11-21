@@ -2,7 +2,8 @@ import { Shape, PolygonShape, PolylineShape, DisplayOptions } from '../../../dat
 import type { MapDisplay } from '../MapDisplay';
 import type { StateManager } from '../../../core/StateManager';
 import { Shape3DRenderer } from './Shape3DRenderer';
-import { lineStringFeature, pointFeature, polygonFeature, toLngLatCoords } from '../../../utils/geojson';
+import { lineStringFeature, pointFeature, polygonFeature, toLngLatCoords, unwrapLngLatPath } from '../../../utils/geojson';
+import { polygonLabelAnchor, polylineLabelAnchor } from './shapeGeometry';
 import { logger } from '../../../utils/Logger';
 import {
     ensureGeoJSONSource,
@@ -197,9 +198,10 @@ export class ShapeRenderer {
     private renderPolygons(polygons: PolygonShape[]): void {
         const displayOptions = this.stateManager.getDisplayOptions();
 
-        // Ring closure is handled by polygonFeature.
+        // Ring closure is handled by polygonFeature; unwrapLngLatPath keeps
+        // shapes straddling ±180 from being drawn around the world.
         const features = polygons.map(poly =>
-            polygonFeature(toLngLatCoords(poly.coordinates), {
+            polygonFeature(unwrapLngLatPath(toLngLatCoords(poly.coordinates)), {
                 name: poly.name,
                 fillColor: poly.fillColor || displayOptions.shapeFillColor || '#ff00ff',
                 fillOpacity: poly.fillOpacity !== undefined ? poly.fillOpacity : 0.2,
@@ -216,7 +218,7 @@ export class ShapeRenderer {
         const displayOptions = this.stateManager.getDisplayOptions();
 
         const features = polylines.map(line =>
-            lineStringFeature(toLngLatCoords(line.coordinates), {
+            lineStringFeature(unwrapLngLatPath(toLngLatCoords(line.coordinates)), {
                 name: line.name,
                 color: line.color || displayOptions.shapeLinesColor || '#ff00ff',
                 width: line.width || 2
@@ -234,41 +236,17 @@ export class ShapeRenderer {
         shapes.forEach((shape) => {
             if (!shape.visible) return;
 
-            let centroid: [number, number];
-            if (shape.type === 'polygon') {
-                centroid = this.calculatePolygonCentroid(shape.coordinates);
-            } else if (shape.type === 'polyline') {
-                centroid = this.calculatePolylineMidpoint(shape.coordinates);
-            } else {
-                return;
+            const anchor = shape.type === 'polygon'
+                ? polygonLabelAnchor(shape.coordinates)
+                : shape.type === 'polyline'
+                    ? polylineLabelAnchor(shape.coordinates)
+                    : null;
+            if (anchor) {
+                features.push(pointFeature([anchor.lng, anchor.lat], { name: shape.name }));
             }
-
-            features.push(pointFeature(centroid, { name: shape.name }));
         });
 
         this.updateSource(this.LABELS_SOURCE_ID, features);
-    }
-
-    private calculatePolygonCentroid(coordinates: Array<{lat: number, lng: number}>): [number, number] {
-        if (coordinates.length === 0) return [0, 0];
-
-        let sumLng = 0;
-        let sumLat = 0;
-
-        coordinates.forEach(coord => {
-            sumLng += coord.lng;
-            sumLat += coord.lat;
-        });
-
-        return [sumLng / coordinates.length, sumLat / coordinates.length];
-    }
-
-    private calculatePolylineMidpoint(coordinates: Array<{lat: number, lng: number}>): [number, number] {
-        if (coordinates.length === 0) return [0, 0];
-
-        const midIndex = Math.floor(coordinates.length / 2);
-        const coord = coordinates[midIndex];
-        return [coord.lng, coord.lat];
     }
 
     private updateDisplayOptions(displayOptions: DisplayOptions): void {

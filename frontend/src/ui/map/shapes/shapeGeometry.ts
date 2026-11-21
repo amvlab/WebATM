@@ -1,9 +1,10 @@
 /**
- * DOM-free geometry helpers for the box and circle drawing tools, shared by
- * the command builder (radius for the CIRCLE command) and the drawing
- * preview (rectangle corners, tessellated circle ring). Kept separate so
- * they stay unit-testable in isolation.
+ * DOM-free geometry helpers for the shape tools: drawing (box corners,
+ * circle ring, CIRCLE radius) and rendering (label anchors). Kept separate
+ * so they stay unit-testable in isolation.
  */
+
+import { normalizeLongitude, unwrapLongitude } from '../../../utils/geo';
 
 /** A geographic point in {lat, lng} form (BaseDrawingManager's DrawingPoint). */
 export interface GeoPoint {
@@ -20,6 +21,39 @@ const EARTH_RADIUS_NM = 6371.0 / 1.852;
  * looks like what the server will render back.
  */
 export const CIRCLE_PREVIEW_SEGMENTS = 72;
+
+/**
+ * Mean-of-vertices label anchor for a polygon ring, or null for an empty
+ * ring. Longitudes are averaged unwrapped around the first vertex so a ring
+ * straddling ±180 anchors on the shape rather than the far side of the
+ * world, and a closing vertex equal to the first is dropped so it doesn't
+ * skew the mean.
+ */
+export function polygonLabelAnchor(points: GeoPoint[]): GeoPoint | null {
+    if (points.length === 0) return null;
+    const first = points[0];
+    const last = points[points.length - 1];
+    const ring = points.length > 1 && last.lat === first.lat && last.lng === first.lng
+        ? points.slice(0, -1)
+        : points;
+
+    let sumLat = 0;
+    let sumLng = 0;
+    for (const p of ring) {
+        sumLat += p.lat;
+        sumLng += unwrapLongitude(p.lng, first.lng);
+    }
+    return {
+        lat: sumLat / ring.length,
+        lng: normalizeLongitude(sumLng / ring.length),
+    };
+}
+
+/** Middle vertex of a polyline as its label anchor, or null when empty. */
+export function polylineLabelAnchor(points: GeoPoint[]): GeoPoint | null {
+    if (points.length === 0) return null;
+    return points[Math.floor(points.length / 2)];
+}
 
 /** Great-circle (haversine) distance between two points in nautical miles. */
 export function distanceNm(a: GeoPoint, b: GeoPoint): number {
