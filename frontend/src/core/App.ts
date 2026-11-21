@@ -1,4 +1,5 @@
 import { AircraftData, RouteData, AppState } from '../data/types';
+import { hasRouteWaypoints, normalizeRouteLongitudes } from '../utils/route';
 import { SocketManager } from './SocketManager';
 import { StateManager } from './StateManager';
 import { connectionStatus } from './ConnectionStatusService';
@@ -442,7 +443,12 @@ export class App {
                     this.commandHandler.executeServerCommand(data.command);
                 }
             },
-            onRouteData: (data: RouteData) => {
+            onRouteData: (rawData: RouteData) => {
+                // Wrap longitudes once on ingest (BlueSky reports lon beyond
+                // ±180 after an antimeridian crossing), mirroring the ACDATA
+                // normalization in StateManager.updateAircraftData.
+                const data = normalizeRouteLongitudes(rawData);
+
                 // Check if we just sent an explicit POS command for this aircraft
                 const isExplicitPosResponse = this.aircraftInteractionManager?.wasLastExplicitPosFor(data.acid) ?? false;
 
@@ -450,8 +456,12 @@ export class App {
                 // client) becomes an implicit selection, but only while nothing
                 // is selected: it must never steal an active selection (e.g. a
                 // still-streaming broadcast of a previously selected aircraft).
+                // Waypoint-less frames are BlueSky's route-clear broadcasts and
+                // must never select: after DEL of a displayed aircraft the
+                // server streams {acid}-only frames once per second, which
+                // would re-select the deleted aircraft in an endless loop.
                 const currentSelection = this.stateManager.getState().selectedAircraft;
-                if (data.acid && !currentSelection && !isExplicitPosResponse) {
+                if (data.acid && hasRouteWaypoints(data) && !currentSelection && !isExplicitPosResponse) {
                     logger.info('App', '🛰️ Unsolicited ROUTEDATA received for', data.acid, '- treating as implicit selection');
                     this.stateManager.setSelectedAircraft(data.acid);
                 }
