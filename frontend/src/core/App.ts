@@ -150,6 +150,12 @@ export class App {
             }
         });
 
+        this.stateManager.subscribe('aircraftTrailHistory', (history) => {
+            if (history && this.mapOverlay) {
+                this.mapOverlay.seedAircraftTrails(history);
+            }
+        });
+
         this.stateManager.subscribe('displayOptions', (newOptions) => {
             if (newOptions && this.mapOverlay) {
                 this.mapOverlay.updateDisplayOptions(newOptions);
@@ -163,6 +169,15 @@ export class App {
         this.stateManager.subscribe('selectedAircraft', (newSelected) => {
             if (this.mapOverlay) {
                 this.mapOverlay.setSelectedAircraft(newSelected);
+            }
+        });
+
+        // Trails belong to the node's own simulation (and clock), so a node
+        // switch makes them stale — same reasoning as the shape clearing in
+        // StateManager.setActiveNode. Skip the initial null -> node set.
+        this.stateManager.subscribe('activeNode', (newNode, oldNode) => {
+            if (oldNode !== null && newNode !== oldNode) {
+                this.mapOverlay?.getAircraftRenderer()?.clearTrails();
             }
         });
     }

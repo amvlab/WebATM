@@ -1,6 +1,6 @@
 import { Map as MapLibreMap, GeoJSONSource } from 'maplibre-gl';
 import { DataProcessor } from '../../../data/DataProcessor';
-import { AircraftData, DisplayOptions } from '../../../data/types';
+import { AircraftData, AircraftTrailHistory, DisplayOptions } from '../../../data/types';
 import { StateManager } from '../../../core/StateManager';
 import { EntityRenderer, EntityShapeDrawer, EntityRenderConfig } from '../EntityRenderer';
 import { featureCollection, lineStringFeature } from '../../../utils/geojson';
@@ -33,6 +33,14 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
     // Trail management
     private aircraftTrails: Map<string, AircraftTrailData> = new Map();
     private readonly trailSaveInterval: number = 5; // Save trail point every 5 simulation seconds
+    /**
+     * Per-aircraft point cap. A trail that outgrows it drops every other
+     * point, keeping the whole flight at half the resolution (the proxy's
+     * TrailManager bounds its history the same way).
+     */
+    private static readonly MAX_TRAIL_POINTS = 500;
+    /** Set when trail points changed while the trail layer was hidden. */
+    private trailLayerStale = false;
 
     constructor(map: MapLibreMap, displayOptions: DisplayOptions, shapeDrawer: AircraftShapeDrawer, stateManager: StateManager) {
         // Create aircraft-specific configuration using colors from displayOptions
@@ -148,10 +156,9 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
     }
 
     /**
-     * Redraw everything, trails included. The base class calls this on
-     * selection, shape, and style changes, so overriding it here keeps the
-     * trail features' selected/conflict state in sync with the icons instead
-     * of lagging until the next data frame.
+     * Redraw everything, trails included, so the trail features'
+     * selected/conflict state stays in sync with the icons on selection,
+     * shape, and style changes instead of lagging until the next frame.
      */
     public override updateEntityDisplay(aircraftData: AircraftData): void {
         super.updateEntityDisplay(aircraftData);
@@ -160,12 +167,10 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
 
     /**
      * Update aircraft display with new data
-     * Provides aircraft-specific method name for backward compatibility
      */
     public updateAircraftDisplay(aircraftData: AircraftData): void {
-        // Sources may be missing if data arrives before the map finishes
-        // loading, or right after a style change (which drops sources). In
-        // either case, (re)initialize the renderer before updating.
+        // Sources go missing when data arrives before the map finishes loading
+        // or right after a style change; (re)initialize before updating.
         const source = this.map.getSource('aircraft-points') as GeoJSONSource;
         if (!source) {
             logger.debug('AircraftRenderer', 'Points source not found, initializing renderer...');
@@ -181,19 +186,16 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         this.updateAircraftTrails(aircraftData);
         this.updateEntityDisplay(aircraftData);
 
-        // Style reloads and first-frame lazy init can leave the 2D sprites
-        // stacked above the 3D layer; raising here is cheap.
+        // Style reloads and lazy init can leave the 2D sprites above the 3D layer
         this.raise3DLayerIfPresent();
     }
 
     /**
      * Maintain per-aircraft trail points from the incoming frame.
      *
-     * Sampling uses the frame's own `simt` — the sim time BlueSky paired with
-     * these positions. The SIMINFO clock (the fallback for servers that omit
-     * `simt`) only ticks ~1 Hz, so sampling against it drifts the interval by
-     * up to a second and, under DTMULT/FF, thins trails to one point per
-     * SIMINFO tick instead of one per `trailSaveInterval` sim seconds.
+     * Sampling uses the frame's own `simt` (the sim time BlueSky paired with
+     * these positions); the ~1 Hz SIMINFO clock is only a fallback, since
+     * sampling against it drifts the interval and thins trails under FF.
      */
     private updateAircraftTrails(aircraftData: AircraftData): void {
         if (!aircraftData.id || aircraftData.id.length === 0) {
@@ -226,12 +228,26 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
                 continue;
             }
 
+            if (currentSimTime < trailData.lastSavedTime) {
+                // Sim time went backwards: a RESET (or IC rerunning a scenario)
+                // respawned this callsign. The stored points belong to the
+                // previous run, so restart the trail at the new position —
+                // otherwise the old trail stays attached as a ghost and no new
+                // point records until the clock passes the old run's time.
+                trailData.coordinates = [[lon, lat]];
+                trailData.lastSavedTime = currentSimTime;
+                continue;
+            }
+
             if (currentSimTime - trailData.lastSavedTime >= this.trailSaveInterval) {
                 // Skip duplicate points (aircraft not moving)
                 const lastPoint = trailData.coordinates[trailData.coordinates.length - 1];
                 if (!lastPoint || lastPoint[0] !== lon || lastPoint[1] !== lat) {
                     trailData.coordinates.push([lon, lat]);
                     trailData.lastSavedTime = currentSimTime;
+                    if (trailData.coordinates.length > AircraftRenderer.MAX_TRAIL_POINTS) {
+                        trailData.coordinates = AircraftRenderer.thinTrail(trailData.coordinates);
+                    }
                 }
             }
         }
@@ -245,14 +261,63 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         }
     }
 
+    /** Halve a trail's resolution, keeping its first and last points. */
+    private static thinTrail(coordinates: [number, number][]): [number, number][] {
+        const last = coordinates[coordinates.length - 1];
+        const thinned = coordinates.filter((_, index) => index % 2 === 0);
+        if (thinned[thinned.length - 1] !== last) {
+            thinned.push(last);
+        }
+        return thinned;
+    }
+
     /**
-     * Redraw the trail layer from the stored trail points
+     * Load the trail history the proxy recorded since each aircraft entered
+     * the simulation (sent on socket connect), so a page opened mid-run shows
+     * complete trails instead of ones starting at page load. A server trail
+     * replaces the local one unless the local trail already holds more
+     * points; sampling then continues locally from the live frames.
+     */
+    public seedTrails(history: AircraftTrailHistory): void {
+        const seedTime = history.simt ?? this.stateManager.getSimulationTime();
+
+        for (const [id, coordinates] of Object.entries(history.trails)) {
+            const local = this.aircraftTrails.get(id);
+            if (coordinates.length === 0 || (local && local.coordinates.length > coordinates.length)) {
+                continue;
+            }
+            this.aircraftTrails.set(id, {
+                coordinates: coordinates.map(([lon, lat]) => [lon, lat]),
+                lastSavedTime: seedTime
+            });
+        }
+
+        if (this.entityData) {
+            this.updateTrailLayer(this.entityData);
+        }
+    }
+
+    /** Whether the trail layer is currently displayed. */
+    private trailsVisible(): boolean {
+        return this.displayOptions.showAircraft && this.displayOptions.showAircraftTrails;
+    }
+
+    /**
+     * Redraw the trail layer from the stored trail points. Trails keep being
+     * recorded while hidden, but rebuilding every line on each data frame is
+     * wasted work then — the redraw is deferred until they are shown again.
      */
     private updateTrailLayer(aircraftData: AircraftData): void {
+        if (!this.trailsVisible()) {
+            this.trailLayerStale = true;
+            return;
+        }
+
         const trailSource = this.map.getSource('aircraft-trails') as GeoJSONSource;
         if (!trailSource) {
             return;
         }
+        this.trailLayerStale = false;
 
         const indexById = new Map((aircraftData.id ?? []).map((id, index) => [id, index]));
         const trailFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
@@ -351,6 +416,11 @@ export class AircraftRenderer extends EntityRenderer<AircraftData> {
         // must rebuild the features.
         if (AircraftRenderer.LABEL_CONTENT_KEYS.some(changed) && this.entityData) {
             this.updateAircraftDisplay(this.entityData);
+        }
+
+        // Trails recorded while hidden are drawn as soon as they are shown.
+        if (this.trailLayerStale && this.trailsVisible() && this.entityData) {
+            this.updateTrailLayer(this.entityData);
         }
 
         this.updateLayerVisibility();

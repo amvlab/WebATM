@@ -276,6 +276,8 @@ export interface ShapeDisplayOptions {
 export interface AppState {
   simInfo: SimInfo | null;
   aircraftData: AircraftData | null;
+  // Server-recorded trail history from the last socket connect.
+  aircraftTrailHistory: AircraftTrailHistory | null;
   selectedAircraft: string | null;
   activeNode: string | null;
   shapeOptions: ShapeDisplayOptions;
@@ -290,6 +292,19 @@ export interface AppState {
   // whenever the global aircraft3DScale changes so the new global
   // setting wins.
   aircraftScaleOverrides: Record<string, number>;
+}
+
+/**
+ * Flown-track history of every current aircraft, sent on socket connect
+ * (`trails` event) from the proxy's `TrailManager.snapshot()`. The proxy
+ * records trails from the moment each aircraft enters the simulation, so a
+ * browser that joins mid-run still gets the complete tracks.
+ */
+export interface AircraftTrailHistory {
+  /** Sim time of the newest stored sample; null when no trail exists. */
+  simt: number | null;
+  /** [lon, lat] points per aircraft id, oldest first. */
+  trails: Record<string, [number, number][]>;
 }
 
 /**

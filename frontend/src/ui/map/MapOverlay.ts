@@ -1,5 +1,5 @@
 import type { Map as MapLibreMap } from 'maplibre-gl';
-import { AircraftData, DisplayOptions, RouteData } from '../../data/types';
+import { AircraftData, AircraftTrailHistory, DisplayOptions, RouteData } from '../../data/types';
 import { MapDisplay } from './MapDisplay';
 import { AircraftRenderer } from './aircraft/AircraftRenderer';
 import { Aircraft2DRenderer } from './aircraft/Aircraft2DRenderer';
@@ -96,6 +96,12 @@ export class MapOverlay {
         this.aircraft2DRenderer = AircraftRendererFactory.create2D(displayOptions, this.stateManager);
         this.aircraft2DRenderer.initialize(map);
         logger.debug('MapOverlay', '2D aircraft renderer initialized (always active)');
+
+        // The server's trail history can arrive before the map is ready.
+        const trailHistory = this.stateManager.getState().aircraftTrailHistory;
+        if (trailHistory) {
+            this.seedAircraftTrails(trailHistory);
+        }
 
         if (displayOptions.show3DOverlay) {
             this.is3DOverlayDesired = true;
@@ -263,6 +269,11 @@ export class MapOverlay {
                 this.seedAircraftStateFor3DRoute();
             }
         }
+    }
+
+    /** Load the server-recorded trail history into the 2D aircraft renderer. */
+    public seedAircraftTrails(history: AircraftTrailHistory): void {
+        this.getAircraftRenderer()?.seedTrails(history);
     }
 
     /** Set (or clear, with null) the selected aircraft across all renderers. */
@@ -564,6 +575,11 @@ export class MapOverlay {
         if (this.aircraftRoutes) {
             this.aircraftRoutes.clearRouteData();
         }
+
+        // Drop 2D trails immediately: the reset arrives via the RESET topic,
+        // so waiting for an empty ACDATA frame leaves stale trails rendered
+        // (or, if the new scenario respawns aircraft first, never clears them).
+        this.getAircraftRenderer()?.clearTrails();
     }
 
     /**

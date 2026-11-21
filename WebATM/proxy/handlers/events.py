@@ -56,6 +56,7 @@ def on_reset_received(data=None, *args, sender_id=None, **kwargs):
         cleared = empty_traffic_data()
         proxy.traffic_data = cleared
         proxy.sim_data = {}
+        proxy.trail_mgr.clear()
 
         if proxy.socketio and proxy.connected_clients > 0:
             proxy.socketio.emit("acdata", cleared)

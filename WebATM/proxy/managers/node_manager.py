@@ -55,6 +55,8 @@ class NodeManager:
             cleared = empty_traffic_data()
             self.proxy.traffic_data = cleared
             self.proxy.sim_data = {}
+            # Trails are the previous node's flown tracks.
+            self.proxy.trail_mgr.clear()
             if self.proxy.socketio and self.proxy.connected_clients > 0:
                 self.proxy.socketio.emit("acdata", cleared)
                 self.proxy.socketio.emit("siminfo", empty_sim_data())

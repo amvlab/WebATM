@@ -279,6 +279,30 @@ describe('AircraftRenderer trails', () => {
         expect(lastTrails(map).features[0].properties!.selected).toBe(false);
     });
 
+    it('restarts the trail when sim time goes backwards (reset / scenario rerun)', () => {
+        const map = fakeMap();
+        const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: true });
+
+        // First run: build a two-point trail up to simt=120.
+        renderer.updateAircraftDisplay(frame(115, 4.0));
+        renderer.updateAircraftDisplay(frame(120, 4.1));
+        expect(lastTrails(map).features).toHaveLength(1);
+
+        // RESET;CRE respawns the same callsign with the clock back near 0.
+        // The old trail must not stay attached to the new aircraft.
+        renderer.updateAircraftDisplay(frame(0, 6.0));
+        expect(lastTrails(map).features).toHaveLength(0);
+
+        // And recording must resume on the new clock, not after 120+ sim s.
+        renderer.updateAircraftDisplay(frame(5, 6.1));
+        const trails = lastTrails(map).features;
+        expect(trails).toHaveLength(1);
+        expect((trails[0].geometry as GeoJSON.LineString).coordinates).toEqual([
+            [6.0, 52.0],
+            [6.1, 52.0],
+        ]);
+    });
+
     it('drops the trail when the aircraft disappears', () => {
         const map = fakeMap();
         const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: true });
@@ -289,5 +313,57 @@ describe('AircraftRenderer trails', () => {
         renderer.updateAircraftDisplay({ ...frame(10, 5.0), id: ['XX1'] } as AircraftData);
 
         expect(lastTrails(map).features).toHaveLength(0);
+    });
+
+    it('seeds the complete server-recorded history and keeps extending it', () => {
+        const map = fakeMap();
+        const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: true });
+        renderer.updateAircraftDisplay(frame(100, 4.0)); // page opened mid-run
+
+        renderer.seedTrails({ simt: 98, trails: { KL204: [[3.0, 52.0], [3.5, 52.0], [3.9, 52.0]] } });
+        expect((lastTrails(map).features[0].geometry as GeoJSON.LineString).coordinates).toHaveLength(3);
+
+        renderer.updateAircraftDisplay(frame(103, 4.1)); // 5 s after the server's last sample
+        expect((lastTrails(map).features[0].geometry as GeoJSON.LineString).coordinates).toEqual([
+            [3.0, 52.0], [3.5, 52.0], [3.9, 52.0], [4.1, 52.0],
+        ]);
+    });
+
+    it('keeps a local trail that is longer than the server history', () => {
+        const map = fakeMap();
+        const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: true });
+        renderer.updateAircraftDisplay(frame(0, 4.0));
+        renderer.updateAircraftDisplay(frame(5, 4.1));
+        renderer.updateAircraftDisplay(frame(10, 4.2));
+
+        renderer.seedTrails({ simt: 10, trails: { KL204: [[4.0, 52.0], [4.2, 52.0]] } });
+
+        expect((lastTrails(map).features[0].geometry as GeoJSON.LineString).coordinates).toHaveLength(3);
+    });
+
+    it('records while hidden without redrawing, then draws the full trail when shown', () => {
+        const map = fakeMap();
+        const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: false });
+        renderer.updateAircraftDisplay(frame(0, 4.0));
+        renderer.updateAircraftDisplay(frame(5, 4.1));
+        renderer.updateAircraftDisplay(frame(10, 4.2));
+        expect(map.trailsSource.setData).not.toHaveBeenCalled();
+
+        renderer.updateDisplayOptions({ ...BASE_OPTIONS, showAircraftTrails: true });
+
+        expect((lastTrails(map).features[0].geometry as GeoJSON.LineString).coordinates).toHaveLength(3);
+    });
+
+    it('thins a long trail instead of growing without bound, keeping both ends', () => {
+        const map = fakeMap();
+        const renderer = makeRenderer(map, { ...BASE_OPTIONS, showAircraftTrails: true });
+        for (let step = 0; step <= 1200; step++) {
+            renderer.updateAircraftDisplay(frame(step * 5, step * 0.01));
+        }
+
+        const coords = (lastTrails(map).features[0].geometry as GeoJSON.LineString).coordinates;
+        expect(coords.length).toBeLessThanOrEqual(500);
+        expect(coords[0]).toEqual([0, 52.0]);
+        expect(coords[coords.length - 1]).toEqual([12, 52.0]);
     });
 });

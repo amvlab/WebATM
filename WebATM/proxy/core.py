@@ -4,7 +4,13 @@ import time
 from typing import Any
 
 from ..logger import get_logger
-from .managers import CommandProcessor, ConnectionManager, DataManager, NodeManager
+from .managers import (
+    CommandProcessor,
+    ConnectionManager,
+    DataManager,
+    NodeManager,
+    TrailManager,
+)
 
 logger = get_logger()
 
@@ -36,6 +42,7 @@ class BlueSkyProxy:
         node_mgr (NodeManager): Node/server tracking manager.
         command_proc (CommandProcessor): Command processing manager.
         data_mgr (DataManager): Data emission and state manager.
+        trail_mgr (TrailManager): Per-aircraft trail history store.
     """
 
     def __init__(self):
@@ -103,6 +110,7 @@ class BlueSkyProxy:
         self.node_mgr = NodeManager(self)
         self.command_proc = CommandProcessor(self)
         self.data_mgr = DataManager(self)
+        self.trail_mgr = TrailManager(self)
 
     # ========================================================================
     # Connection Management - Delegate to ConnectionManager

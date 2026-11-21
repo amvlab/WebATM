@@ -108,6 +108,9 @@ def register_socket_handlers(socketio, session_manager):
             # connects; it flows naturally once data arrives.
             emit("poly", snapshot["poly_data"] or {"polys": {}})
             emit("polyline", snapshot["polyline_data"] or {"polys": {}})
+            # Flown-track history of every current aircraft, so this browser
+            # shows complete trails even when it joined mid-simulation.
+            emit("trails", current_app.bluesky_proxy.trail_mgr.snapshot())
         except Exception as e:
             logger.info(f"Error sending initial data to {session_id}: {e}")
 
