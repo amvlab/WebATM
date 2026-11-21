@@ -90,3 +90,13 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.13"
+
+[[tool.mypy.overrides]]
+# Third-party packages that ship no type information, and the optional
+# `webatm_integrated` package (WebATM-integrated/), which is only present in
+# the integrated build and is imported behind the WEBATM_INTEGRATED=1 guard.
+module = ["msgpack", "msgpack.*", "flask_socketio", "flask_socketio.*", "webatm_integrated", "webatm_integrated.*"]
+ignore_missing_imports = true
