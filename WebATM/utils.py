@@ -27,21 +27,47 @@ def _finite_list(arr):
     return arr.tolist()
 
 
+def safe_decode(data):
+    """Decode bytes to a readable string without raising.
+
+    Attempts UTF-8 decoding and returns the result only if it consists
+    entirely of printable ASCII characters; otherwise falls back to an
+    uppercase hexadecimal representation. Non-bytes input is converted with
+    ``str()``.
+
+    Args:
+        data (bytes | object): Value to decode or stringify.
+
+    Returns:
+        str: A printable string representation of ``data``.
+    """
+    if isinstance(data, bytes):
+        try:
+            decoded = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.hex().upper()
+        if all(32 <= ord(c) <= 126 for c in decoded):
+            return decoded
+        return data.hex().upper()
+    return str(data)
+
+
 def make_json_serializable(obj):
     """Convert an object to a JSON-serializable format.
 
-    Recursively converts numpy arrays and scalars, dictionaries (including
-    BlueSky's msgpack-serialized numpy arrays, identified by the ``numpy``,
-    ``data``, ``type`` and ``shape`` byte keys), lists, tuples, and arbitrary
-    objects (via ``vars()``) into plain Python types that ``json.dumps`` can
-    handle. Byte dictionary keys are decoded to strings. Non-finite floats
-    (NaN/Infinity) become ``None``, since ``json.dumps`` would otherwise emit
-    them as invalid-JSON tokens that break every browser client (see
-    ``_finite_list``).
+    Recursively converts numpy arrays and scalars, bytes, dictionaries
+    (including BlueSky's msgpack-serialized numpy arrays, identified by the
+    ``numpy``, ``data``, ``type`` and ``shape`` byte keys), lists, tuples, and
+    arbitrary objects (via ``vars()``) into plain Python types that
+    ``json.dumps`` can handle. Byte dictionary keys and values are decoded to
+    strings (values via ``safe_decode``, so undecodable bytes become hex).
+    Non-finite floats (NaN/Infinity) become ``None``, since ``json.dumps``
+    would otherwise emit them as invalid-JSON tokens that break every browser
+    client (see ``_finite_list``).
 
     Args:
-        obj (Any): The object to convert. May be a numpy array/scalar, dict, list,
-            tuple, or any object exposing ``__dict__``.
+        obj (Any): The object to convert. May be a numpy array/scalar, bytes,
+            dict, list, tuple, or any object exposing ``__dict__``.
 
     Returns:
         Any: A JSON-serializable equivalent of ``obj`` (list, dict, int,
@@ -49,12 +75,19 @@ def make_json_serializable(obj):
     """
     if isinstance(obj, np.ndarray):
         return _finite_list(obj)
-    elif isinstance(obj, np.integer):
-        return int(obj)
-    elif isinstance(obj, (float, np.floating)):
-        value = float(obj)
-        return value if math.isfinite(value) else None
-    elif isinstance(obj, dict):
+    if isinstance(obj, np.generic):
+        # Any numpy scalar (np.float64, np.int32, np.bool_, np.str_, ...):
+        # unwrap to the equivalent Python scalar and convert that instead.
+        # json.dumps rejects the numpy types the branches below don't cover
+        # (np.bool_ for one), which would drop the whole Socket.IO packet.
+        obj = obj.item()
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, (bytes, bytearray)):
+        # msgpack bin values (e.g. raw node/sender IDs embedded in a payload)
+        # are not JSON serializable and would also drop the whole packet.
+        return safe_decode(bytes(obj))
+    if isinstance(obj, dict):
         if b"numpy" in obj and b"data" in obj and b"type" in obj and b"shape" in obj:
             # BlueSky msgpack-encoded numpy array; decode it the same way as
             # bluesky.network.npcodec.decode_ndarray, flattened for JSON.
@@ -73,20 +106,19 @@ def make_json_serializable(obj):
                 )
 
         return {
-            (key.decode() if isinstance(key, bytes) else key): make_json_serializable(
-                value
+            (safe_decode(key) if isinstance(key, bytes) else key): (
+                make_json_serializable(value)
             )
             for key, value in obj.items()
         }
-    elif isinstance(obj, (list, tuple)):
+    if isinstance(obj, (list, tuple)):
         return [make_json_serializable(item) for item in obj]
-    elif hasattr(obj, "__dict__"):
+    if hasattr(obj, "__dict__"):
         try:
             return make_json_serializable(vars(obj))
         except Exception:
             return str(obj)
-    else:
-        return obj
+    return obj
 
 
 def empty_traffic_data():

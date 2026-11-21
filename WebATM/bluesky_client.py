@@ -24,6 +24,7 @@ import msgpack
 import zmq
 
 from .logger import get_logger
+from .utils import safe_decode
 
 logger = get_logger()
 
@@ -150,31 +151,6 @@ def seqidx2id(seqidx):
         bytes: A single charmap-encoded byte representing the index.
     """
     return chr(128 + seqidx).encode("charmap")
-
-
-def safe_decode(data):
-    """Decode bytes to a readable string without raising.
-
-    Attempts UTF-8 decoding and returns the result only if it consists
-    entirely of printable ASCII characters; otherwise falls back to an
-    uppercase hexadecimal representation. Non-bytes input is converted with
-    ``str()``.
-
-    Args:
-        data (bytes | object): Value to decode or stringify.
-
-    Returns:
-        str: A printable string representation of ``data``.
-    """
-    if isinstance(data, bytes):
-        try:
-            decoded = data.decode("utf-8")
-        except UnicodeDecodeError:
-            return data.hex().upper()
-        if all(32 <= ord(c) <= 126 for c in decoded):
-            return decoded
-        return data.hex().upper()
-    return str(data)
 
 
 class BlueSkySignal:

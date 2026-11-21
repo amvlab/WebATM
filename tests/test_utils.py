@@ -1,5 +1,6 @@
 """Tests for WebATM.utils (JSON serialization and time helpers)."""
 
+import json
 import struct
 
 import numpy as np
@@ -10,6 +11,7 @@ from WebATM.utils import (
     i2txt,
     id2str,
     make_json_serializable,
+    safe_decode,
     tim2txt,
 )
 
@@ -218,6 +220,75 @@ class TestId2str:
 
     def test_string_passes_through(self):
         assert id2str("abcd") == "abcd"
+
+
+class TestSafeDecode:
+    def test_printable_ascii_bytes_decode(self):
+        assert safe_decode(b"HELLO") == "HELLO"
+
+    def test_non_utf8_bytes_become_uppercase_hex(self):
+        assert safe_decode(b"\x80\xff") == "80FF"
+
+    def test_non_printable_utf8_bytes_become_uppercase_hex(self):
+        assert safe_decode(b"\x01\x02") == "0102"
+
+    def test_non_bytes_input_is_stringified(self):
+        assert safe_decode("already") == "already"
+        assert safe_decode(123) == "123"
+
+
+class TestMakeJsonSerializableNonJsonLeaves:
+    """Leaf types json.dumps rejects must never survive serialization.
+
+    One such value anywhere in a payload makes json.dumps raise inside
+    Socket.IO and drops the whole packet — the same failure class as the
+    NaN incident documented in ``_finite_list``.
+    """
+
+    def test_bytes_value_is_decoded(self):
+        out = make_json_serializable({"text": b"KL204"})
+        assert out == {"text": "KL204"}
+        json.dumps(out)
+
+    def test_undecodable_bytes_value_becomes_hex(self):
+        out = make_json_serializable({"sender": b"\x80\xff"})
+        assert out == {"sender": "80FF"}
+        json.dumps(out)
+
+    def test_bytearray_value_is_decoded(self):
+        assert make_json_serializable(bytearray(b"abc")) == "abc"
+
+    def test_bytes_nested_in_lists_and_dicts(self):
+        out = make_json_serializable({"items": [b"a", {"b": b"\x01"}]})
+        assert out == {"items": ["a", {"b": "01"}]}
+        json.dumps(out)
+
+    def test_undecodable_bytes_key_becomes_hex(self):
+        out = make_json_serializable({b"\x80\xff": 1})
+        assert out == {"80FF": 1}
+        json.dumps(out)
+
+    def test_numpy_bool_scalar_becomes_python_bool(self):
+        out = make_json_serializable({"inconf": np.bool_(True)})
+        assert out == {"inconf": True}
+        assert type(out["inconf"]) is bool
+        json.dumps(out)
+
+    def test_numpy_str_scalar_becomes_python_str(self):
+        out = make_json_serializable(np.str_("AC1"))
+        assert out == "AC1"
+        assert type(out) is str
+
+    def test_numpy_bytes_scalar_is_decoded(self):
+        assert make_json_serializable(np.bytes_(b"AC1")) == "AC1"
+
+    def test_numpy_float32_nan_scalar_becomes_none(self):
+        assert make_json_serializable(np.float32("nan")) is None
+
+    def test_numpy_integer_scalar_still_becomes_int(self):
+        out = make_json_serializable(np.uint8(7))
+        assert out == 7
+        assert type(out) is int
 
 
 class TestEmptyTrafficData:
