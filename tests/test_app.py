@@ -169,6 +169,24 @@ class TestServerConfigRoutes:
         assert resp.status_code == 200
         assert resp.get_json()["hostname"] == "example.test"
 
+    @pytest.mark.parametrize("hostname", [123, ["h"], {"host": "x"}, True])
+    def test_server_status_rejects_non_string_hostname(self, client, hostname):
+        """A non-string JSON hostname is a 400, not a 500 from the probe.
+
+        Regression test: these used to hit socket.connect_ex with the raw
+        value and surface as a 500 leaking the TypeError text.
+        """
+        resp = client.post("/api/server/status", json={"hostname": hostname})
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["status"] == "error"
+        assert body["message"] == "hostname must be a string"
+
+    def test_server_status_null_hostname_falls_back(self, client):
+        resp = client.post("/api/server/status", json={"hostname": None})
+        assert resp.status_code == 200
+        assert resp.get_json()["hostname"] == "localhost"
+
 
 def _fake_proxy_class(created, start_client=None):
     """Build a minimal BlueSkyProxy stand-in recording construction and calls."""
@@ -230,8 +248,50 @@ class TestServerConfigConnect:
         assert new_proxy.server_ip == "10.0.0.5"
         assert new_proxy.socketio is old_proxy.socketio
         assert new_proxy.connected_clients == 3
-        # Subscribers are registered on the freshly connected proxy explicitly.
-        assert registered == [new_proxy]
+        # Subscriber registration is start_client's own job now (covered by
+        # tests/test_connection_manager.py), so the route only connects.
+
+    @pytest.mark.parametrize("server_ip", [None, 123, ["10.0.0.5"], {"ip": "x"}])
+    def test_post_config_rejects_non_string_server_ip(
+        self, app_and_client, monkeypatch, server_ip
+    ):
+        """A non-string server_ip is a 400 before any proxy teardown.
+
+        Regression test: these used to crash on .strip() and return a 500
+        claiming "Failed to connect to server: ... has no attribute 'strip'".
+        """
+        import WebATM.proxy as proxy_pkg
+
+        app, client = app_and_client
+        created: list = []
+        monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", _fake_proxy_class(created))
+        old_proxy = app.bluesky_proxy
+
+        resp = client.post("/api/server/config", json={"server_ip": server_ip})
+
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["success"] is False
+        assert body["error"] == "server_ip must be a string"
+        # The existing connection must be untouched: no new proxy, no swap.
+        assert created == []
+        assert app.bluesky_proxy is old_proxy
+
+    def test_post_config_blank_server_ip_defaults_to_localhost(
+        self, app_and_client, monkeypatch
+    ):
+        import WebATM.proxy as proxy_pkg
+
+        app, client = app_and_client
+        created: list = []
+        monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", _fake_proxy_class(created))
+        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda proxy: None)
+
+        resp = client.post("/api/server/config", json={"server_ip": "   "})
+
+        assert resp.status_code == 200
+        assert resp.get_json()["server_ip"] == "localhost"
+        assert created[0].started_with == "localhost"
 
     def test_post_config_connect_failure_returns_500(self, app_and_client, monkeypatch):
         import WebATM.proxy as proxy_pkg
