@@ -92,6 +92,59 @@ describe('buildRouteFeatures', () => {
     });
 });
 
+describe('antimeridian crossings', () => {
+    /** Route flying east across ±180 near Fiji, aircraft west of the line. */
+    function crossingRoute(over: Partial<RouteData> = {}): RouteData {
+        return northboundRoute({
+            aclat: -17.7,
+            aclon: 179.6,
+            wplat: [-17.7, -17.7, -17.7, -17.7],
+            wplon: [179.8, 179.95, -179.9, -179.7],
+            ...over
+        });
+    }
+
+    function lineLons(f: GeoJSON.Feature): number[] {
+        return (f.geometry as GeoJSON.LineString).coordinates.map((c) => c[0]);
+    }
+
+    it('draws a complete-route segment across the antimeridian, not around the world', () => {
+        const f = renderer.buildRouteFeatures(crossingRoute(), 1);
+        // Segment 179.95 -> -179.9 must be unwrapped to 179.95 -> 180.1.
+        expect(lineLons(f.completeRouteFeatures[1])).toEqual([179.95, expect.closeTo(180.1, 10)]);
+        // Segments on one side of the line stay as-is.
+        expect(lineLons(f.completeRouteFeatures[0])).toEqual([179.8, 179.95]);
+    });
+
+    it('unwraps a westward crossing below -180', () => {
+        const f = renderer.buildRouteFeatures(crossingRoute({
+            wplon: [-179.7, -179.9, 179.95, 179.8]
+        }), 1);
+        expect(lineLons(f.completeRouteFeatures[1])).toEqual([-179.9, expect.closeTo(-180.05, 10)]);
+    });
+
+    it('draws the aircraft-to-active line across the antimeridian', () => {
+        const f = renderer.buildRouteFeatures(crossingRoute(), 2);
+        // Aircraft at 179.6 to active waypoint at -179.9 -> unwrapped 180.1.
+        expect(lineLons(f.aircraftToActiveFeatures[0])).toEqual([179.6, expect.closeTo(180.1, 10)]);
+    });
+
+    it('unwraps the remaining-route polyline cumulatively past the crossing', () => {
+        const f = renderer.buildRouteFeatures(crossingRoute(), 1);
+        // From the active waypoint onward: 179.95, -179.9, -179.7 unwrap to
+        // a monotonically increasing eastbound track.
+        expect(lineLons(f.remainingRouteFeatures[0])).toEqual([
+            179.95, expect.closeTo(180.1, 10), expect.closeTo(180.3, 10)
+        ]);
+    });
+
+    it('leaves waypoint circles and labels at their in-range coordinates', () => {
+        const f = renderer.buildRouteFeatures(crossingRoute(), 1);
+        const lons = f.waypointFeatures.map((w) => (w.geometry as GeoJSON.Point).coordinates[0]);
+        expect(lons).toEqual([179.8, 179.95, -179.9, -179.7]);
+    });
+});
+
 describe('label placement', () => {
     it('anchors first and last waypoint labels beside the point', () => {
         const f = renderer.buildRouteFeatures(northboundRoute(), 1);
