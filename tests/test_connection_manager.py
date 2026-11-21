@@ -1,11 +1,100 @@
 """Tests for WebATM.proxy.managers.connection_manager.ConnectionManager.
 
-Covers the teardown paths (``close``, ``stop_client``,
-``_handle_disconnection``), which all funnel their cached-state clearing
-through ``DataManager._reset_cached_state`` so the paths cannot drift apart.
+Covers the start path (``start_client`` must leave a fully-subscribed client
+before its network timer can deliver a message) and the teardown paths
+(``close``, ``stop_client``, ``_handle_disconnection``), which all funnel
+their cached-state clearing through ``DataManager._reset_cached_state`` so
+the paths cannot drift apart.
 """
 
 import time
+
+import pytest
+
+from WebATM.bluesky_client import BlueSkyContext, BlueSkyStack, BlueSkySubscriber
+
+
+class _StubNetworkClient:
+    """Stand-in for ``BlueSkyClient`` with a real subscriber registry.
+
+    ``connect()`` succeeds without touching ZMQ; ``subscribe()`` records the
+    registration exactly like the real client so dispatching through
+    ``subscriber.emit`` exercises the real handlers.
+    """
+
+    def __init__(self, group_id=None):
+        self.node_id = b"CSTUB"
+        self.subscriber = BlueSkySubscriber()
+        self.context = BlueSkyContext()
+        self.stack = BlueSkyStack()
+        self.act_id = None
+        self.nodes = set()
+        self.servers = set()
+        self.running = False
+
+    def connect(self, hostname=None, **kwargs):
+        self.running = True
+        return True
+
+    def subscribe(self, topic, callback, actonly=False):
+        self.subscriber.subscribe(topic, callback)
+
+    def close(self):
+        self.running = False
+
+
+def _start_with_stub_client(proxy, monkeypatch, on_timer_start=None):
+    """Run ``start_client`` against the stub client with timers stubbed out."""
+    from WebATM.proxy.managers import connection_manager as cm
+
+    monkeypatch.setattr(cm, "BlueSkyClient", _StubNetworkClient)
+    monkeypatch.setattr(
+        cm.ConnectionManager,
+        "_start_network_timer",
+        lambda self: on_timer_start() if on_timer_start else None,
+    )
+    proxy.data_mgr.start_backup_timer = lambda: None
+    proxy.connection_mgr.start_client(hostname="127.0.0.1")
+
+
+class TestStartClient:
+    def test_subscribers_are_registered_before_the_network_timer_starts(
+        self, proxy, monkeypatch
+    ):
+        """The receive loop must never run against an empty subscriber registry.
+
+        Discovery of the first node broadcasts a REQUEST whose answers (the
+        initial POLY shapes and the STACKCMDS cmddict) are one-shot; handlers
+        registered only after ``start_client`` returned could miss them.
+        """
+        from WebATM.proxy.subscribers import SUBSCRIPTIONS
+
+        topics_at_timer_start = []
+
+        def record():
+            topics_at_timer_start.append(
+                set(proxy.bluesky_client.subscriber.subscribers)
+            )
+
+        _start_with_stub_client(proxy, monkeypatch, on_timer_start=record)
+
+        assert topics_at_timer_start == [{topic for topic, _, _ in SUBSCRIPTIONS}]
+
+    def test_stackcmds_answer_right_after_connect_reaches_the_cmddict(
+        self, proxy, monkeypatch
+    ):
+        """Regression: a REQUEST answer arriving immediately after ``connect()``
+        (before the caller of ``start_client`` runs any further code) must be
+        handled, not silently dropped — nothing re-requests the cmddict until
+        the active node changes."""
+        _start_with_stub_client(proxy, monkeypatch)
+
+        client = proxy.bluesky_client
+        client.context.action = "R"
+        client.context.sender_id = b"NODE\x81"
+        client.subscriber.emit("STACKCMDS", {"cmddict": {"CRE": "acid,type"}})
+
+        assert proxy.cmddict == {"CRE": "acid,type"}
 
 
 def _seed_cached_state(proxy):
@@ -19,7 +108,6 @@ def _seed_cached_state(proxy):
     proxy.last_siminfo_emit = 123.0
     proxy.last_acdata_emit = 123.0
     proxy.last_node_info_emit = 123.0
-    proxy.current_bbox = (0.0, 0.0, 1.0, 1.0)
     proxy.was_connected = True
     proxy.connection_failures = 2
 
@@ -34,7 +122,6 @@ def _assert_cached_state_cleared(proxy):
     assert proxy.last_siminfo_emit == 0
     assert proxy.last_acdata_emit == 0
     assert proxy.last_node_info_emit == 0
-    assert proxy.current_bbox is None
     assert proxy.cmddict == {}
     assert proxy.was_connected is False
     # A leftover failure count would put the next session on the same proxy
@@ -152,6 +239,65 @@ class TestMarkConnected:
 
         assert proxy.last_successful_update == sentinel
         assert fake_socketio.count("connection_status") == 0
+
+
+class TestNetworkTick:
+    """One pass of the 20 ms network timer (``_network_tick``)."""
+
+    @pytest.fixture
+    def connected(self, proxy, fake_client):
+        """A proxy that looks fully connected with fresh data flow."""
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = True
+        proxy.tracked_nodes["n1"] = {"node_id": b"NODE\x81"}
+        proxy.last_successful_update = time.time()
+        return proxy
+
+    def test_healthy_tick_resets_failures_and_reschedules(self, connected):
+        connected.connection_failures = 2
+        assert connected.connection_mgr._network_tick() is True
+        assert connected.connection_failures == 0
+
+    def test_failed_update_counts_toward_max(self, connected):
+        """update() reports socket trouble by returning False, never by
+        raising — counting only exceptions would disable the failure limit."""
+        connected.bluesky_client.update_result = False
+        assert connected.connection_mgr._network_tick() is True
+        assert connected.connection_failures == 1
+
+    def test_max_failed_updates_disconnect(self, connected, fake_socketio):
+        connected.bluesky_client.update_result = False
+        results = [connected.connection_mgr._network_tick() for _ in range(3)]
+        assert results == [True, True, False]
+        assert connected.running is False
+        assert fake_socketio.last("connection_status")["connected"] is False
+
+    def test_update_exception_counts_as_failure(self, connected):
+        connected.bluesky_client.update_result = RuntimeError("boom")
+        assert connected.connection_mgr._network_tick() is True
+        assert connected.connection_failures == 1
+
+    def test_data_flow_timeout_disconnects(self, connected, fake_socketio):
+        connected.last_successful_update = time.time() - (
+            connected.connection_timeout + 1
+        )
+        assert connected.connection_mgr._network_tick() is False
+        assert connected.running is False
+        assert fake_socketio.last("connection_status")["connected"] is False
+
+    def test_first_node_flips_connected(self, proxy, fake_client):
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.was_connected = False
+        proxy.tracked_nodes["n1"] = {"node_id": b"NODE\x81"}
+        assert proxy.connection_mgr._network_tick() is True
+        assert proxy.was_connected is True
+
+    def test_stopped_proxy_does_not_reschedule(self, proxy, fake_client):
+        proxy.bluesky_client = fake_client
+        proxy.running = False
+        assert proxy.connection_mgr._network_tick() is False
 
 
 class TestHandleDisconnection:

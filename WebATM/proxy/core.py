@@ -59,7 +59,10 @@ class BlueSkyProxy:
         self.connection_failures = 0
         self.max_connection_failures = 3  # Max failures before marking disconnected
 
-        # Data caches for web client
+        # Data caches for web client. Invariant: published payloads (these
+        # caches, the shape envelopes below, cmddict) are swapped whole on
+        # update, never mutated in place — get_current_data snapshots hold
+        # references that other threads JSON-encode.
         self.traffic_data = {}
         self.sim_data = {}
 
@@ -84,9 +87,6 @@ class BlueSkyProxy:
         # Track nodes and servers like web client does
         self.tracked_nodes = {}
         self.tracked_servers = {}  # Keep minimal server tracking for compatibility
-
-        # Store current map bounds
-        self.current_bbox = None
 
         # Server IP address (overridden by main.py / the connect routes)
         self.server_ip = "localhost"

@@ -4,7 +4,7 @@ import threading
 
 from ...bluesky_client import safe_decode, seqid2idx, seqidx2id
 from ...logger import get_logger
-from ...utils import empty_traffic_data, id2str
+from ...utils import empty_sim_data, empty_traffic_data, id2str
 
 logger = get_logger()
 
@@ -47,15 +47,17 @@ class NodeManager:
     def _on_actnode_changed(self, node_id):
         """Callback when active node changes."""
         if self.proxy.running:
-            # The cached traffic and sim info belong to the previous node;
-            # drop both (and clear browsers) so the backup timer and the
-            # initial_data snapshot can't re-serve them while the new node's
-            # streams spin up. Same idea as the shape clear below.
+            # The cached traffic and sim info belong to the previous node:
+            # drop both and clear browsers, so nothing re-serves them while
+            # the new node's streams spin up. Without the siminfo clear the
+            # header keeps the old node's clock/run-state until the new
+            # node's next 1 Hz SIMINFO tick.
             cleared = empty_traffic_data()
             self.proxy.traffic_data = cleared
             self.proxy.sim_data = {}
             if self.proxy.socketio and self.proxy.connected_clients > 0:
                 self.proxy.socketio.emit("acdata", cleared)
+                self.proxy.socketio.emit("siminfo", empty_sim_data())
 
             self._emit_node_info()
             self._emit_active_node_poly_data()
@@ -73,7 +75,7 @@ class NodeManager:
         try:
             self.proxy.bluesky_client.send("REQUEST", ["STACKCMDS"], node_id)
         except Exception as e:
-            logger.error(f" Error requesting STACKCMDS from new active node: {e}")
+            logger.error(f"Error requesting STACKCMDS from new active node: {e}")
 
     def _emit_active_node_poly_data(self):
         """Emit POLY and POLYLINE data for the currently active node."""

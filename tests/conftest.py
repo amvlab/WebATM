@@ -60,6 +60,15 @@ class FakeBlueSkyClient:
         self.nodes = set()
         self.sent: list[tuple[str, object, object]] = []
         self.closed = False
+        # What update() reports: True/False like the real client, or an
+        # Exception instance to be raised (the real client never raises, but
+        # the timer must survive one anyway).
+        self.update_result: bool | Exception = True
+
+    def update(self):
+        if isinstance(self.update_result, Exception):
+            raise self.update_result
+        return self.update_result
 
     def send(self, topic, data="", to_group=""):
         self.sent.append((topic, data, to_group))

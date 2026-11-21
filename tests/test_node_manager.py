@@ -378,6 +378,22 @@ class TestActnodeChangedTrafficClear:
         assert proxy.traffic_data == empty_traffic_data()
         assert fake_socketio.last("acdata") == empty_traffic_data()
 
+    def test_switch_emits_cleared_siminfo_to_browsers(
+        self, proxy, fake_client, fake_socketio
+    ):
+        """Regression: only acdata was cleared in browsers on a node switch,
+        so the header kept the previous node's clock/speed/run-state (and its
+        play/pause button) until the new node's next 1 Hz SIMINFO tick."""
+        from WebATM.utils import empty_sim_data
+
+        proxy.bluesky_client = fake_client
+        proxy.running = True
+        proxy.sim_data = {"simt": 6169.0, "scenname": "OLD", "state": 2}
+
+        proxy.node_mgr._on_actnode_changed(b"\x01\x02\x03\x04\x81")
+
+        assert fake_socketio.last("siminfo") == empty_sim_data()
+
     def test_switch_clears_cached_sim_info(self, proxy, fake_client):
         """Regression: the previous node's SIMINFO cache survived a node
         switch, so the 0.5 s backup emit and the initial_data snapshot kept
@@ -405,6 +421,7 @@ class TestActnodeChangedTrafficClear:
 
         assert proxy.traffic_data == empty_traffic_data()
         assert fake_socketio.count("acdata") == 0
+        assert fake_socketio.count("siminfo") == 0
 
     def test_not_running_is_a_noop(self, proxy, fake_client, fake_socketio):
         proxy.bluesky_client = fake_client

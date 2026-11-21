@@ -85,13 +85,17 @@ def register_server_status_routes(app):
         Returns:
             Response: JSON with ``status`` (``"success"``), ``running`` (bool),
                 ``message`` (listening ports or failure reason), and
-                ``hostname`` (the host that was probed). On unexpected errors,
-                JSON with ``status`` (``"error"``) and ``message``, with HTTP
-                500.
+                ``hostname`` (the host that was probed). A non-string JSON
+                ``hostname`` gets a 400; unexpected errors get a 500, both as
+                JSON with ``status`` (``"error"``) and ``message``.
         """
         try:
             if request.method == "POST":
                 hostname = (request.get_json(silent=True) or {}).get("hostname")
+                if hostname is not None and not isinstance(hostname, str):
+                    return jsonify(
+                        {"status": "error", "message": "hostname must be a string"}
+                    ), 400
             else:
                 hostname = request.args.get("hostname")
 

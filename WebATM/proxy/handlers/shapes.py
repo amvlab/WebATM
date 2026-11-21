@@ -260,6 +260,31 @@ def _merge_shapes(store_polys, store_lines, new_polys, new_lines):
         store_lines[name] = info
 
 
+def _copy_published_shapes(stores, sender_id):
+    """Return an entry-wise copy of one node's published shape mapping.
+
+    Published envelopes are shared with initial_data snapshots that other
+    threads JSON-encode, so updates are applied to a copy and swapped in
+    whole (see ``on_poly_received``). Entries are copied one level deep —
+    after publication their values (coordinate lists, colors) are only ever
+    replaced, never mutated.
+
+    Args:
+        stores (dict): ``proxy.poly_data_by_node`` or the polyline equivalent.
+        sender_id (str): Hex node ID whose shapes to copy.
+
+    Returns:
+        dict: Copied shape mapping (name -> shape info), empty when the node
+        has no published envelope yet.
+    """
+    envelope = stores.get(sender_id)
+    polys = envelope.get("polys", {}) if isinstance(envelope, dict) else {}
+    return {
+        name: dict(info) if isinstance(info, dict) else info
+        for name, info in polys.items()
+    }
+
+
 def _trim_shape_store(polys, kind):
     """Drop the oldest shapes beyond the per-kind cap, in place.
 
@@ -303,30 +328,31 @@ def on_poly_received(data, *args, **kwargs):
         poly_data = make_json_serializable(data)
 
         if sender_id:
-            poly_store = proxy.poly_data_by_node.setdefault(sender_id, {"polys": {}})
-            line_store = proxy.polyline_data_by_node.setdefault(
-                sender_id, {"polys": {}}
-            )
+            # Work on copies and publish by swapping in fresh envelopes:
+            # the published ones are shared with initial_data snapshots that
+            # other threads JSON-encode, so they must never change once out.
+            store_polys = _copy_published_shapes(proxy.poly_data_by_node, sender_id)
+            store_lines = _copy_published_shapes(proxy.polyline_data_by_node, sender_id)
 
             if action == DELETE_ACTION:
                 for name in _deleted_names(poly_data):
-                    poly_store["polys"].pop(name, None)
-                    line_store["polys"].pop(name, None)
+                    store_polys.pop(name, None)
+                    store_lines.pop(name, None)
             else:
                 separated = _separate_poly_and_polyline_data(poly_data)
                 new_polys = _shapes_of(separated["polygons"])
                 new_lines = _shapes_of(separated["polylines"])
 
                 if action in REPLACE_ACTIONS:
-                    poly_store["polys"] = new_polys
-                    line_store["polys"] = new_lines
+                    store_polys, store_lines = new_polys, new_lines
                 else:
-                    _merge_shapes(
-                        poly_store["polys"], line_store["polys"], new_polys, new_lines
-                    )
+                    _merge_shapes(store_polys, store_lines, new_polys, new_lines)
 
-                _trim_shape_store(poly_store["polys"], "polygons")
-                _trim_shape_store(line_store["polys"], "polylines")
+                _trim_shape_store(store_polys, "polygons")
+                _trim_shape_store(store_lines, "polylines")
+
+            proxy.poly_data_by_node[sender_id] = {"polys": store_polys}
+            proxy.polyline_data_by_node[sender_id] = {"polys": store_lines}
 
         # Only the active node's shapes are displayed; emit the complete stored
         # sets (not just this message's shapes).

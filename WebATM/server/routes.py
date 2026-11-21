@@ -398,18 +398,25 @@ def register_basic_routes(app, session_manager):
 
         Returns:
             JSON with ``success: True`` and the ``server_ip`` once nodes are
-            detected, or a 500 error payload if the connection fails or no
-            nodes appear before the timeout.
+            detected, a 400 error payload for a non-string ``server_ip``, or a
+            500 error payload if the connection fails or no nodes appear
+            before the timeout.
         """
         try:
             data = request.get_json(silent=True) or {}
-            server_ip = data.get("server_ip", "localhost").strip() or "localhost"
+            server_ip = data.get("server_ip", "localhost")
+            if not isinstance(server_ip, str):
+                # Reject before any teardown: without this check a null/number
+                # crashed on .strip() and the 500 claimed a connect failure.
+                return jsonify(
+                    {"success": False, "error": "server_ip must be a string"}
+                ), 400
+            server_ip = server_ip.strip() or "localhost"
             logger.info(f"User requested connection to BlueSky server at {server_ip}")
 
             from ..proxy import (
                 BlueSkyProxy,
                 connect_lock,
-                register_subscribers,
                 set_bluesky_proxy,
             )
 
@@ -435,9 +442,9 @@ def register_basic_routes(app, session_manager):
                 set_bluesky_proxy(proxy)  # update the global the subscribers use
 
                 proxy.server_ip = server_ip
+                # start_client also registers the data subscribers, before
+                # its network timer can deliver the first messages.
                 proxy.start_client(hostname=server_ip)
-                # Subscribers attach to the client start_client just created.
-                register_subscribers(proxy)
 
             # Confirm the server is real: wait for node detection.
             if _wait_for_nodes(proxy):
