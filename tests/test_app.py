@@ -226,9 +226,7 @@ class TestServerConfigConnect:
 
         app, client = app_and_client
         created: list = []
-        registered: list = []
         monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", _fake_proxy_class(created))
-        monkeypatch.setattr(proxy_pkg, "register_subscribers", registered.append)
         old_proxy = app.bluesky_proxy
         old_proxy.connected_clients = 3
 
@@ -305,7 +303,6 @@ class TestServerConfigConnect:
         monkeypatch.setattr(
             proxy_pkg, "BlueSkyProxy", _fake_proxy_class(created, start_client=boom)
         )
-        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda proxy: None)
 
         resp = client.post("/api/server/config", json={"server_ip": "10.0.0.5"})
 
@@ -322,7 +319,6 @@ class TestServerConfigConnect:
         app, client = app_and_client
         created: list = []
         monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", _fake_proxy_class(created))
-        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda proxy: None)
 
         resp = client.post("/api/server/config", json={"server_ip": "10.0.0.5"})
 
@@ -349,7 +345,6 @@ class TestServerConfigConnect:
             (context, connect_lock.locked())
         )
         monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", FakeProxy)
-        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda proxy: None)
         monkeypatch.setattr(routes_mod, "_wait_for_nodes", lambda proxy: False)
 
         resp = client.post("/api/server/config", json={"server_ip": "10.0.0.5"})
@@ -375,7 +370,6 @@ class TestServerConfigConnect:
             context
         )
         monkeypatch.setattr(proxy_pkg, "BlueSkyProxy", FakeProxy)
-        monkeypatch.setattr(proxy_pkg, "register_subscribers", lambda proxy: None)
 
         def replace_proxy_then_time_out(proxy):
             app.bluesky_proxy = object()  # a newer connect took over

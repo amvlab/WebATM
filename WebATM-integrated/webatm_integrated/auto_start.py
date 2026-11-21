@@ -127,7 +127,6 @@ def connect_proxy_when_ready(
     ready_timeout: float = 60.0,
     poll_interval: float = 0.5,
     is_port_listening: Callable[..., bool] | None = None,
-    register_subscribers: Callable[..., None] | None = None,
     get_proxy: Callable[[], object] | None = None,
     lock: AbstractContextManager | None = None,
     sleep: Callable[[float], None] | None = None,
@@ -135,12 +134,13 @@ def connect_proxy_when_ready(
     """Wait for BlueSky to accept connections, then connect the WebATM proxy.
 
     Polls BlueSky's command/data ports until one is listening (or the timeout
-    elapses), then performs the same ``start_client`` → ``register_subscribers``
-    sequence as the manual ``/api/server/config`` route. The connect step runs
+    elapses), then performs the same ``start_client`` connect call as the
+    manual ``/api/server/config`` route (``start_client`` itself registers the
+    data subscribers before its network timer starts). The connect step runs
     under the shared ``WebATM.proxy.connect_lock`` and stands down if a manual
     connect replaced the global proxy during the port wait — connecting the
-    stale boot-time proxy would leave a second, subscriber-less ZMQ client
-    alive to broadcast a bogus disconnect later.
+    stale boot-time proxy would leave a second ZMQ client alive to broadcast
+    a bogus disconnect later.
 
     The collaborators are injectable so this can be unit-tested without a real
     BlueSky server or wall-clock delays.
@@ -153,8 +153,6 @@ def connect_proxy_when_ready(
         poll_interval (float): Seconds to sleep between port probes.
         is_port_listening (Callable | None): Port probe ``(port, timeout,
             host)``; defaults to the core implementation.
-        register_subscribers (Callable | None): Subscriber-registration hook;
-            defaults to ``WebATM.proxy.register_subscribers``.
         get_proxy (Callable | None): Returns the current global proxy;
             defaults to ``WebATM.proxy.get_bluesky_proxy``.
         lock (AbstractContextManager | None): Lock held around the connect
@@ -169,8 +167,6 @@ def connect_proxy_when_ready(
     # the Flask/ZMQ-laden core packages unless we actually connect.
     if is_port_listening is None:
         from WebATM.server.bluesky_server_status import is_port_listening
-    if register_subscribers is None:
-        from WebATM.proxy import register_subscribers
     if get_proxy is None:
         from WebATM.proxy import get_bluesky_proxy as get_proxy
     if lock is None:
@@ -202,12 +198,9 @@ def connect_proxy_when_ready(
             return False
         try:
             bluesky_proxy.server_ip = host
+            # start_client also registers the data subscribers, before its
+            # network timer can deliver the first messages.
             bluesky_proxy.start_client(hostname=host)
-            # Subscribers can only be registered once the client exists, which
-            # start_client creates -- this is the same ordering the manual
-            # /api/server/config route relies on. They attach to bluesky_proxy
-            # explicitly, so they always land on the client just started.
-            register_subscribers(bluesky_proxy)
             logger.info(f"Auto-start: WebATM proxy connected to BlueSky at '{host}'")
             return True
         except Exception as e:

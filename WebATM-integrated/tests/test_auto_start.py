@@ -1,9 +1,11 @@
 """Tests for the integrated auto-start (start BlueSky + connect proxy on boot).
 
 These exercise the auto-start orchestration without a real BlueSky server or
-Flask app: the port probe, subscriber registration and sleep are injected, so
-the wait/connect ordering and the start->connect handoff are verified
-deterministically.
+Flask app: the port probe and sleep are injected, so the wait/connect ordering
+and the start->connect handoff are verified deterministically. Subscriber
+registration happens inside ``start_client`` itself (see
+``ConnectionManager.start_client``), so it is no longer part of this module's
+orchestration.
 """
 
 import pytest
@@ -116,9 +118,8 @@ def test_claim_degrades_to_true_when_marker_uncreatable(tmp_path):
 
 
 def test_connects_once_ports_come_up():
-    """Ports come up after a couple of polls; then connect + subscribe, in order."""
+    """Ports come up after a couple of polls; then the proxy is connected."""
     proxy = FakeProxy(server_ip="localhost")
-    registered: list[object] = []
     ready = {"v": False}
     sleeps = {"n": 0}
 
@@ -130,48 +131,36 @@ def test_connects_once_ports_come_up():
     def fake_lister(port, timeout, host):
         return ready["v"]
 
-    def fake_register(p):
-        proxy.events.append("register_subscribers")
-        registered.append(p)
-
     result = auto_start.connect_proxy_when_ready(
         proxy,
         ready_timeout=10.0,
         poll_interval=0.01,
         is_port_listening=fake_lister,
-        register_subscribers=fake_register,
         get_proxy=lambda: proxy,
         sleep=fake_sleep,
     )
 
     assert result is True
     assert proxy.start_client_hosts == ["localhost"]
-    # Subscribers must attach to the exact proxy that was connected, not to
-    # whatever the global happens to be at registration time.
-    assert registered == [proxy]
-    # Subscribers must be registered AFTER the client is created by start_client.
-    assert proxy.events == ["start_client", "register_subscribers"]
+    assert proxy.events == ["start_client"]
     assert sleeps["n"] >= 2
 
 
 def test_gives_up_when_ports_never_listen():
     """No port ever opens -> no connect attempt, returns False."""
     proxy = FakeProxy()
-    registered: list[object] = []
 
     result = auto_start.connect_proxy_when_ready(
         proxy,
         ready_timeout=0.05,
         poll_interval=0.01,
         is_port_listening=_always(False),
-        register_subscribers=registered.append,
         get_proxy=lambda: proxy,
         sleep=lambda _: None,
     )
 
     assert result is False
     assert proxy.start_client_hosts == []
-    assert registered == []
 
 
 def test_wait_for_ports_honors_wall_clock_deadline():
@@ -223,7 +212,6 @@ def test_explicit_host_overrides_proxy_and_env(monkeypatch):
         proxy,
         host="explicit",
         is_port_listening=fake_lister,
-        register_subscribers=lambda p: None,
         get_proxy=lambda: proxy,
         sleep=lambda _: None,
     )
@@ -240,7 +228,6 @@ def test_host_falls_back_to_env_when_proxy_has_none(monkeypatch):
     auto_start.connect_proxy_when_ready(
         proxy,
         is_port_listening=_always(True),
-        register_subscribers=lambda p: None,
         get_proxy=lambda: proxy,
         sleep=lambda _: None,
     )
@@ -251,20 +238,16 @@ def test_host_falls_back_to_env_when_proxy_has_none(monkeypatch):
 def test_connect_failure_is_caught():
     """A start_client that raises is reported as a failed (False) connect."""
     proxy = FakeProxy(raise_on_start=True)
-    registered: list[object] = []
 
     result = auto_start.connect_proxy_when_ready(
         proxy,
         is_port_listening=_always(True),
-        register_subscribers=registered.append,
         get_proxy=lambda: proxy,
         sleep=lambda _: None,
     )
 
     assert result is False
-    # start_client was attempted, but subscribers must not be registered after it failed.
     assert proxy.start_client_hosts == ["localhost"]
-    assert registered == []
 
 
 def test_stands_down_when_manual_connect_replaced_proxy():
@@ -277,12 +260,10 @@ def test_stands_down_when_manual_connect_replaced_proxy():
     """
     boot_proxy = FakeProxy()
     manual_proxy = FakeProxy()  # what /api/server/config installed meanwhile
-    registered: list[object] = []
 
     result = auto_start.connect_proxy_when_ready(
         boot_proxy,
         is_port_listening=_always(True),
-        register_subscribers=registered.append,
         get_proxy=lambda: manual_proxy,
         sleep=lambda _: None,
     )
@@ -290,7 +271,6 @@ def test_stands_down_when_manual_connect_replaced_proxy():
     assert result is False
     assert boot_proxy.start_client_hosts == []
     assert manual_proxy.start_client_hosts == []
-    assert registered == []
 
 
 def test_takeover_check_and_connect_run_under_the_lock():
@@ -316,7 +296,6 @@ def test_takeover_check_and_connect_run_under_the_lock():
     result = auto_start.connect_proxy_when_ready(
         proxy,
         is_port_listening=_always(True),
-        register_subscribers=lambda p: proxy.events.append("register_subscribers"),
         get_proxy=fake_get_proxy,
         lock=FakeLock(),
         sleep=lambda _: None,
@@ -327,7 +306,6 @@ def test_takeover_check_and_connect_run_under_the_lock():
         "lock_enter",
         "get_proxy",
         "start_client",
-        "register_subscribers",
         "lock_exit",
     ]
 

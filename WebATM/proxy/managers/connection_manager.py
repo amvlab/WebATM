@@ -65,8 +65,17 @@ class ConnectionManager:
 
         Stops any existing connection first, creates the BlueSky network
         client if needed, wires its node/server signals to the node manager,
-        connects to the server, and starts the network update and backup
-        emission timers.
+        connects to the server, registers the data subscribers, and starts
+        the network update and backup emission timers.
+
+        Subscribers are registered here — after ``connect()`` (the network-
+        level subscriptions need the sockets) but before the network timer
+        starts — so the client is never pumped while the subscriber registry
+        is empty. Discovery of the first node broadcasts a REQUEST whose
+        answers (the initial POLY shapes and STACKCMDS command dictionary)
+        are one-shot: if they arrived before handlers were attached they were
+        silently dropped, and nothing re-requests them until the active node
+        changes.
 
         Args:
             hostname (str | None): BlueSky server hostname/IP. When None, the
@@ -116,6 +125,12 @@ class ConnectionManager:
             except Exception as e:
                 logger.error(f"Error in network connect(): {e}")
                 raise
+
+            # Deferred import: this module is loaded during WebATM.proxy
+            # package init, before .subscribers exists.
+            from ..subscribers import register_subscribers
+
+            register_subscribers(self.proxy)
 
             # Initialize connection monitoring; was_connected flips to True
             # once the first node is detected.

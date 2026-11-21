@@ -417,7 +417,6 @@ def register_basic_routes(app, session_manager):
             from ..proxy import (
                 BlueSkyProxy,
                 connect_lock,
-                register_subscribers,
                 set_bluesky_proxy,
             )
 
@@ -443,9 +442,9 @@ def register_basic_routes(app, session_manager):
                 set_bluesky_proxy(proxy)  # update the global the subscribers use
 
                 proxy.server_ip = server_ip
+                # start_client also registers the data subscribers, before
+                # its network timer can deliver the first messages.
                 proxy.start_client(hostname=server_ip)
-                # Subscribers attach to the client start_client just created.
-                register_subscribers(proxy)
 
             # Confirm the server is real: wait for node detection.
             if _wait_for_nodes(proxy):

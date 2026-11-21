@@ -1,11 +1,100 @@
 """Tests for WebATM.proxy.managers.connection_manager.ConnectionManager.
 
-Covers the teardown paths (``close``, ``stop_client``,
-``_handle_disconnection``), which all funnel their cached-state clearing
-through ``DataManager._reset_cached_state`` so the paths cannot drift apart.
+Covers the start path (``start_client`` must leave a fully-subscribed client
+before its network timer can deliver a message) and the teardown paths
+(``close``, ``stop_client``, ``_handle_disconnection``), which all funnel
+their cached-state clearing through ``DataManager._reset_cached_state`` so
+the paths cannot drift apart.
 """
 
 import time
+
+import pytest
+
+from WebATM.bluesky_client import BlueSkyContext, BlueSkyStack, BlueSkySubscriber
+
+
+class _StubNetworkClient:
+    """Stand-in for ``BlueSkyClient`` with a real subscriber registry.
+
+    ``connect()`` succeeds without touching ZMQ; ``subscribe()`` records the
+    registration exactly like the real client so dispatching through
+    ``subscriber.emit`` exercises the real handlers.
+    """
+
+    def __init__(self, group_id=None):
+        self.node_id = b"CSTUB"
+        self.subscriber = BlueSkySubscriber()
+        self.context = BlueSkyContext()
+        self.stack = BlueSkyStack()
+        self.act_id = None
+        self.nodes = set()
+        self.servers = set()
+        self.running = False
+
+    def connect(self, hostname=None, **kwargs):
+        self.running = True
+        return True
+
+    def subscribe(self, topic, callback, actonly=False):
+        self.subscriber.subscribe(topic, callback)
+
+    def close(self):
+        self.running = False
+
+
+def _start_with_stub_client(proxy, monkeypatch, on_timer_start=None):
+    """Run ``start_client`` against the stub client with timers stubbed out."""
+    from WebATM.proxy.managers import connection_manager as cm
+
+    monkeypatch.setattr(cm, "BlueSkyClient", _StubNetworkClient)
+    monkeypatch.setattr(
+        cm.ConnectionManager,
+        "_start_network_timer",
+        lambda self: on_timer_start() if on_timer_start else None,
+    )
+    proxy.data_mgr.start_backup_timer = lambda: None
+    proxy.connection_mgr.start_client(hostname="127.0.0.1")
+
+
+class TestStartClient:
+    def test_subscribers_are_registered_before_the_network_timer_starts(
+        self, proxy, monkeypatch
+    ):
+        """The receive loop must never run against an empty subscriber registry.
+
+        Discovery of the first node broadcasts a REQUEST whose answers (the
+        initial POLY shapes and the STACKCMDS cmddict) are one-shot; handlers
+        registered only after ``start_client`` returned could miss them.
+        """
+        from WebATM.proxy.subscribers import SUBSCRIPTIONS
+
+        topics_at_timer_start = []
+
+        def record():
+            topics_at_timer_start.append(
+                set(proxy.bluesky_client.subscriber.subscribers)
+            )
+
+        _start_with_stub_client(proxy, monkeypatch, on_timer_start=record)
+
+        assert topics_at_timer_start == [{topic for topic, _, _ in SUBSCRIPTIONS}]
+
+    def test_stackcmds_answer_right_after_connect_reaches_the_cmddict(
+        self, proxy, monkeypatch
+    ):
+        """Regression: a REQUEST answer arriving immediately after ``connect()``
+        (before the caller of ``start_client`` runs any further code) must be
+        handled, not silently dropped — nothing re-requests the cmddict until
+        the active node changes."""
+        _start_with_stub_client(proxy, monkeypatch)
+
+        client = proxy.bluesky_client
+        client.context.action = "R"
+        client.context.sender_id = b"NODE\x81"
+        client.subscriber.emit("STACKCMDS", {"cmddict": {"CRE": "acid,type"}})
+
+        assert proxy.cmddict == {"CRE": "acid,type"}
 
 
 def _seed_cached_state(proxy):
