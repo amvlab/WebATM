@@ -22,6 +22,7 @@ export class StateManager {
         this.state = {
             simInfo: null,
             aircraftData: null,
+            aircraftTrailHistory: null,
             selectedAircraft: null,
             activeNode: null,
             shapeOptions: {
@@ -448,6 +449,7 @@ export class StateManager {
             // Reset simulation state
             simInfo: null,
             aircraftData: null,
+            aircraftTrailHistory: null,
             selectedAircraft: null,
             activeNode: null,
 

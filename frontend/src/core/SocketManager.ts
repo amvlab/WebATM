@@ -9,6 +9,7 @@ import {
     PolyData,
     PolylineData,
     InitialData,
+    AircraftTrailHistory,
     CommandDictData,
     EchoData,
     Shape,
@@ -38,6 +39,7 @@ interface SocketEventHandlers {
     onInitialData?: (data: InitialData) => void;
     onSimInfo?: (data: SimInfo) => void;
     onAircraftData?: (data: AircraftData) => void;
+    onTrailHistory?: (data: AircraftTrailHistory) => void;
     onCommandResult?: (data: CommandResult) => void;
     onNodeInfo?: (data: NodeInfo) => void;
     onEcho?: (data: EchoData) => void;
@@ -132,6 +134,10 @@ export class SocketManager {
                 this.stateManager.updateAircraftData(data);
                 connectionStatus.onAircraftDataReceived();
             },
+            onTrailHistory: (data: AircraftTrailHistory) => {
+                if (connectionStatus.isInDisconnectGrace()) return;
+                this.stateManager.updateState('aircraftTrailHistory', data);
+            },
             onNodeInfo: (data: NodeInfo) => {
                 // Receiving nodeinfo means we're connected to BlueSky.
                 connectionStatus.onNodeInfoReceived();
@@ -190,6 +196,7 @@ export class SocketManager {
         ['initial_data', 'onInitialData'],
         ['siminfo', 'onSimInfo'],
         ['acdata', 'onAircraftData'],
+        ['trails', 'onTrailHistory'],
         ['command_result', 'onCommandResult'],
         ['node_info', 'onNodeInfo'],
         ['echo', 'onEcho'],
