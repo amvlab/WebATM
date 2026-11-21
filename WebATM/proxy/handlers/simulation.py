@@ -127,6 +127,11 @@ def on_acdata_received(data):
             data_path_perf.record_filtered()
             return
 
+        # Trail history is sampled on sim time, ahead of the wall-clock
+        # throttle, so fast-forwarded runs keep their trail resolution. The
+        # call is a couple of comparisons for all but the sampled frames.
+        proxy.trail_mgr.record(data)
+
         # Throttle BEFORE serializing: serialization is the dominant per-frame
         # cost, so pay it at most once per acdata_interval.
         current_time = time.time()

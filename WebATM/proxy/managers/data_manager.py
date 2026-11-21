@@ -121,6 +121,7 @@ class DataManager:
 
         self.proxy.traffic_data = {}
         self.proxy.sim_data = {}
+        self.proxy.trail_mgr.clear()
         self.proxy.poly_data_by_node.clear()
         self.proxy.polyline_data_by_node.clear()
 
