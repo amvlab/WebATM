@@ -5,6 +5,7 @@ import type { Render3DArgs } from '../rendering/CustomLayer3D';
 import { altitudeScaledForOrigin, mercatorCameraMatrix, relativePositionMeters } from '../rendering/mercatorUtils';
 import type { RouteData, DisplayOptions } from '../../../data/types';
 import { logger } from '../../../utils/Logger';
+import { whenStyleReady } from '../rendering/styleReady';
 import { isValidCoordinate, safeRemoveLayer } from '../../../utils/maplibre';
 import { clampActiveWaypoint } from '../../../utils/route';
 
@@ -45,20 +46,11 @@ export class AircraftRoute3DRenderer {
     }
 
     /**
-     * Run `callback` once the map style is loaded (rAF polling; style.load may
-     * have already fired). Aborts if the renderer is destroyed or moved to
-     * another map while waiting.
+     * Run `callback` once the map style can take layers. Aborts if the
+     * renderer is destroyed or moved to another map while waiting.
      */
     private whenStyleLoaded(map: MapLibreMap, callback: () => void): void {
-        const poll = () => {
-            if (this.map !== map) return;
-            if (map.isStyleLoaded()) {
-                callback();
-            } else {
-                requestAnimationFrame(poll);
-            }
-        };
-        poll();
+        whenStyleReady(map, () => this.map === map, callback);
     }
 
     private addLayerToMap(map: MapLibreMap): void {
