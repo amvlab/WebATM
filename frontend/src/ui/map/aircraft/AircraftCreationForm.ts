@@ -1,7 +1,11 @@
 import { modalManager } from '../../ModalManager';
 import { SpeedUnit, AltitudeUnit } from '../../../data/types';
 import { DataProcessor } from '../../../data/DataProcessor';
-import { OPENAP_AIRCRAFT_TYPES, isOpenapAircraftType } from '../../../data/aircraftTypes';
+import {
+    OPENAP_AIRCRAFT_TYPES,
+    isOpenapAircraftType,
+    hasOpenapTypeCandidates
+} from '../../../data/aircraftTypes';
 import { logger } from '../../../utils/Logger';
 import { Dropdown, rankByPrefixThenContains } from '../../../utils/dropdown';
 import { parseNumericField } from './aircraftCreationValidation';
@@ -90,10 +94,8 @@ export class AircraftCreationForm {
             });
         }
 
-        // Set up real-time duplicate-ID warning for aircraft ID.
-        // NOTE: this is non-blocking — it only warns, submission is still
-        // allowed so the user can intentionally send a duplicate CRE and
-        // let BlueSky respond with its own error.
+        // Real-time duplicate-ID warning (non-blocking: a duplicate CRE may
+        // be intentional, BlueSky answers it with its own error).
         const idInput = document.getElementById('aircraft-id-input') as HTMLInputElement;
         if (idInput) {
             idInput.addEventListener('input', () => {
@@ -265,9 +267,15 @@ export class AircraftCreationForm {
         }
     }
 
+    /**
+     * Enter / primary-button action: whatever the visible submit button does
+     * in the current mode — Create Aircraft (manual) or Start Drawing (map).
+     */
     private onSubmitClick(): void {
         if (this.creationMode === 'manual') {
             this.createAircraftManual();
+        } else {
+            this.onStartDrawingClick();
         }
     }
 
@@ -387,11 +395,12 @@ export class AircraftCreationForm {
             }
         });
 
-        // Hide dropdown on blur (with a small delay so mousedown selection fires)
+        // Hide dropdown on blur (with a small delay so mousedown selection
+        // fires). The field has settled, so the warning check turns strict.
         typeInput.addEventListener('blur', () => {
             setTimeout(() => {
                 this.typeDropdown?.hide();
-                this.updateAircraftTypeWarning();
+                this.updateAircraftTypeWarning(true);
             }, 150);
         });
     }
@@ -420,19 +429,25 @@ export class AircraftCreationForm {
      * Show a warning under the type input when the typed value is not part
      * of the openap aircraft list. Never blocks submission - custom types
      * are intentionally allowed.
+     *
+     * While the user is still typing (`settled` false) the warning stays
+     * hidden as long as the value can still complete to an openap type, so
+     * typing "A3" towards "A320" doesn't flash a false warning (mirrors the
+     * console's type autocomplete). Once the field settles (blur), any
+     * non-openap value warns.
      */
-    private updateAircraftTypeWarning(): void {
+    private updateAircraftTypeWarning(settled = false): void {
         const typeInput = document.getElementById('aircraft-type-input') as HTMLInputElement;
         const warning = document.getElementById('aircraft-type-warning') as HTMLElement;
         if (!typeInput || !warning) return;
 
         const value = typeInput.value.trim();
-        if (value.length === 0) {
-            warning.style.display = 'none';
-            return;
-        }
+        const ok =
+            value.length === 0 ||
+            isOpenapAircraftType(value) ||
+            (!settled && hasOpenapTypeCandidates(value));
 
-        if (isOpenapAircraftType(value)) {
+        if (ok) {
             warning.style.display = 'none';
         } else {
             warning.textContent = `openap library does not include "${value.toUpperCase()}"`;
@@ -445,7 +460,7 @@ export class AircraftCreationForm {
      */
     private aircraftExists(aircraftId: string): boolean {
         if (!window.app) {
-            logger.warn('AircraftCreationForm', '✈️ App not available, cannot check aircraft existence');
+            logger.warn('AircraftCreationForm', 'App not available, cannot check aircraft existence');
             return false;
         }
 
@@ -562,7 +577,7 @@ export class AircraftCreationForm {
                 logger.warn('AircraftCreationForm', 'Console instance is null');
             }
         } else {
-            logger.error('AircraftCreationForm', '✈️ Cannot send command: app not available');
+            logger.error('AircraftCreationForm', 'Cannot send command: app not available');
         }
 
         // Close modal

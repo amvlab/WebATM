@@ -1,7 +1,6 @@
 """Node and server management for the BlueSky proxy."""
 
 import threading
-import traceback
 
 from ...bluesky_client import safe_decode, seqid2idx, seqidx2id
 from ...logger import get_logger
@@ -84,9 +83,8 @@ class NodeManager:
             self._emit_shapes(
                 active_node_id, self.proxy.polyline_data_by_node, "polyline"
             )
-        except Exception as e:
-            logger.error(f"Error emitting active node POLY/POLYLINE data: {e}")
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Error emitting active node POLY/POLYLINE data")
 
     def _emit_shapes(self, active_node_id, data_by_node, event):
         """Emit the active node's shapes for one event, or empty data to clear stale ones."""
@@ -143,9 +141,8 @@ class NodeManager:
 
                 if self.proxy.running:
                     self._emit_node_info()
-        except Exception as e:
-            logger.error(f"Error in _on_node_added: {e}")
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Error in _on_node_added")
 
     def _reactivate_if_active_node_gone(self, node_id):
         """Activate a newly discovered node if the client's active node is dead.
@@ -280,9 +277,8 @@ class NodeManager:
             return
         try:
             self.proxy.socketio.emit("node_info", self.serialize_node_info())
-        except Exception as e:
-            logger.error(f"Error emitting node info: {e}")
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Error emitting node info")
 
     def actnode(self, node_id):
         """Select the active simulation node via the network client.

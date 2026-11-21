@@ -1,8 +1,7 @@
 /**
- * Pure parsing/statistics helpers for the Log Plot modal: turns the text of a
- * BlueSky CRELOG data log (comma-separated rows, '#' comment header, simt as
- * the first column; one row per aircraft per interval) into typed columns and
- * plottable series. Kept free of DOM so it is directly unit-testable.
+ * Pure (DOM-free) parsing/statistics helpers for the Log Plot modal: turns
+ * BlueSky CRELOG data log text (comma-separated rows, '#' comment header,
+ * simt first; one row per aircraft per interval) into typed columns/series.
  */
 
 /** One column of a parsed log file. */
@@ -39,13 +38,11 @@ function toNumber(cell: string): number {
 }
 
 /**
- * Parse the text of a data log file. Lines starting with '#' are collected
- * as comments; the remaining lines are split on commas. The column count is
- * the most common field count among data lines (rows with a different count
- * are dropped and tallied in `skipped`). Column names come from the last
- * comment line that splits into exactly that many comma-separated tokens
- * (a user-provided "simt, id, lat, ..." header); otherwise the first column
- * is called `simt` when numeric (BlueSky's periodic logger always writes
+ * Parse data log text: '#' lines become comments, the rest split on commas.
+ * The column count is the most common field count (other rows are dropped
+ * and tallied in `skipped`). Column names come from the last comment line
+ * with exactly that many tokens (a "simt, id, lat, ..." header); otherwise
+ * the first column is `simt` when numeric (BlueSky's periodic logger writes
  * simulation time first) and the rest `col2`, `col3`, ...
  */
 export function parseLogText(text: string): ParsedLog {
@@ -175,12 +172,10 @@ export interface PlotSeries {
 export const MAX_SERIES = 40;
 
 /**
- * Build plot series from two numeric columns, split into one series per
- * distinct value of the log's group column (typically the aircraft id) in
- * first-appearance order. Rows where either coordinate is not finite are
- * skipped. When the log has no group column, one series named 'data' holds
- * every row. At most MAX_SERIES groups are kept; the overflow goes into a
- * final series so the point count stays honest.
+ * Build plot series from two numeric columns: one series per group-column
+ * value (typically the aircraft id) in first-appearance order, or a single
+ * 'data' series without a group column. Non-finite coordinates are skipped;
+ * groups beyond MAX_SERIES are folded into a final overflow series.
  */
 export function buildSeries(log: ParsedLog, xCol: number, yCol: number): PlotSeries[] {
     const series = new Map<string, PlotSeries>();

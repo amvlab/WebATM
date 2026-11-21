@@ -72,8 +72,12 @@ export class MapStyleManager {
     /**
      * Change the map style
      * @param styleUrl - URL of the new map style
+     * @param options.persist - Save the choice to storage (default true).
+     *   The offline fallback passes false: it is a session-only recovery,
+     *   and persisting it would silently replace the user's chosen basemap
+     *   after a single offline or slow boot.
      */
-    public changeStyle(styleUrl: string): void {
+    public changeStyle(styleUrl: string, options?: { persist?: boolean }): void {
         const map = this.getMap();
         if (!map) {
             logger.error('MapStyleManager', 'Cannot change style: map not initialized');
@@ -83,8 +87,9 @@ export class MapStyleManager {
         try {
             logger.debug('MapStyleManager', 'Changing map style to:', styleUrl);
 
-            // Save the style to storage for persistence
-            storage.set(this.STORAGE_KEY_STYLE, styleUrl);
+            if (options?.persist !== false) {
+                storage.set(this.STORAGE_KEY_STYLE, styleUrl);
+            }
             this.currentStyle = styleUrl;
 
             // Change the map style
@@ -155,7 +160,7 @@ export class MapStyleManager {
                     'MapStyleManager',
                     `Remote style did not load (${failure}); switching to offline basemap.`
                 );
-                this.changeStyle(this.OFFLINE_STYLE);
+                this.changeStyle(this.OFFLINE_STYLE, { persist: false });
             });
     }
 
@@ -179,7 +184,7 @@ export class MapStyleManager {
         if (this.shouldFallBackToOffline(e)) {
             this.hasFallenBackToOffline = true;
             logger.warn('MapStyleManager', 'Remote style unreachable; switching to offline basemap.');
-            this.changeStyle(this.OFFLINE_STYLE);
+            this.changeStyle(this.OFFLINE_STYLE, { persist: false });
             return;
         }
 

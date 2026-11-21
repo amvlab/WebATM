@@ -1,7 +1,7 @@
 import { logger } from '../utils/Logger';
 import { storage } from '../utils/StorageManager';
 import { modalManager } from './ModalManager';
-import { onDOMReady, setVisible, escapeHtml } from '../utils/dom';
+import { onDOMReady, setVisible, setText, escapeHtml } from '../utils/dom';
 
 interface BlueSkyFileStatus {
     configured: boolean;
@@ -37,8 +37,8 @@ interface Breadcrumb {
 
 interface UploadResponse {
     success: boolean;
-    // Name the backend stored the file under — it can differ from the
-    // uploaded name (sanitization, auto-rename on conflict).
+    // Name the backend stored the file under (sanitization/auto-rename can
+    // change it from the uploaded name).
     filename?: string;
     error?: string;
 }
@@ -50,9 +50,8 @@ interface UploadResponse {
 export class BlueSkyFileManager {
     private static readonly BASE_PATH_KEY = 'bluesky-base-path';
 
-    // Accepted upload extension per file type. The backend owns the actual
-    // directory layout and size limits; the frontend only needs the extension
-    // to drive the file picker's `accept` filter and a pre-upload check.
+    // Accepted upload extension per file type; drives the file picker's
+    // `accept` filter and a pre-upload check (the backend owns the real rules).
     private fileExtensions: Record<string, string> = {
         scenario: '.scn',
         plugins: '.py',
@@ -60,11 +59,13 @@ export class BlueSkyFileManager {
     };
 
     private isConfigured: boolean = false;
-    // Integrated build only: when true the manual "BlueSky Base Directory"
-    // controls are hidden because the backend wires file management straight to
-    // BlueSky's working directory. Activated via enableIntegratedMode(); stays
-    // false (and a no-op) in the default build.
+    // Integrated build only: hides the manual "BlueSky Base Directory"
+    // controls (the backend wires the paths itself). See enableIntegratedMode().
     private integratedMode: boolean = false;
+    // Pending auto-clear timeout of the last status toast, if any.
+    private statusClearTimer: ReturnType<typeof setTimeout> | null = null;
+    // Pending hide timeout of the upload progress bar, if any.
+    private progressHideTimer: ReturnType<typeof setTimeout> | null = null;
     private currentPaths: Record<string, string> = {
         scenario: '',
         plugins: '',
@@ -99,9 +100,8 @@ export class BlueSkyFileManager {
         fileInput?.addEventListener('change', () => this.handleFileSelection());
         dropZone?.addEventListener('click', () => fileInput?.click());
 
-        // Drag and drop. dragleave/dragend clear the highlight when a drag
-        // leaves without dropping (dragover alone would otherwise leave it
-        // stuck on).
+        // Drag and drop; dragleave/dragend clear the highlight when a drag
+        // leaves without dropping.
         dropZone?.addEventListener('dragover', (e) => this.handleDragOver(e));
         dropZone?.addEventListener('dragleave', () => this.clearDropHighlight());
         dropZone?.addEventListener('dragend', () => this.clearDropHighlight());
@@ -127,10 +127,9 @@ export class BlueSkyFileManager {
         const closeFooterBtn = document.getElementById('upload-files-close-footer');
         closeFooterBtn?.addEventListener('click', () => this.closeModal());
 
-        // Event delegation on the (persistent) file list container. Rows and
-        // buttons carry data-action / data-* attributes instead of inline
-        // onclick handlers, so untrusted filenames are never interpolated into
-        // executable strings (XSS risk).
+        // Event delegation on the persistent file list container: rows carry
+        // data-action / data-* attributes instead of inline onclick handlers,
+        // so untrusted filenames never land in executable strings (XSS).
         const fileListDiv = document.getElementById('file-list');
         fileListDiv?.addEventListener('click', (e) => {
             const target = (e.target as HTMLElement)?.closest('[data-action]') as HTMLElement | null;
@@ -186,10 +185,7 @@ export class BlueSkyFileManager {
         // Show status in settings modal
         const statusDiv = document.getElementById('base-path-status-settings');
         if (statusDiv && status.derived_paths) {
-            document.getElementById('scenario-path-display-settings')!.textContent = status.derived_paths.scenario;
-            document.getElementById('plugins-path-display-settings')!.textContent = status.derived_paths.plugins;
-            document.getElementById('settings-path-display-settings')!.textContent = status.derived_paths.settings;
-            document.getElementById('output-path-display-settings')!.textContent = status.derived_paths.output;
+            this.renderDerivedPaths(status.derived_paths, '-settings');
             statusDiv.style.display = 'block';
         }
 
@@ -204,19 +200,22 @@ export class BlueSkyFileManager {
         const configuredStatusDiv = document.getElementById('base-path-status');
         if (notConfiguredDiv) notConfiguredDiv.style.display = 'none';
         if (configuredStatusDiv && status.derived_paths) {
-            const scenarioDisplay = document.getElementById('scenario-path-display');
-            const pluginsDisplay = document.getElementById('plugins-path-display');
-            const settingsDisplay = document.getElementById('settings-path-display');
-            const outputDisplay = document.getElementById('output-path-display');
-
-            if (scenarioDisplay) scenarioDisplay.textContent = status.derived_paths.scenario;
-            if (pluginsDisplay) pluginsDisplay.textContent = status.derived_paths.plugins;
-            if (settingsDisplay) settingsDisplay.textContent = status.derived_paths.settings;
-            if (outputDisplay) outputDisplay.textContent = status.derived_paths.output;
+            this.renderDerivedPaths(status.derived_paths, '');
             configuredStatusDiv.style.display = 'block';
         }
 
         this.refreshFileList();
+    }
+
+    /** Fill the derived-path displays; the settings modal's ids carry a
+     *  '-settings' suffix, the upload modal's none. */
+    private renderDerivedPaths(
+        paths: NonNullable<BlueSkyFileStatus['derived_paths']>,
+        idSuffix: '' | '-settings'
+    ): void {
+        for (const type of ['scenario', 'plugins', 'settings', 'output'] as const) {
+            setText(`${type}-path-display${idSuffix}`, paths[type]);
+        }
     }
 
     private updateUIForUnconfiguredState(): void {
@@ -289,13 +288,10 @@ export class BlueSkyFileManager {
     /**
      * Switch file management into integrated mode (integrated build only).
      *
-     * In the integrated build BlueSky runs inside the same container as the
-     * WebATM backend, so its scenario/plugins/output directories live at a
-     * fixed path that the backend wires up automatically (see
-     * webatm_integrated.bluesky_paths). There is nothing for the user to
-     * configure, so hide the "BlueSky Base Directory" input + Configure button;
-     * the auto-configured paths are still shown via the normal configured-state
-     * UI. Never called in the default build, so it stays a no-op there.
+     * There the backend wires BlueSky's directories up automatically (see
+     * webatm_integrated.bluesky_paths), so the manual "BlueSky Base Directory"
+     * controls are hidden; the auto-configured paths still show via the normal
+     * configured-state UI. Never called in the default build.
      */
     public enableIntegratedMode(): void {
         if (this.integratedMode) return;
@@ -307,18 +303,15 @@ export class BlueSkyFileManager {
      * Hide the manual base-path configuration controls. Safe to call repeatedly.
      */
     private applyIntegratedMode(): void {
-        // The input, Configure button, help text and "file system access"
-        // warning all live in one .setting-group; hiding it removes the whole
-        // manual-configuration affordance while leaving the configured-paths
-        // status display (a sibling element) intact.
+        // The whole manual-configuration affordance lives in one .setting-group;
+        // hiding it leaves the configured-paths status (a sibling) intact.
         const input = document.getElementById('bluesky-base-path-input-settings');
         const configGroup = input?.closest('.setting-group');
         if (configGroup instanceof HTMLElement) {
             setVisible(configGroup, false);
         }
 
-        // The section now just reports the fixed paths, so drop the "Configure
-        // …" wording that no longer applies.
+        // The section now just reports the fixed paths.
         const description = input
             ?.closest('.settings-section')
             ?.querySelector('.section-description');
@@ -418,11 +411,8 @@ export class BlueSkyFileManager {
                 this.showStatus('File uploaded successfully! Running scenario...', 'success');
                 this.closeModal();
 
-                // IC runs the scenario under the full name the backend stored
-                // it as — it can differ from the uploaded name (sanitization,
-                // auto-rename on conflict), and stripping .scn would let
-                // BlueSky's Path.with_suffix rewrite a dotted name
-                // ("demo.v2" -> "demo.scn") to a stale namesake.
+                // IC runs the full stored name, .scn included — see
+                // runScenario() for why the extension must be kept.
                 if (window.app) {
                     window.app.sendCommand(`IC ${storedFilename}`);
                 } else {
@@ -459,6 +449,12 @@ export class BlueSkyFileManager {
 
         const progressDiv = document.getElementById('upload-progress');
         const progressBar = document.getElementById('upload-progress-bar');
+        // A hide timeout still pending from the previous upload would blank
+        // this upload's progress bar mid-flight — cancel it first.
+        if (this.progressHideTimer !== null) {
+            clearTimeout(this.progressHideTimer);
+            this.progressHideTimer = null;
+        }
         progressDiv!.style.display = 'block';
 
         try {
@@ -497,7 +493,8 @@ export class BlueSkyFileManager {
             return null;
         } finally {
             // Hide the progress bar after a delay.
-            setTimeout(() => {
+            this.progressHideTimer = setTimeout(() => {
+                this.progressHideTimer = null;
                 progressDiv!.style.display = 'none';
                 progressBar!.style.width = '0%';
                 progressBar!.textContent = '0%';
@@ -522,8 +519,7 @@ export class BlueSkyFileManager {
         uploadBtn.textContent = 'Uploading...';
 
         try {
-            // Report the stored name — on a conflict the backend auto-renames
-            // (e.g. demo.scn -> demo_1.scn), and the list shows that name.
+            // Report the stored name (the backend auto-renames on conflict).
             const storedFilename = await this.performFileUpload(file, fileType);
 
             if (storedFilename) {
@@ -552,12 +548,11 @@ export class BlueSkyFileManager {
         if (!fileListDiv) return;
 
         try {
-            // Use the new browse API with current path
             const currentPath = this.currentPaths[fileType] || '';
-            const url = currentPath ? 
-                `/api/bluesky/browse/${fileType}/${encodeURIComponent(currentPath)}` : 
+            const url = currentPath ?
+                `/api/bluesky/browse/${fileType}/${this.encodePath(currentPath)}` :
                 `/api/bluesky/browse/${fileType}`;
-            
+
             const response = await fetch(url);
             const result: BrowseDirectoryResponse = await response.json();
 
@@ -656,6 +651,12 @@ export class BlueSkyFileManager {
         return currentPath ? `${currentPath}/${filename}` : filename;
     }
 
+    /** Percent-encode each segment of a relative path for use in a URL,
+     *  keeping the '/' separators so the backend sees the same hierarchy. */
+    private encodePath(path: string): string {
+        return path.split('/').map(encodeURIComponent).join('/');
+    }
+
     public runScenario(filename: string): void {
         // Keep the .scn extension: BlueSky's IC forces one onto the name via
         // Path.with_suffix, which would rewrite a stripped dotted name
@@ -679,12 +680,8 @@ export class BlueSkyFileManager {
         }
 
         try {
-            // Delete the file in the folder being browsed, not a root
-            // namesake; encode each segment so any listed name survives the URL.
-            const relPath = this.relativePath(fileType, filename)
-                .split('/')
-                .map(encodeURIComponent)
-                .join('/');
+            // Delete the file in the folder being browsed, not a root namesake.
+            const relPath = this.encodePath(this.relativePath(fileType, filename));
             const response = await fetch(`/api/bluesky/${fileType}/${relPath}`, {
                 method: 'DELETE'
             });
@@ -713,6 +710,14 @@ export class BlueSkyFileManager {
             info: '#2196F3'
         };
 
+        // An auto-clear timeout from an earlier toast must not wipe this one
+        // (it would hide a persistent error 5s after the previous info/success
+        // message, e.g. "Selected: …" followed by an upload error).
+        if (this.statusClearTimer !== null) {
+            clearTimeout(this.statusClearTimer);
+            this.statusClearTimer = null;
+        }
+
         // Escape: messages embed untrusted names (picked/stored filenames,
         // backend error text) and this is an innerHTML sink.
         statusDiv.innerHTML = `
@@ -721,9 +726,10 @@ export class BlueSkyFileManager {
             </div>
         `;
 
-        // Clear status after a delay (except for errors)
+        // Clear status after a delay (except for errors, which persist)
         if (type !== 'error') {
-            setTimeout(() => {
+            this.statusClearTimer = setTimeout(() => {
+                this.statusClearTimer = null;
                 statusDiv.innerHTML = '';
             }, 5000);
         }

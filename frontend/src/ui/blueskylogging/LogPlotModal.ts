@@ -1,10 +1,8 @@
 /**
- * Quick-look plotting for BlueSky data logs: the "Plot" action in the Output
- * Log file browser opens this modal, which fetches the log file's content and
- * offers three simple views of it — a time series (per-aircraft lines over
- * simulation time), an X-Y plot (e.g. lon vs lat gives a ground track), and a
- * stats/table view. It is deliberately a first look, not a plotting tool:
- * users who want real plots should download the log and use their own tools.
+ * Quick-look plotting for BlueSky data logs, opened by the "Plot" action in
+ * the Output Log file browser: a per-aircraft time series, an X-Y plot (e.g.
+ * lon vs lat for a ground track), and a stats/table view. Deliberately a
+ * first look, not a plotting tool — real analysis means downloading the log.
  */
 import { logger } from '../../utils/Logger';
 import { onDOMReady, escapeHtml, setVisible } from '../../utils/dom';
@@ -49,11 +47,13 @@ export class LogPlotModal {
     private yLabelEl: HTMLElement | null = null;
 
     private filepath = '';
-    // Bumped on every load so a slow response for a previously opened file
+    // Bumped per load so a slow response for a previously opened file
     // cannot overwrite the file opened after it.
     private loadGeneration = 0;
     private log: ParsedLog | null = null;
     private view: PlotView = 'timeseries';
+    /** The chart view whose column defaults are applied; 'table' has none. */
+    private chartKind: Exclude<PlotView, 'table'> = 'timeseries';
     private series: PlotSeries[] = [];
     private hiddenSeries = new Set<string>();
     private isInitialized = false;
@@ -99,9 +99,8 @@ export class LogPlotModal {
         document.getElementById('log-plot-download-btn')
             ?.addEventListener('click', () => window.logStreamManager?.downloadFile(this.filepath));
 
-        // Legend interactions (event delegation): chips toggle one aircraft,
-        // shift-click isolates it, and the All/None buttons bulk-select — the
-        // point of the legend in a simulation with many aircraft.
+        // Legend interactions (delegated): chips toggle one aircraft,
+        // shift-click isolates it, All/None bulk-select.
         this.legendEl?.addEventListener('click', (e) => {
             const target = e.target as HTMLElement | null;
             const action = (target?.closest('[data-action]') as HTMLElement | null)?.dataset.action;
@@ -182,10 +181,9 @@ export class LogPlotModal {
     }
 
     /**
-     * Populate the X/Y selects with the numeric columns and pick sensible
-     * defaults: time series uses the first numeric column (simt) as X and the
-     * first other numeric column as Y; the X-Y view prefers a lon/lat pair
-     * (a ground track) when the column names reveal one.
+     * Populate the X/Y selects with the numeric columns and pick the chart
+     * kind's defaults: time series plots the first other numeric column over
+     * simt; the X-Y view prefers a lon/lat pair (a ground track).
      */
     private applyDefaultColumns(): void {
         if (!this.log || !this.xSelect || !this.ySelect) return;
@@ -199,7 +197,7 @@ export class LogPlotModal {
         const byName = (pattern: RegExp): number =>
             numeric.find(i => pattern.test(this.log!.columns[i].name)) ?? -1;
 
-        if (this.view === 'xy') {
+        if (this.chartKind === 'xy') {
             const lon = byName(/lon/i);
             const lat = byName(/lat/i);
             this.xSelect.value = String(lon !== -1 ? lon : numeric[0] ?? 0);
@@ -216,7 +214,12 @@ export class LogPlotModal {
         document.querySelectorAll<HTMLElement>('#log-plot-modal .log-plot-tab').forEach(tab => {
             tab.classList.toggle('active', tab.dataset.view === view);
         });
-        this.applyDefaultColumns();
+        // Re-apply defaults only when the chart kind changes, so a round-trip
+        // through the table view keeps the user's column choice.
+        if (view !== 'table' && view !== this.chartKind) {
+            this.chartKind = view;
+            this.applyDefaultColumns();
+        }
         this.render();
     }
 
@@ -229,8 +232,7 @@ export class LogPlotModal {
             return;
         }
 
-        // Event logs (CONFLOG/FLSTLOG) can't be drawn — say so instead of
-        // plotting something misleading.
+        // Event logs (CONFLOG/FLSTLOG) can't be drawn — say so instead.
         const reason = plotabilityError(this.log);
         if (reason) {
             this.renderUnplottable(reason);
@@ -309,8 +311,7 @@ export class LogPlotModal {
 
     /**
      * Isolate one aircraft: hide every other series. Shift-clicking the only
-     * visible series brings everything back, so the gesture is reversible in
-     * place.
+     * visible series brings everything back.
      */
     private soloSeries(label: string): void {
         const visible = this.series.filter(s => !this.hiddenSeries.has(s.label));
@@ -424,8 +425,7 @@ export class LogPlotModal {
         this.readoutEl.textContent =
             `${label}${formatValue(hit.point.x)}, ${formatValue(hit.point.y)}`;
         this.readoutEl.style.display = '';
-        // Keep the readout inside the chart area (flip it left of the cursor
-        // near the right edge).
+        // Flip the readout left of the cursor near the right edge.
         const wrapWidth = this.chartWrap?.clientWidth ?? 0;
         const flip = hit.px > wrapWidth - 160;
         this.readoutEl.style.left = flip ? '' : `${hit.px + 12}px`;

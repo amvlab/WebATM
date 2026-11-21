@@ -1,8 +1,6 @@
 /**
- * Minimal dependency-free canvas chart for the Log Plot modal: line or
- * scatter rendering of PlotSeries with axes, grid, and nearest-point lookup
- * for the hover readout. Deliberately simple — the modal is a quick first
- * look at a data log, not a full plotting tool.
+ * Minimal dependency-free canvas chart for the Log Plot modal: line/scatter
+ * rendering of PlotSeries with axes, grid, and nearest-point hover lookup.
  */
 import type { PlotSeries, SeriesPoint } from './logPlotData';
 import { formatValue } from './logPlotData';
@@ -149,13 +147,21 @@ export class LogPlotChart {
         };
     }
 
-    private toPx(p: { x: number; y: number }): { px: number; py: number } {
+    /**
+     * Data→CSS-pixel mapping with the plot area resolved once. Requires
+     * bounds. Resolving per point (the old `toPx`) issued a layout query
+     * (`getBoundingClientRect`) for every point of every series, which made
+     * drawing and hover O(points) forced-layout calls — janky on large logs.
+     */
+    private projector(): (p: { x: number; y: number }) => { px: number; py: number } {
         const area = this.plotArea();
         const b = this.bounds!;
-        return {
-            px: area.left + ((p.x - b.xMin) / (b.xMax - b.xMin)) * area.width,
-            py: area.top + area.height - ((p.y - b.yMin) / (b.yMax - b.yMin)) * area.height,
-        };
+        const sx = area.width / (b.xMax - b.xMin);
+        const sy = area.height / (b.yMax - b.yMin);
+        return p => ({
+            px: area.left + (p.x - b.xMin) * sx,
+            py: area.top + area.height - (p.y - b.yMin) * sy,
+        });
     }
 
     /** Resize the backing store to the element's CSS size (DPR-aware) and redraw. */
@@ -188,11 +194,13 @@ export class LogPlotChart {
             return;
         }
 
+        const toPx = this.projector();
+
         // Grid + tick labels
         ctx.font = '11px sans-serif';
         ctx.lineWidth = 1;
         for (const tick of niceTicks(this.bounds.xMin, this.bounds.xMax)) {
-            const { px } = this.toPx({ x: tick, y: 0 });
+            const { px } = toPx({ x: tick, y: 0 });
             ctx.strokeStyle = gridColor;
             ctx.beginPath();
             ctx.moveTo(px, area.top);
@@ -203,7 +211,7 @@ export class LogPlotChart {
             ctx.fillText(formatValue(tick), px, area.top + area.height + 14);
         }
         for (const tick of niceTicks(this.bounds.yMin, this.bounds.yMax, 5)) {
-            const { py } = this.toPx({ x: 0, y: tick });
+            const { py } = toPx({ x: 0, y: tick });
             ctx.strokeStyle = gridColor;
             ctx.beginPath();
             ctx.moveTo(area.left, py);
@@ -233,7 +241,7 @@ export class LogPlotChart {
                 ctx.lineWidth = 1.5;
                 ctx.beginPath();
                 points.forEach((p, i) => {
-                    const { px, py } = this.toPx(p);
+                    const { px, py } = toPx(p);
                     if (i === 0) ctx.moveTo(px, py);
                     else ctx.lineTo(px, py);
                 });
@@ -241,7 +249,7 @@ export class LogPlotChart {
             } else {
                 ctx.fillStyle = color;
                 for (const p of points) {
-                    const { px, py } = this.toPx(p);
+                    const { px, py } = toPx(p);
                     ctx.beginPath();
                     ctx.arc(px, py, 2, 0, Math.PI * 2);
                     ctx.fill();
@@ -251,7 +259,7 @@ export class LogPlotChart {
 
         // Hover highlight ring
         if (this.highlight) {
-            const { px, py } = this.toPx(this.highlight.point);
+            const { px, py } = toPx(this.highlight.point);
             ctx.strokeStyle = seriesColor(this.highlight.seriesIndex);
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -266,12 +274,13 @@ export class LogPlotChart {
      */
     public nearest(offsetX: number, offsetY: number): NearestHit | null {
         if (!this.bounds) return null;
+        const toPx = this.projector();
         let bestDist = HOVER_RADIUS_PX * HOVER_RADIUS_PX;
         let best: NearestHit | null = null;
         this.sampled.forEach((points, index) => {
             if (this.isHidden(index)) return;
             for (const p of points) {
-                const { px, py } = this.toPx(p);
+                const { px, py } = toPx(p);
                 const dist = (px - offsetX) ** 2 + (py - offsetY) ** 2;
                 if (dist < bestDist) {
                     bestDist = dist;

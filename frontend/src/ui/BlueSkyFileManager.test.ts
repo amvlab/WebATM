@@ -209,6 +209,134 @@ describe('BlueSkyFileManager status toast escaping', () => {
     });
 });
 
+describe('BlueSkyFileManager status toast auto-clear', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        buildDom();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({ json: async () => ({ configured: false }) }),
+        );
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        document.body.innerHTML = '';
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    /** Stub a picked file and fire the change event ("Selected: …" info toast).
+     *  Drag-and-drop bypasses the picker's accept filter, so any extension can
+     *  arrive here. */
+    function selectFile(name: string): void {
+        const fileInput = document.getElementById('file-input') as HTMLInputElement;
+        const file = new File(['x'], name, { type: 'text/plain' });
+        Object.defineProperty(fileInput, 'files', { get: () => [file], configurable: true });
+        fileInput.dispatchEvent(new Event('change'));
+    }
+
+    it('a stale timer from an earlier toast does not wipe a later error', async () => {
+        await import('./BlueSkyFileManager');
+        vi.useFakeTimers();
+
+        // t=0: info toast starts the 5s auto-clear clock.
+        selectFile('notes.txt');
+        const status = document.getElementById('upload-status') as HTMLElement;
+        expect(status.textContent).toContain('Selected: notes.txt');
+
+        // t=2s: upload fails extension validation -> persistent error toast.
+        vi.advanceTimersByTime(2000);
+        (document.getElementById('upload-file-btn') as HTMLButtonElement).click();
+        expect(status.textContent).toContain('Invalid file type');
+
+        // t=5s+: the info toast's timer must not have cleared the error.
+        vi.advanceTimersByTime(10000);
+        expect(status.textContent).toContain('Invalid file type');
+    });
+
+    it('re-arms the auto-clear so the latest toast gets its full 5s', async () => {
+        await import('./BlueSkyFileManager');
+        vi.useFakeTimers();
+
+        selectFile('first.scn'); // t=0: first info toast
+        vi.advanceTimersByTime(4000);
+        selectFile('second.scn'); // t=4s: replaced by a second one
+
+        const status = document.getElementById('upload-status') as HTMLElement;
+        expect(status.textContent).toContain('second.scn');
+
+        // t=5.5s: the FIRST toast's timer would have fired here.
+        vi.advanceTimersByTime(1500);
+        expect(status.textContent).toContain('second.scn');
+
+        // t=9.5s: 5s after the second toast it clears as intended.
+        vi.advanceTimersByTime(4000);
+        expect(status.textContent?.trim()).toBe('');
+    });
+});
+
+describe('BlueSkyFileManager upload progress hide timer', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        buildDom();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        document.body.innerHTML = '';
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    function selectFile(name: string): void {
+        const fileInput = document.getElementById('file-input') as HTMLInputElement;
+        const file = new File(['x'], name, { type: 'text/plain' });
+        let files: File[] = [file];
+        Object.defineProperty(fileInput, 'files', { get: () => files, configurable: true });
+        Object.defineProperty(fileInput, 'value', {
+            get: () => (files.length ? files[0].name : ''),
+            set: (v: string) => { if (v === '') files = []; },
+            configurable: true,
+        });
+    }
+
+    it('the previous upload\'s pending hide does not blank a new upload', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockImplementation(async (url: unknown) =>
+                String(url).includes('/api/bluesky/upload/')
+                    ? { json: async () => ({ success: true, filename: 'one.scn' }) }
+                    : { json: async () => ({ configured: false }) },
+            ),
+        );
+        await import('./BlueSkyFileManager');
+        vi.useFakeTimers();
+
+        const progress = document.getElementById('upload-progress') as HTMLElement;
+
+        // First upload completes; its hide fires 2s later.
+        selectFile('one.scn');
+        (document.getElementById('upload-file-btn') as HTMLButtonElement).click();
+        await vi.advanceTimersByTimeAsync(0); // flush the fetch/microtasks
+        expect(progress.style.display).toBe('block');
+
+        // 1s later a second upload starts while that hide is still pending.
+        await vi.advanceTimersByTimeAsync(1000);
+        selectFile('two.scn');
+        (document.getElementById('upload-file-btn') as HTMLButtonElement).click();
+        await vi.advanceTimersByTimeAsync(0);
+
+        // At t=2s (the first upload's hide moment) the bar must still show.
+        await vi.advanceTimersByTimeAsync(1100);
+        expect(progress.style.display).toBe('block');
+
+        // 2s after the SECOND upload finished it hides as intended.
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(progress.style.display).toBe('none');
+    });
+});
+
 describe('BlueSkyFileManager drop zone highlight', () => {
     beforeEach(() => {
         vi.resetModules();

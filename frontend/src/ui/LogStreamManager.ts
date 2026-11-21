@@ -11,6 +11,10 @@ interface StreamContentResponse {
 }
 
 export class LogStreamManager {
+    // Same stick-to-bottom threshold as the integrated Server Log tab
+    // (ServerLogStreamManager.isNearBottom).
+    private static readonly AUTOSCROLL_THRESHOLD_PX = 40;
+
     private logStreamOutput: HTMLElement | null = null;
     private echoOutput: HTMLElement | null = null;
     private outputLogContainer: HTMLElement | null = null;
@@ -239,6 +243,12 @@ export class LogStreamManager {
     private appendContent(text: string, replace: boolean = false): void {
         if (!this.logStreamOutput) return;
 
+        // Decide before mutating the DOM: follow the stream only when the
+        // user is already at (or near) the bottom, so scrolling up to read
+        // or jumping to a search match isn't yanked back down by the next
+        // poll. A replace is fresh content — always land on its tail.
+        const stick = replace || this.isNearBottom();
+
         if (replace) {
             this.logStreamOutput.innerHTML = '';
             this.partialLine = '';
@@ -259,17 +269,56 @@ export class LogStreamManager {
         }
 
         const fragment = document.createDocumentFragment();
+        const appended: HTMLElement[] = [];
         for (const line of lines) {
-            fragment.appendChild(this.createLineElement(line));
+            appended.push(fragment.appendChild(this.createLineElement(line)));
         }
         if (this.partialLine) {
             this.partialLineEl = this.createLineElement(this.partialLine);
-            fragment.appendChild(this.partialLineEl);
+            appended.push(fragment.appendChild(this.partialLineEl));
         }
 
         this.logStreamOutput.appendChild(fragment);
         this.limitLines();
-        this.logStreamOutput.scrollTop = this.logStreamOutput.scrollHeight;
+        if (this.searchTerm) this.syncSearchWithStream(appended);
+        if (stick) {
+            this.logStreamOutput.scrollTop = this.logStreamOutput.scrollHeight;
+        }
+    }
+
+    private isNearBottom(): boolean {
+        const out = this.logStreamOutput;
+        if (!out) return true;
+        return out.scrollHeight - out.scrollTop - out.clientHeight
+            < LogStreamManager.AUTOSCROLL_THRESHOLD_PX;
+    }
+
+    /**
+     * Keep an active search valid while the stream mutates the DOM: highlight
+     * newly appended matching lines, drop matches whose elements the line cap
+     * or partial-line replacement detached, and keep the counter and active
+     * marker on the same line (without scrolling, unlike match navigation).
+     */
+    private syncSearchWithStream(appended: HTMLElement[]): void {
+        const activeEl = this.currentMatchIndex >= 0
+            ? this.searchMatches[this.currentMatchIndex]
+            : null;
+
+        this.searchMatches = this.searchMatches.filter(el => el.isConnected);
+        for (const el of appended) {
+            if ((el.textContent || '').toLowerCase().includes(this.searchTerm)) {
+                el.classList.add('log-search-highlight');
+                this.searchMatches.push(el);
+            }
+        }
+
+        const activeIdx = activeEl ? this.searchMatches.indexOf(activeEl) : -1;
+        this.currentMatchIndex =
+            activeIdx !== -1 ? activeIdx : (this.searchMatches.length > 0 ? 0 : -1);
+        if (activeIdx === -1 && this.currentMatchIndex >= 0) {
+            this.searchMatches[this.currentMatchIndex].classList.add('active');
+        }
+        this.updateSearchCount();
     }
 
     private createLineElement(text: string): HTMLElement {
@@ -391,7 +440,12 @@ export class LogStreamManager {
 
     private showStreamView(): void {
         if (this.fileBrowserElement) this.fileBrowserElement.style.display = 'none';
-        if (this.logStreamOutput) this.logStreamOutput.style.display = '';
+        if (this.logStreamOutput) {
+            this.logStreamOutput.style.display = '';
+            // Lines polled in while the pane was hidden (where scrollHeight is
+            // 0, so stick-to-bottom couldn't track them): show the newest now.
+            this.logStreamOutput.scrollTop = this.logStreamOutput.scrollHeight;
+        }
         if (this.createLogBtn) this.createLogBtn.style.display = 'none';
         if (this.refreshBtn) this.refreshBtn.style.display = 'none';
         if (this.clearStreamBtn) this.clearStreamBtn.style.display = '';

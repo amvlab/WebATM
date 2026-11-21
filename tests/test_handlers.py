@@ -5,6 +5,7 @@ These handlers fetch the process-global proxy via ``get_bluesky_proxy()``; the
 global, so the handlers operate against it directly.
 """
 
+import logging
 import time
 
 import pytest
@@ -22,11 +23,7 @@ from WebATM.proxy.handlers.shapes import (
     _separate_poly_and_polyline_data,
     on_poly_received,
 )
-from WebATM.proxy.handlers.simulation import (
-    on_acdata_received,
-    on_siminfo_received,
-    on_statechange_received,
-)
+from WebATM.proxy.handlers.simulation import on_acdata_received, on_siminfo_received
 from WebATM.proxy.handlers.visualization import (
     on_plot_received,
     on_showdialog_received,
@@ -245,6 +242,14 @@ class TestAcdataActiveNodeFiltering:
         assert proxy.traffic_data["id"] == ["SOLO"]
         assert fake_socketio.count("acdata") == 1
 
+    def test_client_without_context_is_accepted(self, proxy, fake_socketio):
+        # A client that exposes no shared context (e.g. mid-construction)
+        # must not crash sender resolution; the frame falls back to accepted.
+        proxy.bluesky_client = object()
+        on_acdata_received({"id": ["AC1"]})
+        assert proxy.traffic_data["id"] == ["AC1"]
+        assert fake_socketio.count("acdata") == 1
+
 
 class TestAcdataThrottle:
     """Serializing + emitting only happen when an emit is actually due
@@ -299,72 +304,6 @@ class TestAcdataCachingWithoutClients:
         # A second frame within acdata_interval is skipped wholesale.
         on_acdata_received({"id": ["AC2"]})
         assert proxy.traffic_data is cached
-
-
-class TestStatechangeHandler:
-    def test_emits_statechange(self, proxy, fake_socketio):
-        proxy.sim_data = {"state": 0}
-        on_statechange_received({"simstate": 2}, sender_id=b"\x01")
-        payload = fake_socketio.last("statechange")
-        assert payload["simstate"] == 2
-        assert proxy.sim_data["state"] == 2
-
-    def test_missing_simstate_is_ignored(self, proxy, fake_socketio):
-        on_statechange_received({"other": 1}, sender_id=b"\x01")
-        assert fake_socketio.count("statechange") == 0
-
-    def test_ignored_when_reconnection_disallowed(self, proxy, fake_socketio):
-        proxy.allow_reconnection = False
-        on_statechange_received({"simstate": 1})
-        assert fake_socketio.count("statechange") == 0
-
-    def test_empty_sim_data_is_not_seeded(self, proxy, fake_socketio):
-        # Without a cached SIMINFO payload there is nothing to patch; seeding
-        # {'state': ...} would let the backup timer emit a partial siminfo.
-        on_statechange_received({"simstate": 2}, sender_id=b"\x01")
-        assert proxy.sim_data == {}
-        assert fake_socketio.count("statechange") == 1
-
-
-class TestStatechangeActiveNodeFiltering:
-    """Like SIMINFO, STATECHANGE must only touch the cached header state for
-    the active node: a paused background node must not flip the displayed
-    run-state (which the 0.5 s backup emit would then broadcast as siminfo)."""
-
-    def _activate(self, proxy, fake_client, active_bytes):
-        proxy.bluesky_client = fake_client
-        proxy.running = True
-        proxy.was_connected = True
-        fake_client.act_id = active_bytes
-        proxy.tracked_nodes[active_bytes.hex()] = {
-            "status": "init",
-            "time": "00:00:00",
-        }
-
-    def test_active_node_updates_state(self, proxy, fake_client, fake_socketio):
-        active = b"\xaa\xaa\xaa\xaa\x81"
-        self._activate(proxy, fake_client, active)
-        proxy.sim_data = {"state": 2}
-        on_statechange_received({"simstate": 1}, sender_id=active)
-        assert proxy.sim_data["state"] == 1
-        assert fake_socketio.last("statechange")["sender_id"] == active.hex()
-
-    def test_background_node_is_ignored(self, proxy, fake_client, fake_socketio):
-        active = b"\xaa\xaa\xaa\xaa\x81"
-        self._activate(proxy, fake_client, active)
-        proxy.sim_data = {"state": 2}  # active node is running (OP)
-
-        other = b"\xbb\xbb\xbb\xbb\x81"
-        on_statechange_received({"simstate": 1}, sender_id=other)  # HOLD elsewhere
-
-        assert proxy.sim_data["state"] == 2
-        assert fake_socketio.count("statechange") == 0
-
-    def test_falls_back_to_any_sender_without_active_node(self, proxy, fake_socketio):
-        proxy.sim_data = {"state": 0}
-        on_statechange_received({"simstate": 2}, sender_id=b"\x01")
-        assert proxy.sim_data["state"] == 2
-        assert fake_socketio.count("statechange") == 1
 
 
 class TestEchoHandler:
@@ -675,6 +614,15 @@ class TestSmokeHandlers:
         proxy.last_successful_update = 0
         on_defwpt_received({"wpt": "ABC"})
         assert proxy.last_successful_update > 0
+
+    def test_placeholder_handlers_log_at_debug_only(self, proxy, caplog):
+        # A scenario load can carry many DEFWPT/REQUEST events; placeholder
+        # handlers must not spam the application log above DEBUG.
+        with caplog.at_level(logging.DEBUG, logger="WebATM"):
+            on_defwpt_received({"custwplbl": ["WPT1"]})
+            on_request_received(["POLY"])
+        assert caplog.records, "expected the placeholder handlers to log"
+        assert all(r.levelno == logging.DEBUG for r in caplog.records)
 
     def test_plot_handler(self, proxy):
         on_plot_received({"data": 1})  # should not raise
@@ -1095,6 +1043,36 @@ class TestPolySharedStateActions:
 
         assert "z2" not in proxy.poly_data_by_node[sender_hex]["polys"]
         assert "z2" in proxy.polyline_data_by_node[sender_hex]["polys"]
+
+    def test_partial_update_for_unknown_shape_is_dropped(self, proxy, fake_client):
+        # A partial update (no 'shape' field) for a name in neither store
+        # must not create a geometry-less ghost entry the frontend can't
+        # render.
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+
+        on_poly_received({"polys": {"ghost": {"color": [255, 0, 0]}}})
+
+        assert "ghost" not in proxy.poly_data_by_node[sender_hex]["polys"]
+        assert "ghost" not in proxy.polyline_data_by_node[sender_hex]["polys"]
+
+    def test_color_of_trimmed_shape_does_not_evict_live_shapes(
+        self, proxy, fake_client
+    ):
+        # Regression: with six areas defined, the per-kind cap trims z1 from
+        # the store while BlueSky still knows it, so COLOR z1 arrives as a
+        # partial update for an unstored shape. Storing that fragment made
+        # the cap evict the live z2, which browsers then deleted from the map.
+        sender_hex = self._activate(proxy, fake_client)
+        fake_client.context.action = b"U"
+        for i in range(1, 7):
+            on_poly_received({"polys": {f"z{i}": dict(self.AREA)}})
+        polys = proxy.poly_data_by_node[sender_hex]["polys"]
+        assert set(polys) == {"z2", "z3", "z4", "z5", "z6"}  # cap trimmed z1
+
+        on_poly_received({"polys": {"z1": {"color": [255, 0, 0]}}})
+
+        assert set(polys) == {"z2", "z3", "z4", "z5", "z6"}
 
     def test_full_redefinition_replaces_stale_fields(self, proxy, fake_client):
         # defineArea creates a fresh server-side Shape, so fields of the old

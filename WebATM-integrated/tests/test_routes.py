@@ -1,7 +1,9 @@
 """Tests for the integrated REST lifecycle routes (webatm_integrated.routes).
 
 The routes are a thin delegation layer over BlueSkyProcessManager; these verify
-each endpoint calls the matching manager method and returns its result as JSON.
+each endpoint calls the matching manager method and returns its result as JSON,
+and that an unexpected manager exception comes back as the same structured
+error shape (not Flask's generic error payload, which the UI cannot read).
 """
 
 import pytest
@@ -67,3 +69,39 @@ def test_lifecycle_actions_reject_get(client_and_manager, action):
     resp = client.get(f"/api/integrated/server/{action}")
     assert resp.status_code == 405
     assert manager.calls == []
+
+
+class RaisingManager:
+    """Manager whose every method blows up, like an unexpected runtime fault."""
+
+    def _boom(self):
+        raise RuntimeError("wait() lost the process")
+
+    start = stop = restart = kill = status = _boom
+
+
+@pytest.fixture
+def raising_client():
+    app = Flask(__name__)
+    register_integrated_routes(app, RaisingManager())
+    with app.test_client() as client:
+        yield client
+
+
+@pytest.mark.parametrize("action", ["start", "stop", "restart", "kill"])
+def test_lifecycle_action_exception_returns_structured_error(raising_client, action):
+    resp = raising_client.post(f"/api/integrated/server/{action}")
+    assert resp.status_code == 500
+    data = resp.get_json()
+    assert data["success"] is False
+    assert data["status"] == "error"
+    assert action in data["message"]
+    assert "wait() lost the process" in data["message"]
+
+
+def test_status_exception_returns_structured_error(raising_client):
+    resp = raising_client.get("/api/integrated/server/status")
+    assert resp.status_code == 500
+    data = resp.get_json()
+    assert data["success"] is False
+    assert data["status"] == "error"

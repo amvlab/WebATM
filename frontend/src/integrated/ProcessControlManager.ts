@@ -80,18 +80,24 @@ export class ProcessControlManager {
         this.setStatus(`${action}…`);
         try {
             const res = await fetch(`/api/integrated/server/${action}`, { method: 'POST' });
-            const data: ServerControlResponse = await res.json();
+            const data: Partial<ServerControlResponse> = await res.json();
             if (this.superseded(seq)) return;
-            this.setStatus(data.message || data.status || 'done');
+            // An HTTP error (or a payload without a message, like Flask's
+            // generic error handler's) must read as a failure — never "done".
+            const succeeded = res.ok && data.success === true;
+            this.setStatus(
+                data.message || data.status
+                    || (succeeded ? 'done' : `${action} failed (HTTP ${res.status})`),
+            );
             // The proxy connection follows the server lifecycle automatically.
             if (action === 'start' || action === 'restart') {
                 // Surface the live logs even on a failed start, so the error is
                 // visible.
                 this.logTab.activate();
-                if (data.success) {
+                if (succeeded) {
                     await this.runAutoConnect(seq);
                 }
-            } else if ((action === 'stop' || action === 'kill') && data.success) {
+            } else if ((action === 'stop' || action === 'kill') && succeeded) {
                 await this.runAutoDisconnect();
             }
         } catch (err) {
@@ -151,6 +157,7 @@ export class ProcessControlManager {
     private async refreshStatus(): Promise<void> {
         try {
             const res = await fetch('/api/integrated/server/status');
+            if (!res.ok) return; // an error payload must not render as "stopped"
             const data = await res.json();
             // A lifecycle action may have started while this probe was in
             // flight; its transient status owns the display until it settles.

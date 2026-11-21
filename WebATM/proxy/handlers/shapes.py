@@ -206,7 +206,11 @@ def _merge_shape(target, name, info):
     A partial Update carries only the changed fields (e.g. COLOR sends
     ``{"color": ...}`` without coordinates); replacing the stored entry would
     wipe the shape's geometry, so dict payloads are merged into the existing
-    dict instead.
+    dict instead. A partial update for a shape that is not stored at all
+    (e.g. one the per-kind cap already trimmed, which BlueSky still knows)
+    is dropped: storing the geometry-less fragment would create an
+    unrenderable ghost entry that counts against the cap and evicts a live
+    shape.
 
     Args:
         target (dict): Shape store (name -> shape info) to merge into.
@@ -216,7 +220,7 @@ def _merge_shape(target, name, info):
     existing = target.get(name)
     if isinstance(existing, dict) and isinstance(info, dict):
         existing.update(info)
-    else:
+    elif not isinstance(info, dict):
         target[name] = info
 
 
@@ -339,11 +343,8 @@ def on_poly_received(data, *args, **kwargs):
                     proxy.polyline_data_by_node.get(sender_id, {"polys": {}}),
                 )
 
-    except Exception as e:
-        logger.error(f"Error processing POLY data: {e}")
-        import traceback
-
-        traceback.print_exc()
+    except Exception:
+        logger.exception("Error processing POLY data")
 
 
 def _separate_poly_and_polyline_data(poly_data):
